@@ -54,6 +54,10 @@ fmt:
     cd backend && uv run ruff check --fix && uv run ruff format
     cd frontend && pnpm lint --fix && pnpm format
 
+# Start N bots in a media room: a tone and a test picture each; Ctrl-C stops them
+bots n="1" room="bots": up
+    cd backend && uv run python -m bots {{ n }} --media-room {{ room }}
+
 # Regenerate frontend/src/contract from the backend OpenAPI; CI fails when it is stale
 contract:
     cd backend && uv run python -m debatemeet.openapi ../frontend/src/contract/openapi.json

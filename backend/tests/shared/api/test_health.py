@@ -2,13 +2,19 @@ from datetime import UTC, datetime
 
 from debatemeet.main import build_app
 from tests.client import http_client
-from tests.fakes import FixedClock, StubHealthProbe
+from tests.fakes import FixedClock, RecordingMediaEvents, StubHealthProbe, StubWebhookVerifier
 
 CLOCK = FixedClock(datetime(2026, 9, 28, tzinfo=UTC))
 
 
 async def test_healthy_backend_reports_its_version() -> None:
-    app = build_app(clock=CLOCK, health_probe=StubHealthProbe(healthy=True), version="2026-09-28")
+    app = build_app(
+        clock=CLOCK,
+        health_probe=StubHealthProbe(healthy=True),
+        webhook_verifier=StubWebhookVerifier(),
+        media_events=RecordingMediaEvents(),
+        version="2026-09-28",
+    )
 
     async with http_client(app) as client:
         response = await client.get("/api/health")
@@ -19,7 +25,13 @@ async def test_healthy_backend_reports_its_version() -> None:
 
 
 async def test_unreachable_database_makes_backend_unavailable() -> None:
-    app = build_app(clock=CLOCK, health_probe=StubHealthProbe(healthy=False), version="test")
+    app = build_app(
+        clock=CLOCK,
+        health_probe=StubHealthProbe(healthy=False),
+        webhook_verifier=StubWebhookVerifier(),
+        media_events=RecordingMediaEvents(),
+        version="test",
+    )
 
     async with http_client(app) as client:
         response = await client.get("/api/health")

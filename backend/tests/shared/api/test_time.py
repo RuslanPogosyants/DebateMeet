@@ -2,12 +2,18 @@ from datetime import UTC, datetime
 
 from debatemeet.main import build_app
 from tests.client import http_client
-from tests.fakes import FixedClock, StubHealthProbe
+from tests.fakes import FixedClock, RecordingMediaEvents, StubHealthProbe, StubWebhookVerifier
 
 
 async def test_returns_server_time_in_epoch_milliseconds() -> None:
     clock = FixedClock(datetime(2026, 9, 28, 12, 0, 0, 123_000, tzinfo=UTC))
-    app = build_app(clock=clock, health_probe=StubHealthProbe(), version="test")
+    app = build_app(
+        clock=clock,
+        health_probe=StubHealthProbe(),
+        webhook_verifier=StubWebhookVerifier(),
+        media_events=RecordingMediaEvents(),
+        version="test",
+    )
 
     async with http_client(app) as client:
         response = await client.get("/api/time")

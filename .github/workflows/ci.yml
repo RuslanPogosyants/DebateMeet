@@ -27,6 +27,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       contract: ${{ steps.filter.outputs.contract }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      media: ${{ steps.filter.outputs.media }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,7 +39,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           everything() {
-            printf '%s\n' backend=true contract=true frontend=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' backend=true contract=true frontend=true media=true >> "$GITHUB_OUTPUT"
             exit 0
           }
           # A push to main checks everything.
@@ -61,6 +62,8 @@ jobs:
           area frontend '^frontend/'
           # The contract is the backend API and its generated TS types.
           area contract '^(backend/|frontend/src/contract/|frontend/package\.json$)'
+          # Tests against the LiveKit of compose.yaml.
+          area media '^(backend/|compose\.yaml$|deploy/dev/)'
 
   backend:
     name: Backend
@@ -114,9 +117,41 @@ jobs:
       - name: import-linter
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync lint-imports
+      # Tests against LiveKit run in the media job.
       - name: pytest
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: uv run --no-sync pytest
+        run: uv run --no-sync pytest -m "not livekit"
+
+  media:
+    name: Media
+    needs: changes
+    if: needs.changes.outputs.media == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # compose.yaml rather than a service container: services start before the checkout and
+      # cannot see deploy/dev/livekit.yaml (docs/architecture.md, section 9).
+      - name: Start LiveKit
+        run: docker compose up -d livekit
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.11.25
+          working-directory: backend
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked
+      # The tests serve the webhook endpoint on port 8000, where LiveKit sends its webhooks.
+      - name: pytest (LiveKit)
+        run: uv run --no-sync pytest -m livekit
+      - name: LiveKit logs
+        if: failure()
+        run: docker compose logs livekit
 
   frontend:
     name: Frontend
@@ -282,7 +317,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, backend, contract, frontend, hygiene, codeql]
+    needs: [changes, backend, contract, frontend, media, hygiene, codeql]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

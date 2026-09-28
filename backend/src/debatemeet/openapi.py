@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from debatemeet.main import build_app
+from debatemeet.media.application.webhooks import MediaEvent
 
 # The served schema carries the app version; the committed one must not change with every build.
 CONTRACT_VERSION = "contract"
@@ -29,8 +30,23 @@ class _InertHealthProbe:
         raise AssertionError("the contract export serves no requests")
 
 
+class _InertWebhookVerifier:
+    def verify(self, body: bytes, authorization: str) -> MediaEvent:
+        raise AssertionError("the contract export serves no requests")
+
+
+async def _inert_media_events(_: MediaEvent) -> None:
+    raise AssertionError("the contract export serves no requests")
+
+
 def openapi_schema() -> dict[str, Any]:
-    app = build_app(clock=_InertClock(), health_probe=_InertHealthProbe(), version=CONTRACT_VERSION)
+    app = build_app(
+        clock=_InertClock(),
+        health_probe=_InertHealthProbe(),
+        webhook_verifier=_InertWebhookVerifier(),
+        media_events=_inert_media_events,
+        version=CONTRACT_VERSION,
+    )
     return app.openapi()
 
 
