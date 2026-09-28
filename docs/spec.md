@@ -146,6 +146,8 @@ LiveKit SFU ◄── медиа и состояние раунда до бра�
 
 ### Фронтенд
 
+Визуальный язык и раскладка экрана раунда — [design.md](design.md): направление «Реплика».
+
 Стек: React + TypeScript + Vite, `livekit-client`, стор на Zustand, React Router, Tailwind 4 и shadcn/ui (Radix). `@livekit/components-react` не используем: его компоненты сами управляют подписками, а владелец подписок должен быть один. Устройство клиента — [architecture.md](architecture.md), раздел 7. Статическое SPA; готового проекта для форка нет, решения подсматриваем у La Suite Meet (MIT) и LiveKit Meet (Apache-2.0).
 
 Слои клиента и правила подписок — [architecture.md](architecture.md), раздел 7: гексагон `contract`, `domain`, `application`, `infrastructure`, `ui`. Одно подключение LiveKit на раунд, `autoSubscribe: false`; единственный владелец подписок, треков и громкости — адаптер `MediaSession`; менеджер подписок подписывается только на участников моей логической комнаты.
