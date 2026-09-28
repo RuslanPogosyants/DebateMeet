@@ -1,4 +1,8 @@
-@import 'tailwindcss';
+/*
+ * Classes are looked up in src/ only (index.html has none), so a build gives the same CSS
+ * wherever it runs: locally, in CI and in the web image, which has no tests or scripts.
+ */
+@import 'tailwindcss' source('..');
 
 /*
  * Fonts of the «Реплика» direction (docs/design.md, «Типографика»), all under OFL and bundled

@@ -62,3 +62,8 @@ bots n="1" room="bots": up
 contract:
     cd backend && uv run python -m debatemeet.openapi ../frontend/src/contract/openapi.json
     cd frontend && pnpm contract
+
+# Build the backend and web images as :dev, with the version of HEAD (tools/app-version.sh)
+images:
+    docker build --build-arg APP_VERSION="$(tools/app-version.sh)" --tag debatemeet-backend:dev backend
+    docker build --build-arg APP_VERSION="$(tools/app-version.sh)" --tag debatemeet-web:dev frontend
