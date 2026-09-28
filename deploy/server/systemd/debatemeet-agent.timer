@@ -1,0 +1,11 @@
+# Every minute, as docs/architecture.md §10 asks: the agent pulls, nothing pushes to the server.
+[Unit]
+Description=DebateMeet deploy agent, every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
