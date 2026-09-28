@@ -1,0 +1,103 @@
+# The stand and prod (docs/architecture.md §10): one file for both, per-server values in .env
+# (env.example). The deploy agent runs it from the unpacked bundle and sets DM_BACKEND_IMAGE.
+#
+# LiveKit, Caddy and the backend run in the host network and talk over 127.0.0.1: Caddy proxies
+# to the backend and LiveKit, LiveKit sends webhooks to the backend, the backend calls LiveKit,
+# and the backend sees Caddy as 127.0.0.1, the address uvicorn trusts X-Forwarded-For from.
+#
+# Third-party images come from the registry mirror, pinned by the digests of the originals.
+# Dependabot cannot see them behind ${DM_REGISTRY}: they are updated by hand.
+#
+# Not `debatemeet`: that is the dev stack of the root compose.yaml, and the same project name
+# would take over its containers and its Postgres volume on a developer machine.
+name: debatemeet-server
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 20m
+    max-file: "5"
+
+services:
+  postgres:
+    # postgres:18-alpine, 18.6: the digest CI tests against.
+    image: ${DM_REGISTRY:?}/mirror/postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_USER: debatemeet
+      POSTGRES_PASSWORD: ${DM_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: debatemeet
+    ports:
+      # Loopback only: Docker opens published ports past ufw.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U debatemeet -d debatemeet"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+  backend:
+    image: ${DM_BACKEND_IMAGE:?set by the deploy agent}
+    network_mode: host
+    # The image listens on 0.0.0.0 for a bridge network; here only loopback is needed.
+    command: ["uvicorn", "debatemeet.main:create_app", "--factory", "--host", "127.0.0.1",
+              "--port", "8000", "--timeout-graceful-shutdown", "20"]
+    environment:
+      DM_ENVIRONMENT: ${DM_ENVIRONMENT:?}
+      DM_DATABASE_URL: postgresql+asyncpg://debatemeet:${DM_POSTGRES_PASSWORD:?}@127.0.0.1:5432/debatemeet
+      DM_LIVEKIT_API_KEY: ${DM_LIVEKIT_API_KEY:?}
+      DM_LIVEKIT_API_SECRET: ${DM_LIVEKIT_API_SECRET:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # uvicorn finishes the requests it has started.
+    stop_grace_period: 30s
+    restart: unless-stopped
+    logging: *logging
+
+  livekit:
+    image: ${DM_REGISTRY:?}/mirror/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
+    network_mode: host
+    entrypoint: ["/bin/sh", "/etc/livekit/livekit.sh"]
+    environment:
+      # The backend's key first; during a rotation the retiring ones keep working.
+      LIVEKIT_KEYS: "${DM_LIVEKIT_API_KEY:?}: ${DM_LIVEKIT_API_SECRET:?}\n${DM_LIVEKIT_RETIRING_KEYS:-}"
+      LIVEKIT_WEBHOOK_API_KEY: ${DM_LIVEKIT_API_KEY:?}
+      LIVEKIT_TURN_DOMAIN: ${DM_TURN_DOMAIN:?}
+      NODE_IP: ${DM_NODE_IP:?}
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+      - ./livekit.sh:/etc/livekit/livekit.sh:ro
+    restart: unless-stopped
+    logging: *logging
+
+  caddy:
+    # Caddy with the layer4 module, the image livekit/generate uses.
+    image: ${DM_REGISTRY:?}/mirror/caddyl4:v2.11.3@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e
+    network_mode: host
+    command: ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    environment:
+      # The image sets neither: without them certificates would live in the container and be
+      # issued again on every recreation, into the ACME rate limits.
+      XDG_DATA_HOME: /data
+      XDG_CONFIG_HOME: /config
+      DM_ACME_EMAIL: ${DM_ACME_EMAIL:?}
+      DM_APP_DOMAIN: ${DM_APP_DOMAIN:?}
+      DM_LIVEKIT_DOMAIN: ${DM_LIVEKIT_DOMAIN:?}
+      DM_TURN_DOMAIN: ${DM_TURN_DOMAIN:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      # The static folder the deploy agent fills: assets/ of recent releases and current/.
+      - ${DM_WEB_ROOT:-/srv/debatemeet/web}:/srv/web:ro
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

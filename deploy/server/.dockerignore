@@ -1,0 +1,7 @@
+# Only the files of the bundle: never a server .env.
+*
+!compose.yaml
+!Caddyfile
+!livekit.yaml
+!livekit.sh
+!env.example
