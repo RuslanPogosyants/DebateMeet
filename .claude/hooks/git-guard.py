@@ -2,9 +2,12 @@
 """Claude Code PreToolUse hook for Bash: blocks the git and gh operations that
 CLAUDE.md ("Git and PRs") reserves for the author.
 
-Allowed: commits, pushes of feature branches, opening and updating PRs, reads.
+Allowed: commits, pushes of feature branches, opening and updating PRs, reads,
+and `gh pr merge N --squash` once GitHub confirms the merge policy: a PR of this
+repository into main, opened by a person, that leaves the guardrails alone and
+whose latest ci-ok on the head commit is green.
 Blocked: push to main, force-push, remote deletes and tag pushes, --no-verify,
---amend, commit -a, hooksPath overrides, bulk or forced git add, gh pr merge,
+--amend, commit -a, hooksPath overrides, bulk or forced git add, any other merge,
 releases, gh repo, manual workflow runs, gh api writes, secrets and variables,
 attribution in commit and PR text, PR titles that break the commit format.
 
@@ -25,7 +28,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "git"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "tools" / "git"))
 from check_message import check_message, find_attribution  # noqa: E402
 
 PROTECTED_BRANCHES = ("main", "master")
@@ -35,6 +39,27 @@ SHELLS = ("sh", "bash", "zsh")
 ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 SHORT_FLAGS_RE = re.compile(r"^-[A-Za-z]+$")
 HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+REPO_SLUG_RE = re.compile(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?(?:/|$)", re.IGNORECASE)
+
+MERGE_BASE = "main"
+CI_SUMMARY_CHECK = "ci-ok"
+# They set Claude's own limits, so changes to them are merged by the author.
+GUARDRAIL_PATHS = (".claude/", "tools/git/", "lefthook.yml")
+PR_FACTS = "url,author,baseRefName,changedFiles,files,statusCheckRollup"
+MERGE_FORBIDDEN = {
+    "--admin": "it bypasses the repository rules",
+    "--auto": "auto-merge is not used",
+    "--disable-auto": "auto-merge is not used",
+    "--delete-branch": "deleting merged branches is left to the repository setting",
+    "--merge": "Claude merges with --squash",
+    "--rebase": "Claude merges with --squash",
+    "--repo": "merge from a checkout of this repository",
+}
+MERGE_SHORT_FLAGS = {"d": "--delete-branch", "m": "--merge", "r": "--rebase", "s": "--squash"}
+MERGE_SHORT_VALUES = {"b": "--body", "F": "--body-file", "t": "--subject", "A": "--author-email",
+                      "R": "--repo"}  # fmt: skip
+MERGE_LONG_VALUES = ("--body", "--body-file", "--subject", "--author-email",
+                     "--match-head-commit", "--repo")  # fmt: skip
 
 
 class Blocked(Exception):
@@ -86,6 +111,60 @@ def git_output(cwd: str, *args: str) -> str | None:
 
 def current_branch(cwd: str) -> str | None:
     return git_output(cwd, "symbolic-ref", "--quiet", "--short", "HEAD")
+
+
+def repo_slug(url: str) -> str | None:
+    """owner/repo of a GitHub remote or PR URL, lowercased."""
+    match = REPO_SLUG_RE.search(url)
+    return match.group(1).lower() if match else None
+
+
+def origin_slug() -> str | None:
+    """The repository this hook belongs to."""
+    return repo_slug(git_output(str(REPO_ROOT), "remote", "get-url", "origin") or "")
+
+
+def pr_facts(number: str, cwd: str) -> dict | None:
+    """What the merge policy needs to know about a PR; None when gh cannot tell."""
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", number, "--json", PR_FACTS],
+            cwd=cwd, capture_output=True, text=True, timeout=20, check=False,
+        )  # fmt: skip
+        facts = json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return facts if isinstance(facts, dict) else None
+
+
+def merge_refusal(facts: dict, repository: str | None) -> str | None:
+    """Why Claude may not merge the PR described by gh, or None when it may."""
+    if repository is None or repo_slug(str(facts.get("url") or "")) != repository:
+        return "the PR is not in this repository"
+    if (facts.get("author") or {}).get("is_bot"):
+        return "PRs opened by bots such as Dependabot are merged by the author"
+    base = facts.get("baseRefName")
+    if base != MERGE_BASE:
+        return (
+            f"its base is {base}, not {MERGE_BASE}: retarget it with gh pr edit --base"
+            f" {MERGE_BASE} and merge {MERGE_BASE} into the branch first"
+        )
+    paths = [str(f.get("path") or "") for f in facts.get("files") or []]
+    if int(facts.get("changedFiles") or 0) > len(paths):
+        return "gh lists only part of the changed files, so the guardrails cannot be checked"
+    touched = [path for path in paths if path.startswith(GUARDRAIL_PATHS)]
+    if touched:
+        return f"it changes the guardrails ({touched[0]}): the author merges such PRs"
+    # A PR edit or a new push reruns CI on the same head: only the latest run counts.
+    runs = [c for c in facts.get("statusCheckRollup") or [] if c.get("name") == CI_SUMMARY_CHECK]
+    if not runs:
+        return f"{CI_SUMMARY_CHECK} has not run on the head commit"
+    latest = max(runs, key=lambda run: str(run.get("startedAt") or ""))
+    if latest.get("status") != "COMPLETED":
+        return f"{CI_SUMMARY_CHECK} is still running"
+    if latest.get("conclusion") != "SUCCESS":
+        return f"{CI_SUMMARY_CHECK} is {str(latest.get('conclusion')).lower()}, not green"
+    return None
 
 
 def branch_name(ref: str) -> str:
@@ -297,8 +376,8 @@ class Guard:
         action = args[1] if len(args) > 1 else ""
         if group == "pr":
             if action == "merge":
-                raise Blocked("gh pr merge: the author merges PRs")
-            if action in ("create", "edit", "comment", "review"):
+                self.check_pr_merge(args[2:])
+            elif action in ("create", "edit", "comment", "review"):
                 self.check_pr_text(args[2:])
         elif group == "release" and action not in ("list", "view", "download"):
             raise Blocked(f"gh release {action}: releases are the author's")
@@ -312,6 +391,51 @@ class Guard:
             raise Blocked(f"gh {group} {action}: repository settings are the author's")
         elif group == "api":
             self.check_gh_api(args[1:])
+
+    def check_pr_merge(self, rest: list[str]) -> None:
+        flags: set[str] = set()
+        values: dict[str, str] = {}
+        positional: list[str] = []
+        i = 0
+        while i < len(rest):
+            arg = rest[i]
+            following = rest[i + 1] if i + 1 < len(rest) else ""
+            name, equals, value = arg.partition("=")
+            if arg.startswith("--"):
+                if name in MERGE_LONG_VALUES:
+                    values[name] = value if equals else following
+                    i += 0 if equals else 1
+                else:
+                    flags.add(name)
+            elif arg.startswith("-") and len(arg) > 1:
+                for j, letter in enumerate(arg[1:], start=2):
+                    if letter in MERGE_SHORT_VALUES:  # the rest of the cluster is the value
+                        values[MERGE_SHORT_VALUES[letter]] = arg[j:] or following
+                        i += 0 if arg[j:] else 1
+                        break
+                    flags.add(MERGE_SHORT_FLAGS.get(letter, "-" + letter))
+            else:
+                positional.append(arg)
+            i += 1
+        for option, reason in MERGE_FORBIDDEN.items():
+            if option in flags or option in values:
+                raise Blocked(f"gh pr merge {option}: {reason}")
+        if "--squash" not in flags:
+            raise Blocked("gh pr merge without --squash: Claude merges with --squash")
+        if len(positional) != 1 or not positional[0].isdigit():
+            raise Blocked("gh pr merge needs exactly one PR number")
+        number = positional[0]
+        if "--subject" in values:
+            reason = check_message(values["--subject"], allow_merge=False)
+            if reason:
+                raise Blocked(f"merge subject: {reason}")
+        self.check_attribution(values.get("--body-file"))
+        facts = pr_facts(number, self.cwd)
+        if facts is None:
+            raise Blocked(f"gh pr merge {number}: gh could not read the PR to check the policy")
+        reason = merge_refusal(facts, origin_slug())
+        if reason:
+            raise Blocked(f"gh pr merge {number}: {reason}")
 
     def check_pr_text(self, rest: list[str]) -> None:
         body_file = None

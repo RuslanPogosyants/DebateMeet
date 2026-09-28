@@ -58,9 +58,10 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 
 ## Git and PRs
 
-- Trunk-based: short branches, PR into `main`, squash merge. The author merges, and only when `ci-ok` is green (not enforced by GitHub: there is no branch protection by the author's decision).
+- Trunk-based: short branches, PR into `main`, squash merge, only when the latest `ci-ok` on the PR head is green (not enforced by GitHub: there is no branch protection by the author's decision). Claude merges its own PRs; the author merges PRs that change the guardrails (`.claude/`, `tools/git/`, `lefthook.yml`) and PRs opened by bots such as Dependabot.
+- Every PR targets `main`. If a PR has to stack on another, retarget it with `gh pr edit N --base main` and merge `main` into it after the parent merges, before merging it.
 - Commit message and PR title: one line `type: description` in English, types `feat|fix|refactor|docs|test|chore`, no body.
 - **No attribution of any kind** in commits or PRs: no `Co-Authored-By`, no "Generated with Claude Code", no 🤖, no mention of Claude. Commits use the repo git identity; PRs are opened with the author's `gh`.
-- Claude may commit, push feature branches and open or update PRs. Never push to `main`, force-push, amend, use `--no-verify`, change `hooksPath`, stage with `git add .`/`-A`/`-u` (add explicit paths), merge PRs, create releases, run repository operations (`gh repo …`) or run workflows manually. The hook `.claude/hooks/git-guard.py` blocks these (hooks load when a session starts); it is a guardrail, not a security boundary — do not try to work around it. Commit messages are checked by `tools/git/check_message.py` (lefthook `commit-msg`).
+- Claude may commit, push feature branches, open or update PRs and merge its own PRs with `gh pr merge N --squash --body ""` (a one-line squash commit). Never push to `main`, force-push, amend, use `--no-verify`, change `hooksPath`, stage with `git add .`/`-A`/`-u` (add explicit paths), merge any other way (`--admin`, `--auto`, `--merge`, `--rebase`, `--delete-branch`, `gh api`), create releases, run repository operations (`gh repo …`) or run workflows manually. The hook `.claude/hooks/git-guard.py` blocks these and checks every merge against GitHub (hooks load when a session starts); it is a guardrail, not a security boundary — do not try to work around it. Commit messages are checked by `tools/git/check_message.py` (lefthook `commit-msg`).
 - The repository is public: never commit secrets or `.env` files.
 - No license for now (all rights reserved).

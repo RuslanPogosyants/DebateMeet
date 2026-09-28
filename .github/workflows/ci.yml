@@ -1,5 +1,5 @@
 # Checks on every PR and on main (docs/architecture.md §10). Each area is a job that runs only
-# when its files change; `ci-ok` is the one summary check the author merges on.
+# when its files change; `ci-ok` is the one summary check a merge waits for.
 
 name: CI
 

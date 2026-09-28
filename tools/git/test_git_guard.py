@@ -9,12 +9,31 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HOOK = Path(__file__).resolve().parents[2] / ".claude" / "hooks" / "git-guard.py"
 spec = importlib.util.spec_from_file_location("git_guard", HOOK)
 assert spec and spec.loader
 git_guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(git_guard)
+
+REPOSITORY = "owner/repo"
+GREEN = {"name": "ci-ok", "status": "COMPLETED", "conclusion": "SUCCESS",
+         "startedAt": "2026-09-28T12:54:14Z"}  # fmt: skip
+
+
+def pr(**changes: object) -> dict[str, object]:
+    """gh pr view facts of a PR that Claude may merge, with the given changes."""
+    facts: dict[str, object] = {
+        "url": "https://github.com/Owner/Repo/pull/12",
+        "author": {"login": "owner", "is_bot": False},
+        "baseRefName": "main",
+        "changedFiles": 1,
+        "files": [{"path": "backend/src/debatemeet/main.py"}],
+        "statusCheckRollup": [{"name": "Backend", "status": "COMPLETED"}, GREEN],
+    }
+    facts.update(changes)
+    return facts
 
 
 def make_repo(root: str, branch: str, upstream: str | None = None) -> str:
@@ -145,7 +164,6 @@ class GitGuardTest(unittest.TestCase):
 
     def test_blocks_author_only_gh_operations(self) -> None:
         for command in (
-            "gh pr merge 12 --squash",
             "gh release create v1",
             "gh repo edit --visibility private",
             "gh repo delete",
@@ -159,6 +177,46 @@ class GitGuardTest(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assert_blocked(command)
+
+    def test_merges_only_as_a_squash_of_one_pr(self) -> None:
+        facts = mock.patch.object(git_guard, "pr_facts", return_value=pr())
+        origin = mock.patch.object(git_guard, "origin_slug", return_value=REPOSITORY)
+        with facts, origin:
+            for command in (
+                "gh pr merge 12 --squash",
+                "gh pr merge 12 -s --body ''",
+                "gh pr merge --squash 12 --subject 'chore: land slice 0a (#12)'",
+                "gh pr merge 12 --squash --match-head-commit 3d3c42e5",
+            ):
+                with self.subTest(command=command):
+                    self.assert_allowed(command)
+            for command in (
+                "gh pr merge 12",
+                "gh pr merge 12 --merge",
+                "gh pr merge 12 -m",
+                "gh pr merge 12 --rebase",
+                "gh pr merge 12 -sd",
+                "gh pr merge 12 --squash --delete-branch",
+                "gh pr merge 12 --squash --admin",
+                "gh pr merge 12 --squash --auto",
+                "gh pr merge 12 --squash -R other/repo",
+                "gh pr merge --squash",
+                "gh pr merge feat/x --squash",
+                "gh pr merge 12 13 --squash",
+                "gh pr merge 12 --squash --subject 'Land slice 0a'",
+                "gh pr merge 12 --squash --body '🤖 Generated with Claude Code'",
+                f"gh pr merge 12 --squash --body-file {self.body_file}",
+                "bash -c 'gh pr merge 12 --admin --squash'",
+            ):
+                with self.subTest(command=command):
+                    self.assert_blocked(command)
+
+    def test_merge_asks_github_for_the_policy(self) -> None:
+        with mock.patch.object(git_guard, "origin_slug", return_value=REPOSITORY):
+            with mock.patch.object(git_guard, "pr_facts", return_value=pr(baseRefName="feat/x")):
+                self.assert_blocked("gh pr merge 12 --squash")
+            with mock.patch.object(git_guard, "pr_facts", return_value=None):
+                self.assert_blocked("gh pr merge 12 --squash")
 
     def test_blocks_attribution_and_bad_pr_titles(self) -> None:
         for command in (
@@ -190,6 +248,47 @@ class GitGuardTest(unittest.TestCase):
         blocked = run("git push origin main")
         self.assertEqual(blocked.returncode, 2)
         self.assertIn("BLOCKED", blocked.stderr)
+
+
+class MergePolicyTest(unittest.TestCase):
+    def test_allows_a_green_pr_of_a_person_into_main(self) -> None:
+        self.assertIsNone(git_guard.merge_refusal(pr(), REPOSITORY))
+
+    def test_only_the_latest_ci_ok_counts(self) -> None:
+        cancelled = {**GREEN, "conclusion": "FAILURE", "startedAt": "2026-09-28T12:53:08Z"}
+        failed = {**GREEN, "conclusion": "FAILURE", "startedAt": "2026-09-28T12:55:00Z"}
+        running = {**GREEN, "status": "IN_PROGRESS", "conclusion": "",
+                   "startedAt": "2026-09-28T12:55:00Z"}  # fmt: skip
+        refusal = git_guard.merge_refusal
+        self.assertIsNone(refusal(pr(statusCheckRollup=[cancelled, GREEN]), REPOSITORY))
+        self.assertIsNotNone(refusal(pr(statusCheckRollup=[GREEN, failed]), REPOSITORY))
+        self.assertIsNotNone(refusal(pr(statusCheckRollup=[GREEN, running]), REPOSITORY))
+
+    def test_refuses_what_the_author_merges(self) -> None:
+        for label, facts, repository in (
+            ("another repository", pr(url="https://github.com/other/repo/pull/12"), REPOSITORY),
+            ("unknown origin", pr(), None),
+            ("dependabot", pr(author={"login": "app/dependabot", "is_bot": True}), REPOSITORY),
+            ("stacked", pr(baseRefName="feat/x"), REPOSITORY),
+            ("hook", pr(files=[{"path": ".claude/hooks/git-guard.py"}]), REPOSITORY),
+            ("settings", pr(files=[{"path": ".claude/settings.json"}]), REPOSITORY),
+            ("message policy", pr(files=[{"path": "tools/git/check_message.py"}]), REPOSITORY),
+            ("lefthook", pr(files=[{"path": "lefthook.yml"}]), REPOSITORY),
+            ("unlisted files", pr(changedFiles=101), REPOSITORY),
+            ("no ci-ok", pr(statusCheckRollup=[]), REPOSITORY),
+        ):
+            with self.subTest(label):
+                self.assertIsNotNone(git_guard.merge_refusal(facts, repository))
+
+    def test_repo_slug(self) -> None:
+        for url in (
+            "https://github.com/Owner/Repo.git",
+            "git@github.com:Owner/Repo.git",
+            "ssh://git@github.com/Owner/Repo",
+            "https://github.com/Owner/Repo/pull/12",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(git_guard.repo_slug(url), REPOSITORY)
 
 
 if __name__ == "__main__":
