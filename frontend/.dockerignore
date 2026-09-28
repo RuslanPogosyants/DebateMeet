@@ -1,0 +1,9 @@
+# Only what `vite build` reads: never node_modules, dist or local env files.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!index.html
+!vite.config.ts
+!tsconfig*.json
+!src/

@@ -1,0 +1,6 @@
+# Only what the image needs: never .env, the venv, tests or the dev bots.
+*
+!pyproject.toml
+!uv.lock
+!src/
+**/__pycache__

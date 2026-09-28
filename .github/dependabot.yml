@@ -53,6 +53,30 @@ updates:
       backend:
         update-types: [minor, patch]
 
+  # Base images of backend/Dockerfile and frontend/Dockerfile, pinned by digest.
+  - package-ecosystem: docker
+    directories: [/backend, /frontend]
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+    groups:
+      images:
+        patterns: ['*']
+    ignore:
+      # Python 3.14 and Node 24 are pinned choices (CLAUDE.md): only their fresh builds come in.
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+      # uv moves by hand, together with the version setup-uv installs in ci.yml.
+      - dependency-name: '*astral-sh/uv'
+        update-types: [version-update:semver-major, version-update:semver-minor, version-update:semver-patch]
+
   # Dev infrastructure of compose.yaml.
   - package-ecosystem: docker-compose
     directory: /
