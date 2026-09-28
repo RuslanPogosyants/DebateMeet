@@ -27,6 +27,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       contract: ${{ steps.filter.outputs.contract }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      images: ${{ steps.filter.outputs.images }}
       media: ${{ steps.filter.outputs.media }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,7 +40,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           everything() {
-            printf '%s\n' backend=true contract=true frontend=true media=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' backend=true contract=true frontend=true images=true media=true >> "$GITHUB_OUTPUT"
             exit 0
           }
           # A push to main checks everything.
@@ -64,6 +65,8 @@ jobs:
           area contract '^(backend/|frontend/src/contract/|frontend/package\.json$)'
           # Tests against the LiveKit of compose.yaml.
           area media '^(backend/|compose\.yaml$|deploy/dev/)'
+          # The backend, web and deploy bundle images.
+          area images '^(backend/|frontend/|deploy/server/|tools/app-version\.sh$)'
 
   backend:
     name: Backend
@@ -261,6 +264,148 @@ jobs:
             breaking /specs/base.json /specs/head.json --format githubactions \
             | sed -e 's/^::error /::warning /' -e "s#file=/specs/head.json#file=$spec#"
 
+  # The images of docs/architecture.md §10, built without a push while there is no registry,
+  # and each one checked for doing its job.
+  images:
+    name: Images
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # The database the backend image starts against.
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873 # 18.6
+        env:
+          POSTGRES_USER: debatemeet
+          POSTGRES_PASSWORD: debatemeet
+          POSTGRES_DB: debatemeet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U debatemeet -d debatemeet"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: hadolint
+        run: |
+          for dockerfile in backend/Dockerfile frontend/Dockerfile deploy/server/Dockerfile; do
+            echo "$dockerfile"
+            docker run --rm -i hadolint/hadolint@sha256:27086352fd5e1907ea2b934eb1023f217c5ae087992eb59fde121dce9c9ff21e < "$dockerfile" # v2.14.0
+          done
+      - name: shellcheck
+        if: ${{ !cancelled() }}
+        run: |
+          docker run --rm -v "$PWD:/mnt:ro" -w /mnt \
+            koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
+            tools/app-version.sh deploy/server/livekit.sh # v0.11.0
+      # Every image is built and checked even when a linter fails, so one push reports all failures.
+      - id: version
+        name: Version
+        if: ${{ !cancelled() }}
+        run: echo "version=$(tools/app-version.sh)" >> "$GITHUB_OUTPUT"
+      - id: buildx
+        if: ${{ !cancelled() }}
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: backend
+        name: Build backend
+        if: ${{ !cancelled() && steps.buildx.outcome == 'success' }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          build-args: APP_VERSION=${{ steps.version.outputs.version }}
+          tags: debatemeet-backend:ci
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - id: web
+        name: Build web
+        if: ${{ !cancelled() && steps.buildx.outcome == 'success' }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          build-args: APP_VERSION=${{ steps.version.outputs.version }}
+          tags: debatemeet-web:ci
+          load: true
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+      - id: bundle
+        name: Build bundle
+        if: ${{ !cancelled() && steps.buildx.outcome == 'success' }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/server
+          build-args: APP_VERSION=${{ steps.version.outputs.version }}
+          tags: debatemeet-bundle:ci
+          load: true
+      # Starts against Postgres, turns healthy, reports the version it was built with, not as root.
+      - name: Backend image
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run -d --name backend --network host \
+            -e DM_DATABASE_URL=postgresql+asyncpg://debatemeet:debatemeet@127.0.0.1:5432/debatemeet \
+            -e DM_LIVEKIT_API_KEY=ci -e DM_LIVEKIT_API_SECRET=ci-secret-of-the-images-job-0000000000 \
+            debatemeet-backend:ci
+          for _ in $(seq 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' backend)" = healthy ] && break
+            sleep 1
+          done
+          if [ "$(docker inspect -f '{{.State.Health.Status}}' backend)" != healthy ]; then
+            docker logs backend
+            echo '::error::the backend image did not turn healthy'
+            exit 1
+          fi
+          health="$(curl -fsS http://127.0.0.1:8000/api/health)"
+          echo "$health"
+          test "$(jq -r .version <<< "$health")" = "$VERSION"
+          test "$(docker exec backend id -u)" != 0
+      # Holds index.html and every file it asks for.
+      - name: Web image
+        if: ${{ !cancelled() && steps.web.outcome == 'success' }}
+        run: |
+          id="$(docker create debatemeet-web:ci none)"
+          docker cp "$id:/web" "$RUNNER_TEMP/web"
+          docker rm "$id"
+          test -f "$RUNNER_TEMP/web/index.html"
+          grep -oE '/assets/[^"]+' "$RUNNER_TEMP/web/index.html" | while read -r asset; do
+            test -f "$RUNNER_TEMP/web$asset" || { echo "::error::index.html asks for $asset, the image lacks it"; exit 1; }
+          done
+      # Compose, Caddy and LiveKit accept the bundle as a server would, with the values of env.example.
+      - name: Bundle image
+        if: ${{ !cancelled() && steps.bundle.outcome == 'success' }}
+        env:
+          DM_BACKEND_IMAGE: debatemeet-backend:ci
+          DM_POSTGRES_PASSWORD: ci
+          DM_LIVEKIT_API_KEY: APIci
+          DM_LIVEKIT_API_SECRET: ci-secret-of-the-images-job-0000000000
+          DM_ACME_EMAIL: admin@example.ru
+          DM_APP_DOMAIN: stage.example.ru
+          DM_LIVEKIT_DOMAIN: livekit.stage.example.ru
+          DM_TURN_DOMAIN: turn.stage.example.ru
+        run: |
+          id="$(docker create debatemeet-bundle:ci none)"
+          docker cp "$id:/bundle" "$RUNNER_TEMP/bundle"
+          docker rm "$id"
+          cd "$RUNNER_TEMP/bundle"
+          docker compose --env-file env.example config --quiet
+          docker run --rm -e DM_ACME_EMAIL -e DM_APP_DOMAIN -e DM_LIVEKIT_DOMAIN -e DM_TURN_DOMAIN \
+            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            livekit/caddyl4@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e \
+            adapt --config /etc/caddy/Caddyfile --validate > /dev/null # v2.11.3
+          ports="$(docker run --rm -e LIVEKIT_KEYS="$DM_LIVEKIT_API_KEY: $DM_LIVEKIT_API_SECRET" \
+            -v "$PWD/livekit.yaml:/etc/livekit.yaml:ro" \
+            livekit/livekit-server@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3 \
+            --config /etc/livekit.yaml ports 2>&1)" # v1.13.7
+          echo "$ports"
+          # `ports` exits 0 even when it cannot parse the config, so its output is what counts.
+          grep -q '^TCP Ports' <<< "$ports"
+
   # Hygiene and CodeQL run on every PR in full: they are cheap, and code scanning compares the
   # analysis of each language with the base branch.
   hygiene:
@@ -317,7 +462,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, backend, contract, frontend, media, hygiene, codeql]
+    needs: [changes, backend, contract, frontend, images, media, hygiene, codeql]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
