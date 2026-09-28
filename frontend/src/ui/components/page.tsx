@@ -7,3 +7,7 @@ export function Page({ children }: { children: ReactNode }) {
     </main>
   )
 }
+
+export function PageTitle({ children }: { children: ReactNode }) {
+  return <h1 className="font-display text-display font-bold tracking-display">{children}</h1>
+}
