@@ -53,3 +53,8 @@ lint:
 fmt:
     cd backend && uv run ruff check --fix && uv run ruff format
     cd frontend && pnpm lint --fix && pnpm format
+
+# Regenerate frontend/src/contract from the backend OpenAPI; CI fails when it is stale
+contract:
+    cd backend && uv run python -m debatemeet.openapi ../frontend/src/contract/openapi.json
+    cd frontend && pnpm contract

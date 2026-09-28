@@ -12,7 +12,8 @@ pre-commit:
     - name: oxlint
       root: frontend/
       glob: "*.{ts,tsx,cjs}"
-      run: pnpm exec oxlint {staged_files}
+      # Staged files may all be ignored ones, such as the generated contract.
+      run: pnpm exec oxlint --no-error-on-unmatched-pattern {staged_files}
     - name: prettier
       root: frontend/
       glob: "*.{ts,tsx,js,cjs,json,css,html,md,yaml}"
