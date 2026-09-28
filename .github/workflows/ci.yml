@@ -365,6 +365,16 @@ jobs:
           echo "$health"
           test "$(jq -r .version <<< "$health")" = "$VERSION"
           test "$(docker exec backend id -u)" != 0
+      # The command the deploy agent runs in a one-off container, twice: the second run is a no-op.
+      - name: Migrations in the backend image
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
+        run: |
+          for _ in 1 2; do
+            docker run --rm --network host \
+              -e DM_DATABASE_URL=postgresql+asyncpg://debatemeet:debatemeet@127.0.0.1:5432/debatemeet \
+              -e DM_LIVEKIT_API_KEY=ci -e DM_LIVEKIT_API_SECRET=ci-secret-of-the-images-job-0000000000 \
+              debatemeet-backend:ci python -m debatemeet.migrate
+          done
       # Holds index.html and every file it asks for.
       - name: Web image
         if: ${{ !cancelled() && steps.web.outcome == 'success' }}

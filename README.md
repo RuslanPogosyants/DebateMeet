@@ -51,6 +51,8 @@ just dev
 | `just lint` | линтеры, проверка типов и правила слоёв |
 | `just fmt` | форматирование и безопасные автоисправления |
 | `just contract` | перегенерировать `frontend/src/contract` из OpenAPI бэкенда |
+| `just migrate` | довести dev-базу до последней миграции, как агент выкатки на сервере |
+| `just migration 0002 "…"` | начать новую ревизию схемы в `backend/src/debatemeet/migrations/versions/` |
 | `just bots N` | N тестовых участников: у каждого тон и тестовая картинка |
 | `just images` | собрать образы `debatemeet-backend:dev`, `debatemeet-web:dev` и бандл развёртывания `debatemeet-bundle:dev` с версией текущего коммита |
 
