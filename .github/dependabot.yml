@@ -38,6 +38,9 @@ updates:
       # TypeScript stays on 6.0.x until the lint tooling supports TS 7 (CLAUDE.md, pinned choices).
       - dependency-name: typescript
         update-types: [version-update:semver-major, version-update:semver-minor]
+      # Node types follow the runtime: Node 24 locally, in CI and in the web image.
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: uv
     directory: /backend
@@ -52,6 +55,9 @@ updates:
     groups:
       backend:
         update-types: [minor, patch]
+    ignore:
+      # The build backend moves by hand, together with uv itself (setup-uv in ci.yml).
+      - dependency-name: uv-build
 
   # Dev infrastructure of compose.yaml.
   - package-ecosystem: docker-compose
