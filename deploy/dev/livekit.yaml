@@ -1,0 +1,11 @@
+# Local LiveKit for development only. Media is advertised on 127.0.0.1 (--node-ip in compose.yaml),
+# so browsers on this machine can connect; testing from another device needs the LAN IP instead.
+port: 7880
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: false
+keys:
+  devkey: dev-secret-only-for-local-livekit-000000
+logging:
+  level: info
