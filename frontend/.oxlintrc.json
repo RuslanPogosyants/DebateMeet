@@ -52,7 +52,7 @@
   },
   "overrides": [
     {
-      "files": ["vite.config.ts", "*.cjs"],
+      "files": ["vite.config.ts", "*.cjs", "scripts/**"],
       "env": { "node": true, "browser": false }
     }
   ]

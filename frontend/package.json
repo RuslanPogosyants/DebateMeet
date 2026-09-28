@@ -12,7 +12,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "depcruise": "depcruise src"
+    "depcruise": "depcruise src",
+    "budget": "node scripts/check-budget.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -48,5 +49,6 @@
   },
   "engines": {
     "node": ">=24"
-  }
+  },
+  "packageManager": "pnpm@12.6.0"
 }
