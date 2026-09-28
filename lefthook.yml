@@ -1,0 +1,25 @@
+# Git hooks. `just setup` installs them with `lefthook install`.
+# CI runs the same checks on the whole tree; these only look at staged files.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: ruff
+      root: backend/
+      glob: "*.py"
+      run: uv run ruff check --fix {staged_files} && uv run ruff format {staged_files}
+      stage_fixed: true
+    - name: oxlint
+      root: frontend/
+      glob: "*.{ts,tsx}"
+      run: pnpm exec oxlint {staged_files}
+    - name: prettier
+      root: frontend/
+      glob: "*.{ts,tsx,js,json,css,html}"
+      run: pnpm exec prettier --write {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  jobs:
+    - name: message format
+      run: python3 tools/git/check_message.py {1}

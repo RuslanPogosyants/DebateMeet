@@ -1,0 +1,32 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+
+# Claude Code: only the shared settings and hooks are tracked
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+
+# Personal lefthook overrides
+lefthook-local.yml
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
