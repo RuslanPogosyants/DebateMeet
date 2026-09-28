@@ -3,13 +3,11 @@ from pathlib import Path
 
 from debatemeet.main import create_app
 from debatemeet.openapi import CONTRACT_VERSION, main, openapi_schema
-from debatemeet.shared.infrastructure.settings import Settings
+from tests.settings import settings_for
 
 
 def test_contract_is_the_schema_of_the_served_app(database_url: str) -> None:
-    served = create_app(
-        Settings(database_url=database_url, environment="prod", app_version="abc")
-    ).openapi()
+    served = create_app(settings_for(database_url, environment="prod", app_version="abc")).openapi()
 
     exported = openapi_schema()
 

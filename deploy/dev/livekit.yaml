@@ -1,5 +1,6 @@
-# Local LiveKit for development only. Media is advertised on 127.0.0.1 (--node-ip in compose.yaml),
-# so browsers on this machine can connect; testing from another device needs the LAN IP instead.
+# Local LiveKit for development and CI only (docs/architecture.md, section 6). Media is advertised
+# on 127.0.0.1 (--node-ip in compose.yaml), so browsers on this machine can connect; testing from
+# another device needs the LAN IP instead.
 port: 7880
 rtc:
   tcp_port: 7881
@@ -7,5 +8,19 @@ rtc:
   use_external_ip: false
 keys:
   devkey: dev-secret-only-for-local-livekit-000000
+room:
+  # Only the backend creates media rooms: a client with an old token must not make one of its own.
+  auto_create: false
+  max_participants: 30
+limit:
+  subscription_limit_video: 12
+webhook:
+  api_key: devkey
+  urls:
+    # The backend on the host: `just dev-backend` listens on 0.0.0.0:8000.
+    - http://host.docker.internal:8000/internal/livekit/webhook
+  resource_url_notifier:
+    # How long an event may wait in the queue before it is sent; the default is 30 s.
+    max_age: 5m
 logging:
   level: info

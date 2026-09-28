@@ -29,6 +29,9 @@ services:
       - "7882:7882/udp"
     volumes:
       - ./deploy/dev/livekit.yaml:/etc/livekit.yaml:ro
+    # Webhooks go to the backend on the host, on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   postgres-data:

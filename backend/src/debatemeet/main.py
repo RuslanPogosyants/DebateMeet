@@ -8,6 +8,13 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import FastAPI
 
+from debatemeet.media.api.webhook import webhook_router
+from debatemeet.media.application.webhooks import (
+    MediaEventHandler,
+    WebhookVerifier,
+    log_media_event,
+)
+from debatemeet.media.infrastructure.livekit_webhooks import LiveKitWebhookVerifier
 from debatemeet.shared.api.errors import install_error_handlers
 from debatemeet.shared.api.health import health_router
 from debatemeet.shared.api.time import time_router
@@ -25,6 +32,8 @@ def build_app(
     *,
     clock: Clock,
     health_probe: HealthProbe,
+    webhook_verifier: WebhookVerifier,
+    media_events: MediaEventHandler,
     version: str,
     docs: bool = False,
     lifespan: Lifespan | None = None,
@@ -41,6 +50,7 @@ def build_app(
     install_error_handlers(app)
     app.include_router(health_router(health_probe, version))
     app.include_router(time_router(clock))
+    app.include_router(webhook_router(webhook_verifier, media_events))
     return app
 
 
@@ -57,6 +67,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return build_app(
         clock=SystemClock(),
         health_probe=PostgresHealthProbe(engine),
+        webhook_verifier=LiveKitWebhookVerifier(
+            settings.livekit_api_key, settings.livekit_api_secret.get_secret_value()
+        ),
+        media_events=log_media_event,
         version=settings.app_version,
         docs=settings.environment == "dev",
         lifespan=lifespan,
