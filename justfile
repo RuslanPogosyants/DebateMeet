@@ -54,6 +54,14 @@ fmt:
     cd backend && uv run ruff check --fix && uv run ruff format
     cd frontend && pnpm lint --fix && pnpm format
 
+# Bring the dev database to the head of the migrations, as the deploy agent does on a server
+migrate: up
+    cd backend && uv run python -m debatemeet.migrate
+
+# Start a revision in backend/src/debatemeet/migrations/versions: just migration 0002 "add rounds"
+migration rev message:
+    cd backend && uv run alembic revision --rev-id {{ rev }} -m "{{ message }}"
+
 # Start N bots in a media room: a tone and a test picture each; Ctrl-C stops them
 bots n="1" room="bots": up
     cd backend && uv run python -m bots {{ n }} --media-room {{ room }}
