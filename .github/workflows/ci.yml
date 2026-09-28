@@ -302,7 +302,24 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/mnt:ro" -w /mnt \
             koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
-            tools/app-version.sh deploy/server/livekit.sh # v0.11.0
+            tools/app-version.sh deploy/server/livekit/livekit.sh # v0.11.0
+      # No uv cache in a job that builds the images servers will run: a poisoned cache would reach them.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: ${{ !cancelled() }}
+        with:
+          version: 0.11.25
+          working-directory: backend
+          enable-cache: false
+      # The deploy agent runs on the system Python of the server, stdlib only: the ruff and mypy of
+      # backend/uv.lock check it, and its tests run on the system python3 of the runner.
+      - name: Deploy agent
+        if: ${{ !cancelled() }}
+        run: |
+          uv sync --locked --project backend
+          uv run --no-sync --project backend ruff check deploy/server
+          uv run --no-sync --project backend ruff format --check deploy/server
+          uv run --no-sync --project backend mypy --strict --python-version 3.10 deploy/server/agent.py
+          python3 -m unittest discover -s deploy/server/tests
       # Every image is built and checked even when a linter fails, so one push reports all failures.
       - id: version
         name: Version
@@ -339,7 +356,11 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: deploy/server
-          build-args: APP_VERSION=${{ steps.version.outputs.version }}
+          # With a registry these become the pushed images with their digests.
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
+            BACKEND_IMAGE=debatemeet-backend:ci
+            WEB_IMAGE=debatemeet-web:ci
           tags: debatemeet-bundle:ci
           load: true
       # Starts against Postgres, turns healthy, reports the version it was built with, not as root.
@@ -403,13 +424,17 @@ jobs:
           docker cp "$id:/bundle" "$RUNNER_TEMP/bundle"
           docker rm "$id"
           cd "$RUNNER_TEMP/bundle"
+          # The labels that make the bundle a release: the images the agent runs.
+          test "$(docker image inspect debatemeet-bundle:ci --format '{{index .Config.Labels "debatemeet.backend-image"}}')" = debatemeet-backend:ci
+          test "$(docker image inspect debatemeet-bundle:ci --format '{{index .Config.Labels "debatemeet.web-image"}}')" = debatemeet-web:ci
+          test -f agent.py && test -f systemd/debatemeet-agent.timer
           docker compose --env-file env.example config --quiet
           docker run --rm -e DM_ACME_EMAIL -e DM_APP_DOMAIN -e DM_LIVEKIT_DOMAIN -e DM_TURN_DOMAIN \
-            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -v "$PWD/caddy:/etc/caddy:ro" \
             livekit/caddyl4@sha256:9dd090159a6042a907dbff0ce9dda27a21d2a559dc7b03b60a8e6b1b60b8348e \
             adapt --config /etc/caddy/Caddyfile --validate > /dev/null # v2.11.3
           ports="$(docker run --rm -e LIVEKIT_KEYS="$DM_LIVEKIT_API_KEY: $DM_LIVEKIT_API_SECRET" \
-            -v "$PWD/livekit.yaml:/etc/livekit.yaml:ro" \
+            -v "$PWD/livekit/livekit.yaml:/etc/livekit.yaml:ro" \
             livekit/livekit-server@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3 \
             --config /etc/livekit.yaml ports 2>&1)" # v1.13.7
           echo "$ports"

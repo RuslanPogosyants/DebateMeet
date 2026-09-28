@@ -69,8 +69,9 @@ services:
       LIVEKIT_TURN_DOMAIN: ${DM_TURN_DOMAIN:?}
       NODE_IP: ${DM_NODE_IP:?}
     volumes:
-      - ./livekit.yaml:/etc/livekit.yaml:ro
-      - ./livekit.sh:/etc/livekit/livekit.sh:ro
+      # Directories, not files: a file mount keeps the inode it started with, so a file the deploy
+      # agent replaces would stay invisible to the container.
+      - ./livekit:/etc/livekit:ro
     restart: unless-stopped
     logging: *logging
 
@@ -89,7 +90,8 @@ services:
       DM_LIVEKIT_DOMAIN: ${DM_LIVEKIT_DOMAIN:?}
       DM_TURN_DOMAIN: ${DM_TURN_DOMAIN:?}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # A directory, as for LiveKit: `caddy reload` must see the Caddyfile the agent put there.
+      - ./caddy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
       # The static folder the deploy agent fills: assets/ of recent releases and current/.

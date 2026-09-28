@@ -41,12 +41,15 @@ dev-web:
 # All tests
 test: up
     python3 -m unittest discover -s tools/git
+    python3 -m unittest discover -s deploy/server/tests
     cd backend && uv run pytest
     cd frontend && pnpm test
 
 # Linters, type checks and layer rules
 lint:
     cd backend && uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
+    uv run --project backend ruff check deploy/server && uv run --project backend ruff format --check deploy/server
+    uv run --project backend mypy --strict --python-version 3.10 deploy/server/agent.py
     cd frontend && pnpm lint && pnpm format:check && pnpm typecheck && pnpm depcruise
 
 # Apply formatting and safe lint fixes

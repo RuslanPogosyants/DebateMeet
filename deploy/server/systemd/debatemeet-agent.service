@@ -1,0 +1,14 @@
+# One tick of the deploy agent (docs/architecture.md §10); debatemeet-agent.timer starts it.
+# Installed once with `systemctl link`, so a new bundle updates it in place; the agent itself holds
+# the lock that keeps two ticks apart.
+[Unit]
+Description=DebateMeet deploy agent: roll out the release of the stage tag
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /srv/debatemeet/server/agent.py tick
+# Pulls, migrations and the health wait of a release fit well within it.
+TimeoutStartSec=20min

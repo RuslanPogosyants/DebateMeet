@@ -1,7 +1,8 @@
-# Only the files of the bundle: never a server .env.
+# Only the files of the bundle: never a server .env, the tests or the lint config.
 *
 !compose.yaml
-!Caddyfile
-!livekit.yaml
-!livekit.sh
 !env.example
+!agent.py
+!caddy/
+!livekit/
+!systemd/

@@ -67,7 +67,7 @@ just dev
 | `frontend/` | React SPA, тот же гексагон, что на бэкенде (раздел 7) |
 | `frontend/src/contract/` | схема OpenAPI и TS-типы, сгенерированные из бэкенда; руками не правятся |
 | `deploy/dev/` | конфигурация Postgres и LiveKit для разработки |
-| `deploy/server/` | бандл развёртывания стенда и прода: compose, Caddyfile, конфиг LiveKit, образец `.env` сервера |
+| `deploy/server/` | бандл развёртывания стенда и прода: compose, конфиги Caddy и LiveKit, образец `.env` сервера, агент выкатки `agent.py` и его юниты systemd |
 | `tools/git/` | проверка сообщений коммитов и заголовков PR |
 | `tools/app-version.sh` | версия приложения для образов: дата и sha коммита |
 | `.github/` | CI и Dependabot (раздел 10) |

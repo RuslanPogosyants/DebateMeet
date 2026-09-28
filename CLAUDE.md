@@ -2,7 +2,7 @@
 
 Web platform for British Parliamentary debate rounds: one link = one round with six logical rooms (base, OG, OO, CG, CO, judges), shared timers, motion, position draw, hands, chat. Self-hosted LiveKit, FastAPI, Postgres, React. Goal: a high-tier pet project at pre-product level — production-grade engineering without premature product weight.
 
-**Current stage:** roadmap slice 0a (repository and local environment) is done. Slice 0b, the stand, is in progress. The parts that need no resources come first, one PR each: images, the deploy bundle, image builds in CI, the thin deploy agent. The rest waits for the author's resources listed in `docs/architecture.md` §11. Slice 1 waits until the stand accepts deploys.
+**Current stage:** roadmap slice 0a (repository and local environment) is done. Slice 0b, the stand, is in progress. Its parts that need no resources are done: images, the deploy bundle (`deploy/server/`), image builds in CI and the thin deploy agent (`deploy/server/agent.py`). The rest waits for the author's resources listed in `docs/architecture.md` §11: the registry push, the server and its setup. Slice 1 waits until the stand accepts deploys.
 
 ## Source of truth
 

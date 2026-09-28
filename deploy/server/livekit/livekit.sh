@@ -8,4 +8,4 @@ case "${LIVEKIT_KEYS:-}" in
     exit 1
     ;;
 esac
-exec /livekit-server --config /etc/livekit.yaml "$@"
+exec /livekit-server --config /etc/livekit/livekit.yaml "$@"
