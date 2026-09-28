@@ -1,0 +1,255 @@
+[project]
+name = "debatemeet"
+version = "0.1.0"
+description = "DebateMeet backend: rounds, judge commands, chat history"
+authors = [
+    { name = "Ruslan Pogosyants", email = "136241216+RuslanPogosyants@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.141.1",
+    "livekit-api>=1.2.1",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.1.1",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "import-linter>=2.15",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "A", "S", "SIM", "ASYNC", "DTZ", "PT", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["debatemeet", "tests"]
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers --strict-config"
+markers = ["postgres: needs Postgres (compose.yaml locally, a service container in CI)"]
+
+# Dependency rules from docs/architecture.md, section 4. Run: uv run lint-imports
+[tool.importlinter]
+root_package = "debatemeet"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure synchronous Python: no frameworks, no I/O, no own clock or randomness"
+type = "forbidden"
+source_modules = [
+    "debatemeet.shared.domain",
+    "debatemeet.round.domain",
+    "debatemeet.round.chat.domain",
+]
+forbidden_modules = [
+    "debatemeet.shared.application",
+    "debatemeet.shared.infrastructure",
+    "debatemeet.shared.api",
+    "alembic",
+    "asyncpg",
+    "fastapi",
+    "httpx",
+    "livekit",
+    "pydantic",
+    "pydantic_settings",
+    "sqlalchemy",
+    "starlette",
+    "structlog",
+    "uvicorn",
+    "asyncio",
+    "os",
+    "random",
+    "secrets",
+    "socket",
+    "subprocess",
+    "time",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application depends on domain and shared ports only; Pydantic stays at the boundary"
+type = "forbidden"
+source_modules = [
+    "debatemeet.shared.application",
+    "debatemeet.round.application",
+    "debatemeet.round.chat.application",
+]
+forbidden_modules = [
+    "debatemeet.shared.infrastructure",
+    "debatemeet.shared.api",
+    "alembic",
+    "asyncpg",
+    "fastapi",
+    "httpx",
+    "livekit",
+    "pydantic",
+    "pydantic_settings",
+    "sqlalchemy",
+    "starlette",
+    "uvicorn",
+]
+
+[[tool.importlinter.contracts]]
+name = "Media application reaches LiveKit only through its LiveKitApi port"
+type = "forbidden"
+source_modules = ["debatemeet.media.application"]
+forbidden_modules = [
+    "debatemeet.shared.infrastructure",
+    "debatemeet.shared.api",
+    "asyncpg",
+    "fastapi",
+    "livekit",
+    "sqlalchemy",
+    "starlette",
+]
+
+[[tool.importlinter.contracts]]
+name = "Layers of shared"
+type = "layers"
+containers = ["debatemeet.shared"]
+layers = ["api | infrastructure", "application", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "Layers of round: contract reads only the domain"
+type = "layers"
+containers = ["debatemeet.round"]
+layers = ["api | infrastructure", "application | contract", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "Layers of chat"
+type = "layers"
+containers = ["debatemeet.round.chat"]
+layers = ["api | infrastructure", "application", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "Layers of media"
+type = "layers"
+containers = ["debatemeet.media"]
+layers = ["api | infrastructure", "application"]
+
+[[tool.importlinter.contracts]]
+name = "API never goes to infrastructure, of any context"
+type = "forbidden"
+source_modules = [
+    "debatemeet.shared.api",
+    "debatemeet.round.api",
+    "debatemeet.round.chat.api",
+    "debatemeet.media.api",
+]
+forbidden_modules = [
+    "debatemeet.shared.infrastructure",
+    "debatemeet.round.infrastructure",
+    "debatemeet.round.chat.infrastructure",
+    "debatemeet.media.infrastructure",
+    "asyncpg",
+    "livekit",
+    "sqlalchemy",
+]
+
+[[tool.importlinter.contracts]]
+name = "Infrastructure never goes to an API"
+type = "forbidden"
+source_modules = [
+    "debatemeet.shared.infrastructure",
+    "debatemeet.round.infrastructure",
+    "debatemeet.round.chat.infrastructure",
+    "debatemeet.media.infrastructure",
+]
+forbidden_modules = [
+    "debatemeet.shared.api",
+    "debatemeet.round.api",
+    "debatemeet.round.chat.api",
+    "debatemeet.media.api",
+]
+
+[[tool.importlinter.contracts]]
+name = "Round contract depends on the round domain only"
+type = "forbidden"
+source_modules = ["debatemeet.round.contract"]
+forbidden_modules = [
+    "debatemeet.shared.application",
+    "debatemeet.shared.infrastructure",
+    "debatemeet.shared.api",
+    "debatemeet.round.chat",
+    "debatemeet.media",
+    "fastapi",
+    "sqlalchemy",
+]
+
+[[tool.importlinter.contracts]]
+name = "Chat sees the round only through round.application"
+type = "forbidden"
+source_modules = ["debatemeet.round.chat"]
+forbidden_modules = [
+    "debatemeet.round.domain",
+    "debatemeet.round.infrastructure",
+    "debatemeet.round.api",
+    "debatemeet.round.contract",
+]
+# round.application itself depends on round.domain; only direct imports count here.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "The round does not know Media"
+type = "forbidden"
+source_modules = ["debatemeet.round"]
+forbidden_modules = ["debatemeet.media"]
+
+[[tool.importlinter.contracts]]
+name = "Media sees the round only through round.application and round.contract"
+type = "forbidden"
+source_modules = ["debatemeet.media"]
+forbidden_modules = [
+    "debatemeet.round.domain",
+    "debatemeet.round.infrastructure",
+    "debatemeet.round.api",
+    "debatemeet.round.chat",
+]
+# The paths application -> domain and contract -> domain are allowed.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Shared knows no context"
+type = "forbidden"
+source_modules = ["debatemeet.shared"]
+forbidden_modules = ["debatemeet.round", "debatemeet.media"]
+
+[[tool.importlinter.contracts]]
+name = "Everything meets only in the composition roots"
+type = "forbidden"
+source_modules = ["debatemeet.shared", "debatemeet.round", "debatemeet.media"]
+forbidden_modules = ["debatemeet.main"]
