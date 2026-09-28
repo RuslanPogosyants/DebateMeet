@@ -8,7 +8,7 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 
 - `docs/spec.md` — what we build (MVP decisions). Update it when the author changes a decision.
 - `docs/architecture.md` — how it is built: glossary, contexts, aggregates and invariants, presence transitions, layers, persistence, LiveKit integration, frontend, API, tests, CI/CD and operations, roadmap. Approved by the author and externally reviewed.
-- `docs/design.md` — how the interface looks and behaves: the «Реплика» visual direction and its rules, round screen layout, action safety, states to draw. Chosen by the author after aesthetic and UX reviews of the first mockups.
+- `docs/design.md` — how the interface looks and behaves: the «Реплика» visual direction and its rules, round screen layout at every size, start and entry screens, action safety, states to draw. Chosen by the author after aesthetic and UX reviews of the first mockups.
 - `docs/research.md` — a historical snapshot (2026-09-27) with sources. Where it disagrees with spec or architecture (e.g. participant attributes, 60 s flag hold, round reset), spec and architecture win.
 - Read the relevant sections before proposing changes. Do not re-propose what they reject without new facts. Major changes go through an ADR in `docs/adr/`, discussed with the author first.
 
