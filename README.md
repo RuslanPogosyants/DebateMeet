@@ -52,7 +52,7 @@ just dev
 | `just fmt` | форматирование и безопасные автоисправления |
 | `just contract` | перегенерировать `frontend/src/contract` из OpenAPI бэкенда |
 | `just bots N` | N тестовых участников: у каждого тон и тестовая картинка |
-| `just images` | собрать образы `debatemeet-backend:dev` и `debatemeet-web:dev` с версией текущего коммита |
+| `just images` | собрать образы `debatemeet-backend:dev`, `debatemeet-web:dev` и бандл развёртывания `debatemeet-bundle:dev` с версией текущего коммита |
 
 Тест вебхуков LiveKit слушает порт 8000. Если запущен `just dev-backend`, этот тест пропускается.
 
@@ -65,6 +65,7 @@ just dev
 | `frontend/` | React SPA, тот же гексагон, что на бэкенде (раздел 7) |
 | `frontend/src/contract/` | схема OpenAPI и TS-типы, сгенерированные из бэкенда; руками не правятся |
 | `deploy/dev/` | конфигурация Postgres и LiveKit для разработки |
+| `deploy/server/` | бандл развёртывания стенда и прода: compose, Caddyfile, конфиг LiveKit, образец `.env` сервера |
 | `tools/git/` | проверка сообщений коммитов и заголовков PR |
 | `tools/app-version.sh` | версия приложения для образов: дата и sha коммита |
 | `.github/` | CI и Dependabot (раздел 10) |
