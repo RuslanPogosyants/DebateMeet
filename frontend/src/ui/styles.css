@@ -1,0 +1,144 @@
+@import 'tailwindcss';
+
+/*
+ * Fonts of the «Реплика» direction (docs/design.md, «Типографика»), all under OFL and bundled
+ * with the app: neither servers nor clients depend on foreign CDNs. Each file declares every
+ * subset with its unicode-range, so a browser downloads only the ones a page uses.
+ */
+@import '@fontsource/montserrat/700.css';
+@import '@fontsource/fira-sans/400.css';
+@import '@fontsource/fira-sans/400-italic.css';
+@import '@fontsource/fira-sans/500.css';
+@import '@fontsource/fira-sans/600.css';
+@import '@fontsource/fira-sans-extra-condensed/600.css';
+
+/* There is no dark theme: the `dark:` classes of shadcn/ui components stay inert. */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * The theme admits only what docs/design.md allows. Tailwind's palette, type scale, shadows,
+ * radii and font stacks are cleared, so `text-red-500`, `text-xs`, `shadow-md` or `font-mono`
+ * produce nothing, and the tokens below are the whole vocabulary.
+ */
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+  --radius-*: initial;
+  --font-*: initial;
+
+  --font-sans: 'Fira Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Montserrat', ui-sans-serif, system-ui, sans-serif;
+  --font-timer: 'Fira Sans Extra Condensed', 'Arial Narrow', ui-sans-serif, sans-serif;
+
+  /* Rule 6: 13 / 15 / 20 / 28 / 96 px and nothing smaller than 13. */
+  --text-caption: 13px;
+  --text-caption--line-height: 18px;
+  --text-body: 15px;
+  --text-body--line-height: 21px;
+  --text-title: 20px;
+  --text-title--line-height: 28px;
+  --text-display: 28px;
+  --text-display--line-height: 36px;
+  --text-timer: 96px;
+  --text-timer--line-height: 84px;
+
+  --tracking-display: -0.01em;
+
+  /* Rule 3: rectangles with a 4 px radius, one radius for everything. */
+  --radius: 4px;
+}
+
+/*
+ * Color tokens of docs/design.md, «Цвет». The shadcn/ui names stay, so components added with
+ * `shadcn add` pick the tokens up; the round screen adds its own names below.
+ */
+:root {
+  --background: #ffffff;
+  --foreground: #14140f;
+  --card: #ffffff;
+  --card-foreground: #14140f;
+  --popover: #ffffff;
+  --popover-foreground: #14140f;
+  /* Rule 5: black fill is the judge's layer; outside the round screen, the page's one main action. */
+  --primary: #14140f;
+  --primary-foreground: #ffffff;
+  /* The fill of an enabled mode: a turned-off microphone, a raised hand. */
+  --secondary: #edede8;
+  --secondary-foreground: #14140f;
+  --muted: #edede8;
+  --muted-foreground: #6b6b66;
+  --accent: #edede8;
+  --accent-foreground: #14140f;
+  /* Rule 1: there is one red, and it is not for errors. Destructive actions are black. */
+  --destructive: #14140f;
+  --border: #d6d6d1;
+  --input: #d6d6d1;
+  --ring: #14140f;
+
+  /* Rule 1: «слово сейчас» — the running speech timer and the dash before the speaker. */
+  --word: #e6472e;
+  /* The stage is dark whatever the theme; tiles sit on it with a 2 px gap. */
+  --stage: #14140f;
+  --tile: #2b2a25;
+  --tile-own: #3a3933;
+  --on-stage: #ffffff;
+  --on-stage-muted: #b8b8b2;
+  /* The elapsed part of the speech scale. */
+  --elapsed: #c9c9c3;
+}
+
+@theme inline {
+  --radius-xs: var(--radius);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-word: var(--word);
+  --color-stage: var(--stage);
+  --color-tile: var(--tile);
+  --color-tile-own: var(--tile-own);
+  --color-on-stage: var(--on-stage);
+  --color-on-stage-muted: var(--on-stage-muted);
+  --color-elapsed: var(--elapsed);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background font-sans text-body text-foreground;
+  }
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}

@@ -1,0 +1,70 @@
+# Version updates wait a week after a release (docs/architecture.md, section 10): a hijacked or
+# broken release is usually caught and yanked by then. Security updates are never delayed.
+# Titles follow the commit format that CI checks: `chore: bump …`.
+
+version: 2
+
+updates:
+  # Actions stay pinned by commit SHA; Dependabot moves the SHA and its version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+    groups:
+      actions:
+        patterns: ['*']
+
+  # pnpm: its own minimumReleaseAge (frontend/pnpm-workspace.yaml) is one day, the cooldown is longer.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+    groups:
+      frontend:
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript stays on 6.0.x until the lint tooling supports TS 7 (CLAUDE.md, pinned choices).
+      - dependency-name: typescript
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+    groups:
+      backend:
+        update-types: [minor, patch]
+
+  # Dev infrastructure of compose.yaml.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Moscow
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+    ignore:
+      # A new Postgres major needs a new data directory: an upgrade on purpose, not a bump.
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]

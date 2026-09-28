@@ -2,7 +2,7 @@
 
 Web platform for British Parliamentary debate rounds: one link = one round with six logical rooms (base, OG, OO, CG, CO, judges), shared timers, motion, position draw, hands, chat. Self-hosted LiveKit, FastAPI, Postgres, React. Goal: a high-tier pet project at pre-product level — production-grade engineering without premature product weight.
 
-**Current stage:** planning is complete (2026-09-28); roadmap slice 0a (repository and local environment) is in progress, one PR per step, see `docs/architecture.md` §11.
+**Current stage:** roadmap slice 0a (repository and local environment) is done. Next is slice 0b, the stand: it starts once the author provides the resources listed for it in `docs/architecture.md` §11, and slice 1 waits until the stand accepts deploys.
 
 ## Source of truth
 
@@ -39,7 +39,7 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 ## Architecture in one screen
 
 - Modular monolith, DDD, ports and adapters. Contexts: **Round** (core; chat is a separate aggregate in `round/chat/`) and **Media** (anti-corruption layer over LiveKit).
-- Backend layout: `shared/{domain,application,infrastructure,api}`; `round/{domain,application,infrastructure,api,contract,chat}`; `media/{application,infrastructure,api}`; composition roots `main.py` (HTTP) and `admin.py` (CLI). `domain` is pure synchronous Python on dataclasses: no FastAPI, SQLAlchemy, Pydantic or LiveKit; `now` and randomness are passed in. Enforced by `import-linter`. Manual wiring, no DI container.
+- Backend layout: `shared/{domain,application,infrastructure,api}`; `round/{domain,application,infrastructure,api,contract,chat}`; `media/{application,infrastructure,api}`; composition roots `main.py` (HTTP), `admin.py` (CLI) and `openapi.py` (the contract export); dev bots in `backend/bots/`, outside the package. `domain` is pure synchronous Python on dataclasses: no FastAPI, SQLAlchemy, Pydantic or LiveKit; `now` and randomness are passed in. Enforced by `import-linter`. Manual wiring, no DI container.
 - Frontend layout: `src/{contract,domain,application,infrastructure,ui}`, the same hexagon; `contract` is generated from the backend OpenAPI and is available to every layer. Enforced by `dependency-cruiser`.
 - One `Round` aggregate stored as a JSONB document with a schema number; one row lock per command; monotonic version plus `epoch` (changes on backup restore). An unknown schema is an error, never a reset; the document evolves expand → contract.
 - Delivery to LiveKit: a single publisher leader (Postgres advisory lock, `NOTIFY` + 1 s tick) with delivery levels in `media_rooms` and a transactional outbox (`media_outbox`) for chat, system lines and mutes.
@@ -53,7 +53,7 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 
 - Python 3.14, uv, FastAPI, Pydantic (API boundary and settings only), SQLAlchemy Core (no ORM), asyncpg, Alembic, livekit-api, structlog; ruff, mypy strict, pytest, Hypothesis.
 - Node ≥ 24, pnpm (with `minimumReleaseAge` and `trustPolicy`), Vite, React, TypeScript 6.0.x (TS 7 is not yet supported by the lint tooling), Zustand, React Router, Tailwind 4, shadcn/ui, livekit-client; oxlint, Prettier, Vitest, fast-check, Playwright.
-- Dev infra: `docker compose up -d` in the repo root starts Postgres 18 (host port 5433, databases `debatemeet` and `debatemeet_test`) and LiveKit 1.13.7 (config in `deploy/dev/livekit.yaml`). Slice 0a adds a `justfile`, LiveKit webhooks and `room.auto_create: false`.
+- Dev infra: `docker compose up -d` in the repo root starts Postgres 18 (host port 5433, databases `debatemeet` and `debatemeet_test`) and LiveKit 1.13.7 (config in `deploy/dev/livekit.yaml`): it creates no media room on join (`room.auto_create: false`) and sends signed webhooks to the backend on `host.docker.internal:8000`. `just bots N` starts test participants with a tone and a test picture.
 - Servers never reach abroad (images, STUN, error tracking); the only exception is Caddy's ACME for TLS certificates. No Sentry SaaS.
 
 ## Git and PRs
