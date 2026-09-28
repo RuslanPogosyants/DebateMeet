@@ -1,0 +1,114 @@
+# Checks on every PR and on main (docs/architecture.md §10). Each area is a job that runs only
+# when its files change; `ci-ok` is the one summary check the author merges on.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels its previous run; runs on main always finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    name: Changed areas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: filter
+        name: Filter paths
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          everything() {
+            echo 'frontend=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          # A push to main checks everything.
+          [ "$EVENT" = pull_request ] || everything
+          # On a PR, HEAD is the merge commit and its first parent is the tip of the base branch.
+          changed="$(git diff --name-only HEAD^1 HEAD)"
+          printf '%s\n' "$changed"
+          # Workflows, lock files and the contract run everything.
+          if grep -qE '^(\.github/|frontend/pnpm-lock\.yaml$|backend/uv\.lock$|backend/src/debatemeet/(.+/)?contract/)' <<< "$changed"; then
+            everything
+          fi
+          if grep -q '^frontend/' <<< "$changed"; then
+            echo 'frontend=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'frontend=false' >> "$GITHUB_OUTPUT"
+          fi
+
+  frontend:
+    name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: frontend/package.json
+          cache: true
+          cache_dependency_path: frontend/pnpm-lock.yaml
+      - id: install
+        run: pnpm install --frozen-lockfile
+      # Every check runs once dependencies are in, so one push reports all failures at once.
+      - name: oxlint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm lint
+      - name: Prettier
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm format:check
+      - name: tsc
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm typecheck
+      - name: Vitest
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm test
+      - name: dependency-cruiser
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm depcruise
+      - id: build
+        name: Build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm exec vite build
+      - name: Initial JS budget
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: pnpm budget
+
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [changes, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # A skipped job is fine: its area did not change. A failed path filter is not.
+      - name: Every job passed or was skipped
+        if: needs.changes.result != 'success' || contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo 'All checks passed.'
