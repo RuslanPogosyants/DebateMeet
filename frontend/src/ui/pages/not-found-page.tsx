@@ -1,12 +1,12 @@
 import { Link } from 'react-router'
-import { Page } from '@/ui/components/page'
+import { Page, PageTitle } from '@/ui/components/page'
 import { strings } from '@/ui/strings'
 
 export function NotFoundPage() {
   return (
     <Page>
-      <h1 className="text-3xl font-semibold">{strings.notFound.title}</h1>
-      <Link to="/" className="underline underline-offset-4">
+      <PageTitle>{strings.notFound.title}</PageTitle>
+      <Link to="/" className="self-start font-medium underline underline-offset-3">
         {strings.notFound.backToStart}
       </Link>
     </Page>

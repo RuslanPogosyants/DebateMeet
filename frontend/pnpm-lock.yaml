@@ -169,6 +169,15 @@ importers:
 
   .:
     dependencies:
+      '@fontsource/fira-sans':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/fira-sans-extra-condensed':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/montserrat':
+        specifier: ^5.3.0
+        version: 5.3.0
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -331,6 +340,15 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@fontsource/fira-sans-extra-condensed@5.3.0':
+    resolution: {integrity: sha512-AiwnJulSkWNY0SYSOmdf3oFO9G8Soc3FYyYS81BWXVUSLqj2V/YXf4vC9xTohLOPIbXnDbpeelje692zLT5O6w==}
+
+  '@fontsource/fira-sans@5.3.0':
+    resolution: {integrity: sha512-z1SKSG7eRhm3srlb7rQ3j77QP4TP7OFxCZ4wUWhCdt+3hOF9K0AyvybpAsz6+JWNcCVV7AqC7dbOT3e67P2r5A==}
+
+  '@fontsource/montserrat@5.3.0':
+    resolution: {integrity: sha512-iQPDtZOnmM5ih4JBGaMSXisRap0ixb9bAUw2hDtY7EjVfaqiiNlKtVuJl9XclxUwtwMMHNcWXfQR6zI9x05+Tg==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1755,6 +1773,12 @@ snapshots:
   '@csstools/css-tokenizer@4.0.2': {}
 
   '@exodus/bytes@1.16.0': {}
+
+  '@fontsource/fira-sans-extra-condensed@5.3.0': {}
+
+  '@fontsource/fira-sans@5.3.0': {}
+
+  '@fontsource/montserrat@5.3.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
