@@ -1,0 +1,9 @@
+# Supply-chain guards: skip versions published less than a day ago,
+# and refuse a version whose publish trust (provenance) is weaker than before.
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+
+# Pins that keep the guards above satisfied. Drop a pin once a newer trusted release exists.
+overrides:
+  # 3.2.2 lost the provenance 3.2.1 had; vitest asks for ^3.2.1.
+  why-is-node-running: 3.2.1

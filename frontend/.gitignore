@@ -1,0 +1,4 @@
+# Also read by Prettier and oxlint, which run from this directory
+node_modules/
+dist/
+*.local
