@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,7 +35,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           everything() {
-            echo 'frontend=true' >> "$GITHUB_OUTPUT"
+            printf '%s\n' backend=true frontend=true >> "$GITHUB_OUTPUT"
             exit 0
           }
           # A push to main checks everything.
@@ -46,11 +47,69 @@ jobs:
           if grep -qE '^(\.github/|frontend/pnpm-lock\.yaml$|backend/uv\.lock$|backend/src/debatemeet/(.+/)?contract/)' <<< "$changed"; then
             everything
           fi
-          if grep -q '^frontend/' <<< "$changed"; then
-            echo 'frontend=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'frontend=false' >> "$GITHUB_OUTPUT"
-          fi
+          for area in backend frontend; do
+            if grep -q "^$area/" <<< "$changed"; then
+              echo "$area=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$area=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+  backend:
+    name: Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The tests' own database; locally it is debatemeet_test in compose.yaml.
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873 # 18.6
+        env:
+          POSTGRES_USER: debatemeet
+          POSTGRES_PASSWORD: debatemeet
+          POSTGRES_DB: debatemeet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U debatemeet -d debatemeet_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      DM_TEST_DATABASE_URL: postgresql+asyncpg://debatemeet:debatemeet@localhost:5432/debatemeet_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.11.25
+          working-directory: backend
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # Python 3.14 comes from backend/.python-version; uv downloads it.
+      - id: install
+        run: uv sync --locked
+      # Every check runs once dependencies are in, so one push reports all failures at once.
+      - name: ruff check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --no-sync ruff check --output-format=github
+      - name: ruff format
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --no-sync ruff format --check
+      - name: mypy
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --no-sync mypy
+      - name: import-linter
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --no-sync lint-imports
+      - name: pytest
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --no-sync pytest
 
   frontend:
     name: Frontend
@@ -103,7 +162,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, frontend]
+    needs: [changes, backend, frontend]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
