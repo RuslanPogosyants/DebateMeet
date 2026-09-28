@@ -13,7 +13,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "depcruise": "depcruise src",
-    "budget": "node scripts/check-budget.ts"
+    "budget": "node scripts/check-budget.ts",
+    "contract": "openapi-typescript src/contract/openapi.json --output src/contract/api.d.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

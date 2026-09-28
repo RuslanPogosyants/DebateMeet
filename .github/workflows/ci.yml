@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
+      contract: ${{ steps.filter.outputs.contract }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,7 +38,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           everything() {
-            printf '%s\n' backend=true frontend=true >> "$GITHUB_OUTPUT"
+            printf '%s\n' backend=true contract=true frontend=true >> "$GITHUB_OUTPUT"
             exit 0
           }
           # A push to main checks everything.
@@ -49,13 +50,17 @@ jobs:
           if grep -qE '^(\.github/|frontend/pnpm-lock\.yaml$|backend/uv\.lock$|backend/src/debatemeet/(.+/)?contract/)' <<< "$changed"; then
             everything
           fi
-          for area in backend frontend; do
-            if grep -q "^$area/" <<< "$changed"; then
-              echo "$area=true" >> "$GITHUB_OUTPUT"
+          area() { # name, extended regex of its paths
+            if grep -qE "$2" <<< "$changed"; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
             else
-              echo "$area=false" >> "$GITHUB_OUTPUT"
+              echo "$1=false" >> "$GITHUB_OUTPUT"
             fi
-          done
+          }
+          area backend '^backend/'
+          area frontend '^frontend/'
+          # The contract is the backend API and its generated TS types.
+          area contract '^(backend/|frontend/src/contract/|frontend/package\.json$)'
 
   backend:
     name: Backend
@@ -161,6 +166,66 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: pnpm budget
 
+  contract:
+    name: Contract
+    needs: changes
+    if: needs.changes.outputs.contract == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.11.25
+          working-directory: backend
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: frontend/package.json
+          cache: true
+          cache_dependency_path: frontend/pnpm-lock.yaml
+      - name: Install
+        run: |
+          (cd backend && uv sync --locked)
+          (cd frontend && pnpm install --frozen-lockfile)
+      # The two commands of `just contract`.
+      - name: Generate
+        run: |
+          (cd backend && uv run --no-sync python -m debatemeet.openapi ../frontend/src/contract/openapi.json)
+          (cd frontend && pnpm contract)
+      - name: Generated contract is committed
+        run: |
+          if [ -n "$(git status --porcelain -- frontend/src/contract)" ]; then
+            git status --short -- frontend/src/contract
+            git diff -- frontend/src/contract
+            echo '::error::frontend/src/contract is stale: run `just contract` and commit the result'
+            exit 1
+          fi
+      # Open tabs keep the old contract (docs/architecture.md, section 8): a warning, not a failure.
+      - name: Incompatible changes
+        if: github.event_name == 'pull_request'
+        run: |
+          spec=frontend/src/contract/openapi.json
+          if ! git cat-file -e "HEAD^1:$spec" 2> /dev/null; then
+            echo "The base branch has no $spec yet: nothing to compare with."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/specs"
+          git show "HEAD^1:$spec" > "$RUNNER_TEMP/specs/base.json"
+          cp "$spec" "$RUNNER_TEMP/specs/head.json"
+          docker run --rm -v "$RUNNER_TEMP/specs:/specs:ro" \
+            tufin/oasdiff@sha256:3b14fe0112e5d1bf862f91ab234a4bcd161a3f399e98f8b0b665ce70857694ac \
+            breaking /specs/base.json /specs/head.json --format githubactions \
+            | sed -e 's/^::error /::warning /' -e "s#file=/specs/head.json#file=$spec#"
+
   # Hygiene and CodeQL run on every PR in full: they are cheap, and code scanning compares the
   # analysis of each language with the base branch.
   hygiene:
@@ -217,7 +282,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, backend, frontend, hygiene, codeql]
+    needs: [changes, backend, contract, frontend, hygiene, codeql]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
