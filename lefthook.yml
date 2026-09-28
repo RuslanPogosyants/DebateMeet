@@ -11,11 +11,11 @@ pre-commit:
       stage_fixed: true
     - name: oxlint
       root: frontend/
-      glob: "*.{ts,tsx}"
+      glob: "*.{ts,tsx,cjs}"
       run: pnpm exec oxlint {staged_files}
     - name: prettier
       root: frontend/
-      glob: "*.{ts,tsx,js,json,css,html}"
+      glob: "*.{ts,tsx,js,cjs,json,css,html,md,yaml}"
       run: pnpm exec prettier --write {staged_files}
       stage_fixed: true
 
