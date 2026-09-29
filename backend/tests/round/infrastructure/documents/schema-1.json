@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "participants": [
+    {
+      "id": "vika00000001",
+      "name": "Вика Сомова",
+      "room": "og",
+      "presence": {"status": "connected", "sid": "PA_2", "since": "2026-09-29T18:00:05+00:00"},
+      "last_ended_sid": "PA_1"
+    },
+    {
+      "id": "lev000000002",
+      "name": "Лев",
+      "room": "base",
+      "presence": {"status": "pending", "since": "2026-09-29T18:00:06+00:00"},
+      "last_ended_sid": null
+    },
+    {
+      "id": "dan000000003",
+      "name": "Дан",
+      "room": "judges",
+      "presence": {"status": "disconnected", "since": "2026-09-29T18:00:07+00:00"},
+      "last_ended_sid": "PA_3"
+    }
+  ],
+  "entry_closed": true,
+  "judge_flag": {
+    "holder": null,
+    "last_holder": {"id": "dan000000003", "name": "Дан"},
+    "released_reason": "holder_disconnected",
+    "released_at": "2026-09-29T18:00:07+00:00"
+  }
+}
