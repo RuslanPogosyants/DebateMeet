@@ -202,14 +202,16 @@ class CountingRateLimiter:
 class FakeMedia:
     url = "ws://media.test"
 
-    def __init__(self, rounds: InMemoryRounds) -> None:
+    def __init__(self, rounds: InMemoryRounds | None = None) -> None:
         self._rounds = rounds
-        # The committed version of each round when its media room was opened.
-        self.opened: list[tuple[RoundId, int]] = []
+        # Each round whose media room was opened, with its committed version at that moment
+        # when the rounds are in memory.
+        self.opened: list[tuple[RoundId, int | None]] = []
         self.observation: Observation | None = None
 
     async def open_media_room(self, round_id: RoundId) -> None:
-        self.opened.append((round_id, self._rounds.round(round_id).version))
+        version = self._rounds.round(round_id).version if self._rounds is not None else None
+        self.opened.append((round_id, version))
 
     def token(self, round_id: RoundId, participant_id: ParticipantId, name: str) -> str:
         return f"token:{round_id}:{participant_id}:{name}"
