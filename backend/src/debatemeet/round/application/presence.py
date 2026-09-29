@@ -6,6 +6,8 @@ nothing loudly: a rule that says no is logged. Duplicates are cut by the event i
 same in every repeat of a webhook.
 """
 
+from datetime import datetime
+
 import structlog
 
 from debatemeet.round.application.commands import commit_changes
@@ -19,9 +21,11 @@ from debatemeet.shared.domain.errors import DomainError
 log = structlog.get_logger(__name__)
 
 
-async def _first_time(tx: RoundTransaction, round_id: RoundId, event_id: str) -> bool:
+async def _first_time(
+    tx: RoundTransaction, round_id: RoundId, event_id: str, now: datetime
+) -> bool:
     claim = await tx.command_keys.claim(
-        round_id=round_id, participant_id=None, key=event_id, request_hash=""
+        round_id=round_id, participant_id=None, key=event_id, request_hash="", now=now
     )
     return claim is KeyClaim.FIRST
 
@@ -38,7 +42,7 @@ class ConnectParticipant:
     ) -> None:
         now = self._clock.now()
         async with self._transactions.begin() as tx:
-            if not await _first_time(tx, round_id, event_id):
+            if not await _first_time(tx, round_id, event_id, now):
                 return
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:
@@ -72,7 +76,7 @@ class DisconnectParticipant:
     ) -> None:
         now = self._clock.now()
         async with self._transactions.begin() as tx:
-            if not await _first_time(tx, round_id, event_id):
+            if not await _first_time(tx, round_id, event_id, now):
                 return
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:

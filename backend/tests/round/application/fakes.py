@@ -111,7 +111,13 @@ class _CommandKeys:
         self._store = store
 
     async def claim(
-        self, *, round_id: str, participant_id: str | None, key: str, request_hash: str
+        self,
+        *,
+        round_id: str,
+        participant_id: str | None,
+        key: str,
+        request_hash: str,
+        now: datetime,
     ) -> KeyClaim:
         claimed = self._store.keys.get((round_id, participant_id, key))
         if claimed is None:

@@ -37,7 +37,13 @@ class KeyClaim(StrEnum):
 
 class CommandKeys(Protocol):
     async def claim(
-        self, *, round_id: str, participant_id: str | None, key: str, request_hash: str
+        self,
+        *,
+        round_id: str,
+        participant_id: str | None,
+        key: str,
+        request_hash: str,
+        now: datetime,
     ) -> KeyClaim:
         """The first statement of a command's transaction. A concurrent repeat waits on the
         unique index until the first commits. Webhooks use the event id and no participant."""
