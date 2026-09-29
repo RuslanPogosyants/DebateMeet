@@ -69,6 +69,14 @@ migration rev message:
 bots n="1" room="bots": up
     cd backend && uv run python -m bots {{ n }} --media-room {{ room }}
 
+# Measure on laptop speakers whether Web Audio playback echoes: a voice bot and a page for Chrome
+echo-check: up
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'kill 0' EXIT
+    {{ just_executable() }} dev-web &
+    cd backend && uv run python -m bots.echo_check
+
 # Regenerate frontend/src/contract from the backend OpenAPI; CI fails when it is stale
 contract:
     cd backend && uv run python -m debatemeet.openapi ../frontend/src/contract/openapi.json

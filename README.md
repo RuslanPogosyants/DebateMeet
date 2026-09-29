@@ -54,6 +54,7 @@ just dev
 | `just migrate` | довести dev-базу до последней миграции, как агент выкатки на сервере |
 | `just migration 0002 "…"` | начать новую ревизию схемы в `backend/src/debatemeet/migrations/versions/` |
 | `just bots N` | N тестовых участников: у каждого тон и тестовая картинка |
+| `just echo-check` | проверка эха на динамиках ноутбука: голосовой бот и страница замера для Chrome |
 | `just images` | собрать образы `debatemeet-backend:dev`, `debatemeet-web:dev` и бандл развёртывания `debatemeet-bundle:dev` с версией текущего коммита |
 
 Тест вебхуков LiveKit слушает порт 8000. Если запущен `just dev-backend`, этот тест пропускается.

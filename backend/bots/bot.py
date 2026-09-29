@@ -75,12 +75,23 @@ def picture() -> list[bytes]:
 
 
 class Bot:
-    """A participant that publishes a tone as its microphone and a test picture as its camera."""
+    """A participant that publishes a sound as its microphone and a test picture as its camera.
 
-    def __init__(self, identity: str, media_room: str, *, tone_hz: int = 440) -> None:
+    The sound is a loop of 10 ms frames, a tone of 440 Hz by default.
+    """
+
+    def __init__(
+        self,
+        identity: str,
+        media_room: str,
+        *,
+        sound: list[bytes] | None = None,
+        camera: bool = True,
+    ) -> None:
         self.identity = identity
         self.media_room = media_room
-        self.tone_hz = tone_hz
+        self.sound = sound if sound is not None else tone(440)
+        self.camera = camera
         self._room: rtc.Room | None = None
         self._sources: list[rtc.AudioSource | rtc.VideoSource] = []
         self._tasks: list[asyncio.Task[None]] = []
@@ -88,22 +99,22 @@ class Bot:
     async def start(self) -> None:
         self._room = rtc.Room()
         await self._room.connect(dev.URL, dev_token(self.identity, self.media_room))
-        audio = rtc.AudioSource(SAMPLE_RATE, 1)
-        video = rtc.VideoSource(WIDTH, HEIGHT)
-        self._sources = [audio, video]
         participant = self._room.local_participant
+        audio = rtc.AudioSource(SAMPLE_RATE, 1)
+        self._sources = [audio]
         await participant.publish_track(
-            rtc.LocalAudioTrack.create_audio_track("tone", audio),
+            rtc.LocalAudioTrack.create_audio_track("sound", audio),
             rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
         )
-        await participant.publish_track(
-            rtc.LocalVideoTrack.create_video_track("picture", video),
-            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_CAMERA),
-        )
-        self._tasks = [
-            asyncio.create_task(self._play(audio)),
-            asyncio.create_task(self._show(video)),
-        ]
+        self._tasks = [asyncio.create_task(self._play(audio))]
+        if self.camera:
+            video = rtc.VideoSource(WIDTH, HEIGHT)
+            self._sources.append(video)
+            await participant.publish_track(
+                rtc.LocalVideoTrack.create_video_track("picture", video),
+                rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_CAMERA),
+            )
+            self._tasks.append(asyncio.create_task(self._show(video)))
 
     async def stop(self) -> None:
         for task in self._tasks:
@@ -117,9 +128,8 @@ class Bot:
         self._tasks, self._sources, self._room = [], [], None
 
     async def _play(self, source: rtc.AudioSource) -> None:
-        frames = tone(self.tone_hz)
         while True:
-            for data in frames:
+            for data in self.sound:
                 # Waits while the source queue is full, so the loop keeps real time by itself.
                 await source.capture_frame(rtc.AudioFrame(data, SAMPLE_RATE, 1, SAMPLES_PER_FRAME))
 
