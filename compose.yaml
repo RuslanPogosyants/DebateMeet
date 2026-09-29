@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: debatemeet
       POSTGRES_DB: debatemeet
     ports:
-      - "127.0.0.1:${DM_PG_PORT:-5433}:5432"
+      - "127.0.0.1:${DM_PG_PORT:-5450}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
       - ./deploy/dev/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
