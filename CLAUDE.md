@@ -53,7 +53,7 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 
 - Python 3.14, uv, FastAPI, Pydantic (API boundary and settings only), SQLAlchemy Core (no ORM), asyncpg, Alembic, livekit-api, structlog; ruff, mypy strict, pytest, Hypothesis.
 - Node ≥ 24, pnpm (with `minimumReleaseAge` and `trustPolicy`), Vite, React, TypeScript 6.0.x (TS 7 is not yet supported by the lint tooling), Zustand, React Router, Tailwind 4, shadcn/ui, livekit-client; oxlint, Prettier, Vitest, fast-check, Playwright.
-- Dev infra: `docker compose up -d` in the repo root starts Postgres 18 (host port 5433, databases `debatemeet` and `debatemeet_test`) and LiveKit 1.13.7 (config in `deploy/dev/livekit.yaml`): it creates no media room on join (`room.auto_create: false`) and sends signed webhooks to the backend on `host.docker.internal:8000`. `just bots N` starts test participants with a tone and a test picture.
+- Dev infra: `docker compose up -d` in the repo root starts Postgres 18 (host port 5450, databases `debatemeet` and `debatemeet_test`) and LiveKit 1.13.7 (config in `deploy/dev/livekit.yaml`): it creates no media room on join (`room.auto_create: false`) and sends signed webhooks to the backend on `host.docker.internal:8000`. `just bots N` starts test participants with a tone and a test picture.
 - Servers never reach abroad (images, STUN, error tracking); the only exception is Caddy's ACME for TLS certificates. No Sentry SaaS.
 
 ## Git and PRs
