@@ -5,13 +5,13 @@ import asyncio
 import contextlib
 import gc
 
-from bots.bot import Bot, create_media_room
+from bots.bot import Bot, create_media_room, tone
 
 
 async def run(count: int, media_room: str) -> None:
     await create_media_room(media_room)
     # A tone of its own for every bot, so they are told apart by ear.
-    bots = [Bot(f"bot-{n}", media_room, tone_hz=165 + 55 * n) for n in range(1, count + 1)]
+    bots = [Bot(f"bot-{n}", media_room, sound=tone(165 + 55 * n)) for n in range(1, count + 1)]
     await asyncio.gather(*(bot.start() for bot in bots))
     print(f"{count} bot(s) in the media room {media_room!r}; Ctrl-C stops them")
     try:
