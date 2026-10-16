@@ -11,6 +11,15 @@ from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.ports import CommandKeys, EventLog
 
 
+class RoundUnreadableError(Exception):
+    """The stored round has a schema this code does not know: 503 round_unreadable and an
+    alert, never a reset (docs/architecture.md, section 5)."""
+
+
+class MediaUnavailableError(Exception):
+    """LiveKit did not answer: the media room is not open, the join cannot finish. 503."""
+
+
 @dataclass(frozen=True, slots=True)
 class ArchivedParticipant:
     """Everyone who ever joined the round, whether in the aggregate or evicted from it. Only the

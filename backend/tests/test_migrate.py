@@ -13,7 +13,7 @@ from debatemeet.shared.infrastructure.database import create_engine
 
 pytestmark = pytest.mark.postgres
 
-BASELINE = "0001"
+HEAD = "0002"
 # A revision that no image has: the database is ahead of the image.
 FUTURE = "9999"
 
@@ -35,11 +35,15 @@ async def revisions(database_url: str) -> list[str]:
     return await execute(database_url, "SELECT version_num FROM alembic_version")
 
 
+RESET = ("DROP SCHEMA public CASCADE", "CREATE SCHEMA public")
+
+
 @pytest.fixture
 async def fresh_database(database_url: str) -> AsyncIterator[str]:
-    await execute(database_url, "DROP TABLE IF EXISTS alembic_version")
+    """An empty test database; the fixture `engine` migrates it again for the tests after."""
+    await execute(database_url, *RESET)
     yield database_url
-    await execute(database_url, "DROP TABLE IF EXISTS alembic_version")
+    await execute(database_url, *RESET)
 
 
 def test_the_history_is_one_line() -> None:
@@ -48,13 +52,13 @@ def test_the_history_is_one_line() -> None:
 
 async def test_a_fresh_database_comes_to_the_head(fresh_database: str) -> None:
     assert await migrate(fresh_database) == "upgraded"
-    assert await revisions(fresh_database) == [BASELINE]
+    assert await revisions(fresh_database) == [HEAD]
 
 
 async def test_a_second_run_changes_nothing(fresh_database: str) -> None:
     await migrate(fresh_database)
     assert await migrate(fresh_database) == "upgraded"
-    assert await revisions(fresh_database) == [BASELINE]
+    assert await revisions(fresh_database) == [HEAD]
 
 
 async def test_a_database_ahead_of_the_image_is_left_alone(fresh_database: str) -> None:
@@ -86,4 +90,4 @@ async def test_the_module_runs_as_the_deploy_agent_calls_it(fresh_database: str)
     _, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
     assert process.returncode == 0, stderr.decode()
     assert "migrations_applied" in stderr.decode()
-    assert await revisions(fresh_database) == [BASELINE]
+    assert await revisions(fresh_database) == [HEAD]
