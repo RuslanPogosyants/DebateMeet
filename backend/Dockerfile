@@ -4,7 +4,7 @@
 
 # uv 0.11.25, the version CI uses; Python 3.14.7. Dependabot moves the digests.
 FROM ghcr.io/astral-sh/uv:0.11.25@sha256:1e3808aa9023d0980e7c15b1fa7c1ac16ff35925780cf5c459858b2d693f01a9 AS uv
-FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS python
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS python
 
 # Runtime dependencies from uv.lock, compiled to bytecode; the project itself is not installed.
 FROM python AS dependencies
