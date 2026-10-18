@@ -21,7 +21,7 @@ services:
       retries: 15
 
   livekit:
-    image: livekit/livekit-server:v1.13.7
+    image: livekit/livekit-server:v1.13.9
     command: --config /etc/livekit.yaml --node-ip 127.0.0.1
     ports:
       - "7880:7880"
