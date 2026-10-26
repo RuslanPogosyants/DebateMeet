@@ -1,17 +1,18 @@
 """Stateful properties of the round (docs/architecture.md, section 9): random sequences of joins,
-webhooks, reconciliations and time from random participants, and the invariants after each step.
+rooms, judge commands, webhooks, reconciliations and time, with invariants after each step.
 """
 
+from contextlib import suppress
 from datetime import timedelta
 
 from hypothesis import settings
 from hypothesis import strategies as st
-from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
+from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from debatemeet.round.domain.events import DisconnectCause
 from debatemeet.round.domain.ids import ParticipantId, SessionId
-from debatemeet.round.domain.judge import JudgeFlag
 from debatemeet.round.domain.presence import EVICT_AFTER, Connected, absent_since
+from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import MAX_PARTICIPANTS, Round
 from debatemeet.shared.domain.errors import DomainError
 from tests.round.builders import ROUND_ID, T0
@@ -66,13 +67,41 @@ class RoundPresence(RuleBasedStateMachine):
         at = self.now - timedelta(seconds=observed_ago)
         self.round.sync_presence(observed, at, self.now)
 
-    @precondition(lambda self: self.round.judge_flag.holder is None)
     @rule(participant=PARTICIPANTS)
     def takes_the_flag(self, participant: ParticipantId) -> None:
-        # `claim_judge` arrives in slice 2; its rule: only a connected participant takes it.
-        taker = self.round.participants.get(participant)
-        if taker is not None and isinstance(taker.presence, Connected):
-            self.round.judge_flag = JudgeFlag(holder=participant)
+        with suppress(DomainError):
+            self.round.claim_judge(participant, self.now)
+
+    @rule(participant=PARTICIPANTS, room=st.sampled_from(list(Room)))
+    def enters_a_room(self, participant: ParticipantId, room: Room) -> None:
+        with suppress(DomainError):
+            self.round.enter(participant, room, self.now)
+
+    @rule(participant=PARTICIPANTS, recipient=PARTICIPANTS)
+    def hands_over_flag(self, participant: ParticipantId, recipient: ParticipantId) -> None:
+        with suppress(DomainError):
+            self.round.hand_over_judge(participant, recipient, self.now)
+
+    @rule(participant=PARTICIPANTS)
+    def releases_flag(self, participant: ParticipantId) -> None:
+        with suppress(DomainError):
+            self.round.release_judge(participant, self.now)
+
+    @rule(participant=PARTICIPANTS, room=st.sampled_from(list(Room)))
+    def recalls_room(self, participant: ParticipantId, room: Room) -> None:
+        try:
+            self.round.recall(participant, room, self.now)
+        except DomainError:
+            return
+        assert not any(person.room == room for person in self.round.participants.values())
+
+    @rule(participant=PARTICIPANTS)
+    def recalls_everyone(self, participant: ParticipantId) -> None:
+        try:
+            self.round.recall_all(participant, self.now)
+        except DomainError:
+            return
+        assert all(person.room == Room.BASE for person in self.round.participants.values())
 
     @invariant()
     def the_holder_is_connected(self) -> None:

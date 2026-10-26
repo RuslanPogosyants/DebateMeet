@@ -1,6 +1,6 @@
 """The Round aggregate: everything behind a link but the chat (docs/architecture.md, section 3).
 
-Slice 1 brings the round itself, entry and presence; rooms, timers, motion, hands and the drum
+Entry, presence, rooms and the judge flag share this aggregate. Timers, motion, hands and the drum
 arrive with their slices. Every command starts by evicting whoever has been absent too long:
 eviction is lazy, it happens on any command of the round.
 """
@@ -11,11 +11,17 @@ from datetime import datetime
 
 from debatemeet.round.domain.events import (
     DisconnectCause,
+    EntryChanged,
+    JudgeFlagClaimed,
+    JudgeFlagHandedOver,
     JudgeFlagReleased,
     ParticipantConnected,
     ParticipantDisconnected,
+    ParticipantEntered,
     ParticipantEvicted,
     ParticipantJoined,
+    ParticipantRemoved,
+    ParticipantsRecalled,
     RoundCreated,
 )
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
@@ -28,7 +34,7 @@ from debatemeet.round.domain.presence import (
     Presence,
     absent_since,
 )
-from debatemeet.round.domain.room import Room
+from debatemeet.round.domain.room import SUBROOMS, Room
 from debatemeet.shared.domain.errors import DomainError
 from debatemeet.shared.domain.events import DomainEvent
 
@@ -182,6 +188,117 @@ class Round:
     def _reconnect(self, participant: Participant, sid: SessionId, now: datetime) -> None:
         participant.presence = Connected(sid, now)
         self._record(ParticipantConnected(at=now, participant_id=participant.id, sid=sid))
+
+    def enter(self, participant_id: ParticipantId, room: Room, now: datetime) -> None:
+        self._evict_absent(now)
+        participant = self._connected(participant_id)
+        if participant.room == room:
+            return
+        previous = participant.room
+        participant.room = room
+        self._record(
+            ParticipantEntered(
+                at=now, participant_id=participant_id, previous_room=previous, room=room
+            )
+        )
+
+    def claim_judge(self, participant_id: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        self._connected(participant_id)
+        if self.judge_flag.holder is not None:
+            raise DomainError("judge_flag_taken")
+        self.judge_flag = JudgeFlag(holder=participant_id)
+        self._record(JudgeFlagClaimed(at=now, participant_id=participant_id))
+
+    def release_judge(self, participant_id: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        holder = self._judge(participant_id)
+        self._release_flag(holder, ReleaseReason.BY_HOLDER, now)
+
+    def hand_over_judge(
+        self, participant_id: ParticipantId, target: ParticipantId, now: datetime
+    ) -> None:
+        self._evict_absent(now)
+        self._judge(participant_id)
+        self._connected(target)
+        if target == participant_id:
+            return
+        self.judge_flag = JudgeFlag(holder=target)
+        self._record(
+            JudgeFlagHandedOver(at=now, previous_holder=participant_id, participant_id=target)
+        )
+
+    def recall(self, participant_id: ParticipantId, room: Room, now: datetime) -> None:
+        self._evict_absent(now)
+        self._judge(participant_id)
+        if room not in SUBROOMS:
+            raise DomainError("invalid_room")
+        self._recall(frozenset({room}), now)
+
+    def recall_all(self, participant_id: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        self._judge(participant_id)
+        self._recall(SUBROOMS, now)
+
+    def admin_release_judge(self, now: datetime) -> None:
+        self._evict_absent(now)
+        if self.judge_flag.holder is not None:
+            self._release_flag(self.participants[self.judge_flag.holder], ReleaseReason.ADMIN, now)
+
+    def admin_remove_participant(self, participant_id: ParticipantId, now: datetime) -> None:
+        """The use case checked the archive and revokes its secret in the same transaction.
+
+        An archived participant may already be outside the aggregate; removal is still audited.
+        """
+        self._evict_absent(now)
+        participant = self.participants.get(participant_id)
+        if participant is not None and self.judge_flag.holder == participant_id:
+            self._release_flag(participant, ReleaseReason.ADMIN, now)
+        self.participants.pop(participant_id, None)
+        self._record(
+            ParticipantRemoved(
+                at=now,
+                participant_id=participant_id,
+                previous_room=participant.room if participant is not None else None,
+            )
+        )
+
+    def admin_close_entry(self, now: datetime) -> None:
+        self._set_entry_closed(True, now)
+
+    def admin_open_entry(self, now: datetime) -> None:
+        self._set_entry_closed(False, now)
+
+    def _set_entry_closed(self, closed: bool, now: datetime) -> None:
+        self._evict_absent(now)
+        if self.entry_closed != closed:
+            self.entry_closed = closed
+            self._record(EntryChanged(at=now, closed=closed))
+
+    def _connected(self, participant_id: ParticipantId) -> Participant:
+        participant = self.participants.get(participant_id)
+        if participant is None:
+            raise DomainError("participant_not_found")
+        if not isinstance(participant.presence, Connected):
+            raise DomainError("not_connected")
+        return participant
+
+    def _judge(self, participant_id: ParticipantId) -> Participant:
+        if self.judge_flag.holder != participant_id:
+            raise DomainError("not_judge")
+        return self._connected(participant_id)
+
+    def _recall(self, rooms: frozenset[Room], now: datetime) -> None:
+        previous = {
+            participant.id: participant.room
+            for participant in self.participants.values()
+            if participant.room in rooms
+        }
+        if not previous:
+            return
+        for participant_id in previous:
+            self.participants[participant_id].room = Room.BASE
+        self._record(ParticipantsRecalled(at=now, previous_rooms=previous))
 
     def _end_session(
         self, participant: Participant, sid: SessionId, now: datetime, cause: DisconnectCause

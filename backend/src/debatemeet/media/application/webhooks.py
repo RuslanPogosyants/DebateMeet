@@ -4,7 +4,7 @@
 The integration translates them into round commands and keeps delivery tied to a media-room SID.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -17,7 +17,11 @@ from debatemeet.round.application.presence import (
     DisconnectParticipant,
     SyncPresence,
 )
-from debatemeet.shared.application.errors import MediaUnavailableError
+from debatemeet.shared.application.errors import (
+    MediaUnavailableError,
+    RoundBusyError,
+    UnreadableRoundError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,12 +104,28 @@ class HandleMediaEvent:
             ):
                 await self._disconnect(round_id, participant_id, sid, event.id)
 
-    async def reconcile_startup(self) -> None:
+    async def reconcile_startup(self) -> set[RoundId]:
         rooms = {room.name: room for room in await self._api.rooms()}
         stored = {state.round_id: state for state in await self._store.active()}
-        for round_id in rooms.keys() | stored.keys():
+        round_ids = rooms.keys() | stored.keys()
+        # Register all rooms before waiting for any aggregate row lock. The publisher can
+        # already serve healthy rounds while recovery waits or retries a different one.
+        for round_id in round_ids:
             if round_id in rooms:
                 await self._store.started(round_id, rooms[round_id].sid)
             else:
                 await self._store.finished(round_id, stored[round_id].room_sid)
-            await self._sync(round_id)
+        return await self.reconcile_pending(round_ids)
+
+    async def reconcile_pending(self, round_ids: Collection[RoundId]) -> set[RoundId]:
+        pending: set[RoundId] = set()
+        for round_id in round_ids:
+            try:
+                if not await self._sync(round_id):
+                    pending.add(round_id)
+            except RoundBusyError:
+                pending.add(round_id)
+                log.warning("round_reconciliation_retrying", reason="RoundBusyError")
+            except UnreadableRoundError:
+                log.warning("round_reconciliation_skipped", reason="UnreadableRoundError")
+        return pending

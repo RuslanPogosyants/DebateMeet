@@ -37,6 +37,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     ...devices['Desktop Chrome'],
+    actionTimeout: 15000,
     baseURL: 'http://127.0.0.1:4173',
     permissions: ['camera', 'microphone'],
     trace: 'retain-on-failure',
@@ -51,8 +52,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command:
-        'cd ../backend && .venv/bin/python -m debatemeet.migrate && exec .venv/bin/uvicorn debatemeet.main:create_app --factory --host 0.0.0.0 --port 8000',
+      command: 'cd ../backend && exec .venv/bin/python -m tests.e2e_server',
       url: 'http://127.0.0.1:8000/api/health',
       timeout: 60000,
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },

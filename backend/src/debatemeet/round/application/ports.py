@@ -67,6 +67,18 @@ class ParticipantArchive(Protocol):
         """A rejoin replaces the name and moves the time of the last join."""
         ...
 
+    async def revoke(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        """Permanently refuse this participant's secret, in the command transaction."""
+        ...
+
+
+class MediaOutbox(Protocol):
+    async def remove_participant(
+        self, round_id: RoundId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        """Queue an idempotent media removal in the caller-owned transaction."""
+        ...
+
 
 class ChangeNotifier(Protocol):
     async def round_changed(self, round_id: RoundId) -> None:
@@ -92,6 +104,9 @@ class RoundTransaction(Protocol):
 
     @property
     def notifier(self) -> ChangeNotifier: ...
+
+    @property
+    def media_outbox(self) -> MediaOutbox: ...
 
 
 class RoundTransactions(Protocol):

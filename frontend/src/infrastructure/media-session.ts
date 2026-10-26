@@ -1,5 +1,6 @@
 import {
   ConnectionState,
+  DefaultReconnectPolicy,
   DisconnectReason,
   RemoteAudioTrack,
   Room,
@@ -24,6 +25,8 @@ export class LiveKitMediaSession implements MediaSession {
   private wanted = new Set<string>()
   private snapshot: Snapshot | null = null
   private self = ''
+  private cancelTransition: (() => void) | null = null
+  private tracksChanged: (() => void) | null = null
   private events: MediaEvents | null = null
   private intentional = false
   private readonly audio = new Map<string, { track: RemoteAudioTrack; element: HTMLMediaElement }>()
@@ -32,7 +35,16 @@ export class LiveKitMediaSession implements MediaSession {
   constructor() {
     // The round name is an access key. SDK debug logs must not print connection URLs/tokens.
     setLogLevel('silent')
-    this.room = new Room({ adaptiveStream: true, dynacast: true, webAudioMix: true })
+    const retries = new DefaultReconnectPolicy()
+    this.room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      webAudioMix: true,
+      reconnectPolicy: {
+        nextRetryDelayInMs: (context) =>
+          this.events?.mayReconnect() === false ? null : retries.nextRetryDelayInMs(context),
+      },
+    })
     this.room.on(RoomEvent.ParticipantConnected, () => {
       this.refresh()
     })
@@ -63,10 +75,12 @@ export class LiveKitMediaSession implements MediaSession {
     this.room.on(RoomEvent.TrackSubscribed, (track, _, participant) => {
       if (this.wanted.has(participant.identity)) this.attach(track, participant.identity)
       else if (track instanceof RemoteAudioTrack) track.setVolume(0)
+      this.tracksChanged?.()
       this.people()
     })
     this.room.on(RoomEvent.TrackUnsubscribed, (track, _, participant) => {
       this.detach(track, participant.identity)
+      this.tracksChanged?.()
       this.people()
     })
     this.room.on(RoomEvent.RoomMetadataChanged, (metadata) => {
@@ -148,10 +162,40 @@ export class LiveKitMediaSession implements MediaSession {
     this.clearTracks()
   }
 
-  apply(snapshot: Snapshot, self: string): void {
+  apply(snapshot: Snapshot, self: string): Promise<void> {
+    this.cancelTransition?.()
     this.snapshot = snapshot
     this.self = self
+    // refresh detaches old audio synchronously before requesting any new subscriptions.
     this.refresh()
+    if (this.room.state !== ConnectionState.Connected || this.readyTracks())
+      return Promise.resolve()
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timeout)
+        if (this.cancelTransition === finish) {
+          this.cancelTransition = null
+          this.tracksChanged = null
+        }
+        resolve()
+      }
+      const timeout = setTimeout(finish, 500)
+      this.cancelTransition = finish
+      this.tracksChanged = () => {
+        if (this.readyTracks()) finish()
+      }
+    })
+  }
+
+  private readyTracks(): boolean {
+    for (const participant of this.room.remoteParticipants.values()) {
+      if (!this.wanted.has(participant.identity)) continue
+      for (const publication of participant.trackPublications.values()) {
+        if (publication.kind !== Track.Kind.Audio && !this.video.has(participant.identity)) continue
+        if (!publication.isMuted && publication.track === undefined) return false
+      }
+    }
+    return true
   }
 
   async microphone(enabled: boolean): Promise<void> {
@@ -215,6 +259,7 @@ export class LiveKitMediaSession implements MediaSession {
       }
     }
     for (const identity of this.video.keys()) this.refreshVideo(identity)
+    this.tracksChanged?.()
     this.people()
   }
 
@@ -282,6 +327,7 @@ export class LiveKitMediaSession implements MediaSession {
   }
 
   private clearTracks(): void {
+    this.cancelTransition?.()
     for (const { track, element } of this.audio.values()) {
       track.detach(element)
       element.remove()

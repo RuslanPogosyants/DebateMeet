@@ -53,14 +53,14 @@ def participant_credentials(
     return Credentials(ParticipantId(participant_id), secret)
 
 
-def _no_store(response: Response) -> None:
+def no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
 
 def entry_router(commands: RoundEndpoints | None, app_version: str) -> APIRouter:
     router = APIRouter(
         prefix="/api/rounds",
-        dependencies=[Depends(_no_store)],
+        dependencies=[Depends(no_store)],
         responses={status: {"model": ErrorResponse} for status in (401, 404, 409, 422, 429, 503)},
     )
 

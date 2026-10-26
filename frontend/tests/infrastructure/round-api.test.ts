@@ -58,3 +58,21 @@ describe('HTTP round boundary', () => {
     })
   })
 })
+
+it('sends the command payload without its route discriminant and retains the intent key', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(snapshot(2)))
+  vi.stubGlobal('fetch', fetch)
+  const result = await new HttpRoundApi().command(
+    ROUND_ID,
+    credentials,
+    { type: 'judge/hand-over', participantId: 'b'.repeat(12) },
+    'key',
+  )
+  expect(result.version).toBe(2)
+  expect(fetch.mock.calls[0]?.[0]).toBe(`/api/rounds/${ROUND_ID}/judge/hand-over`)
+  expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+    method: 'POST',
+    headers: { 'Idempotency-Key': 'key' },
+    body: JSON.stringify({ participantId: 'b'.repeat(12) }),
+  })
+})

@@ -49,7 +49,7 @@ WEB_LABEL = "debatemeet.web-image"
 VERSION_LABEL = "org.opencontainers.image.version"
 # Files of the bundle replaced as a whole. Directories are synced file by file and never replaced:
 # containers mount them, and a mount keeps the directory it was created with.
-BUNDLE_FILES = ("compose.yaml", "env.example", "agent.py")
+BUNDLE_FILES = ("compose.yaml", "env.example", "agent.py", "justfile")
 BUNDLE_DIRS = ("caddy", "livekit", "systemd")
 # Releases kept for rollbacks, besides the current and the previous one.
 KEEP_RELEASES = 5

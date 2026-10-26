@@ -3,6 +3,16 @@ import type { Snapshot } from '@/domain/snapshot'
 
 export type Joined = components['schemas']['JoinResponse']
 export type Credentials = { participantId: string; secret: string }
+export type LogicalRoom = components['schemas']['Room']
+export type SubRoom = Exclude<LogicalRoom, 'base'>
+export type RoundCommand =
+  | { type: 'enter'; room: LogicalRoom }
+  | { type: 'judge/claim' }
+  | { type: 'judge/release' }
+  | { type: 'judge/hand-over'; participantId: string }
+  | { type: 'recall'; room: SubRoom }
+  | { type: 'recall-all' }
+
 export type RecentRound = { id: string; visitedAt: number }
 
 export class ClientError extends Error {
@@ -22,6 +32,12 @@ export interface RoundApi {
     credentials: Credentials,
     current: Snapshot | null,
   ): Promise<Snapshot | null>
+  command(
+    roundId: string,
+    credentials: Credentials,
+    intent: RoundCommand,
+    key: string,
+  ): Promise<Snapshot>
   leave(roundId: string, credentials: Credentials, sid: string): Promise<void>
 }
 
@@ -41,6 +57,7 @@ export type MediaPerson = {
 export type DeviceSelection = { cameraId?: string; microphoneId?: string }
 export type EndReason = 'replaced' | 'left' | 'removed' | 'deleted' | 'network'
 export type MediaEvents = {
+  mayReconnect(): boolean
   snapshot(value: unknown): void
   people(value: MediaPerson[]): void
   reconnecting(): void
@@ -60,7 +77,7 @@ export interface MediaSession {
     devices?: DeviceSelection,
   ): Promise<void>
   disconnect(): Promise<void>
-  apply(snapshot: Snapshot, self: string): void
+  apply(snapshot: Snapshot, self: string): Promise<void>
   microphone(enabled: boolean): Promise<void>
   camera(enabled: boolean): Promise<void>
   startAudio(): Promise<void>
@@ -80,9 +97,18 @@ export interface Devices {
   sound(): Promise<void>
 }
 
+export interface SessionOwnership {
+  acquire(returning: boolean, lost: () => void): Promise<boolean>
+  connect(takeover: boolean, connect: () => Promise<void>): Promise<void>
+  current(): Promise<boolean>
+  owned(): boolean
+  release(): void
+}
+
 export interface Services {
   api: RoundApi
   preferences: Preferences
   devices: Devices
   media(): Promise<MediaSession>
+  ownership(roundId: string): SessionOwnership
 }

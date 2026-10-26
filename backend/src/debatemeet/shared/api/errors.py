@@ -98,6 +98,8 @@ async def _domain_error(_: Request, error: Exception) -> JSONResponse:
     status = 422 if error.code.startswith("invalid_") else 409
     if error.code == "not_judge":
         status = 403
+    elif error.code == "participant_not_found":
+        status = 404
     return error_response(status, error.code, str(error))
 
 

@@ -28,6 +28,15 @@ class DeliveryState:
     metadata_updated_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class RemovalEffect:
+    id: int
+    round_id: RoundId
+    participant_id: ParticipantId
+    attempts: int
+    revision: int = 1
+
+
 class LiveKitApi(Protocol):
     async def create_room(self, round_id: RoundId, metadata: str) -> MediaRoom: ...
 
@@ -38,6 +47,10 @@ class LiveKitApi(Protocol):
     async def send_state(self, round_id: RoundId, packet: bytes) -> None: ...
 
     async def update_metadata(self, round_id: RoundId, metadata: str) -> None: ...
+
+    async def remove_participant(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        """Remove an identity, treating an already absent participant or room as success."""
+        ...
 
     def token(self, round_id: RoundId, participant_id: ParticipantId, name: str) -> str: ...
 
@@ -60,6 +73,12 @@ class MediaStore(Protocol):
     ) -> None: ...
 
     async def maintain(self, now: datetime) -> None: ...
+
+    async def pending_effects(self, now: datetime) -> Sequence[RemovalEffect]: ...
+
+    async def effect_delivered(self, effect: RemovalEffect, at: datetime) -> None: ...
+
+    async def effect_failed(self, effect: RemovalEffect, at: datetime) -> None: ...
 
 
 class PublisherWakeup(Protocol):

@@ -61,6 +61,47 @@ export const strings = {
     browsers: 'Подойдут актуальные Chrome, Edge, Яндекс Браузер, Firefox или Safari 17 и новее.',
     anyway: 'Открыть всё равно',
     morePeople: 'Ещё участников без видео',
+    rooms: 'Комнаты',
+    whoWhere: 'Кто где',
+    closePanel: 'Закрыть',
+    closeRooms: 'Закрыть комнаты',
+    closeJudge: 'Закрыть судейскую панель',
+    emptyRoom: 'пусто',
+    currentRoom: 'Ваша комната',
+    enter: 'Перейти',
+    backToBase: '← В базу',
+    noConnection: 'нет связи',
+    noJudge: 'Судьи нет',
+    judge: 'Судья',
+    becomeJudge: 'Стать судьёй',
+    reclaimJudge: 'Взять флаг снова',
+    youJudge: 'Вы судья',
+    releaseJudge: 'Отказаться от флага',
+    handOver: 'Передать флаг…',
+    handOverConfirm: 'Передать флаг',
+    handOverTo: 'Кому передать флаг',
+    chooseParticipant: 'Выберите участника',
+    claimTitle: 'Стать судьёй?',
+    claimDescription: 'Вы сможете возвращать комнаты в базу и передавать флаг другому участнику.',
+    recallAll: 'Всех в базу',
+    recall: 'Вернуть в базу',
+    recallTitle: 'Вернуть участников в базу?',
+    recallNoUndo: 'Отмены этого действия нет. Микрофоны останутся в прежнем состоянии.',
+    cancelAction: 'Отмена',
+    returned: 'Вас вернули в базу.',
+    dismiss: 'Закрыть уведомление',
+    stillHere: 'Вы ещё здесь?',
+    stillHereDescription: 'Вы одни в раунде. Без ответа через две минуты ваша сессия закроется.',
+    stillHereAnswer: 'Да, я здесь',
+    uncertain: 'Ответ на команду не получен. Она могла выполниться; повтор проверит тот же запрос.',
+    retryCommand: 'Повторить команду',
+    judgeLeave: 'Выйти из раунда?',
+    judgeLeaveDescription: 'Флаг судьи освободится. Можно сначала передать его другому участнику.',
+    handOverAndLeave: 'Передать флаг и выйти',
+    takeoverTitle: 'Перенести сюда?',
+    takeoverDescription: 'Раунд уже открыт в другой вкладке. После переноса та сессия завершится.',
+    takeover: 'Перенести',
+    keepPreviousTab: 'Остаться в прежней вкладке',
   },
   notFound: {
     title: 'Страница не найдена',
@@ -84,6 +125,15 @@ const errors: Record<string, string> = {
   media_unavailable:
     'Не удалось подключить звонок. Проверьте сеть и повторите. На мобильном интернете попробуйте Wi-Fi.',
   network: 'Не удалось связаться с сервером. Проверьте сеть и повторите.',
+  session_replaced: 'Сессия перенесена в другую вкладку.',
+  judge_flag_taken: 'Флаг уже взял другой участник.',
+  not_judge: 'Эта команда доступна держателю флага судьи.',
+  not_connected: 'Дождитесь подключения участника к звонку.',
+  entry_in_progress: 'Другая вкладка ещё подключается. Дождитесь подключения и повторите перенос.',
+  credentials_unavailable:
+    'Не удалось подтвердить прежнюю сессию. Она продолжает работать в другой вкладке. Вернитесь туда или обновите эту страницу после сохранения данных входа.',
+  coordination_unavailable:
+    'Браузер не поддерживает безопасный перенос сессии. Используйте актуальный браузер.',
   invalid_response: 'Получен неполный ответ сервера. Обновите страницу и повторите.',
 }
 
@@ -109,3 +159,43 @@ export const endedText = {
   deleted: 'Раунд удалён.',
   network: 'Соединение прервалось. Подключитесь снова.',
 } as const
+
+export const roomNames = {
+  base: 'База',
+  og: 'OG',
+  oo: 'OO',
+  cg: 'CG',
+  co: 'CO',
+  judges: 'Судейская',
+} as const
+export const roomDescriptions = {
+  base: 'Общий зал',
+  og: 'Первое правительство',
+  oo: 'Первая оппозиция',
+  cg: 'Второе правительство',
+  co: 'Вторая оппозиция',
+  judges: 'Обсуждение судей',
+} as const
+export function recallSummary(count: number, rooms: number, includesSelf: boolean): string {
+  return `Участников: ${count}, комнат: ${rooms}${includesSelf ? ', включая вас' : ''}.`
+}
+export function flagReleased(name: string): string {
+  return `Флаг свободен: ${name} отключился`
+}
+export function enterRoom(name: string): string {
+  return `Перейти в ${name}`
+}
+export function recallRoom(name: string): string {
+  return `Вернуть ${name} в базу`
+}
+
+export function roomChangeText(
+  from: keyof typeof roomNames,
+  to: keyof typeof roomNames,
+  names: string[],
+): string {
+  const destination = to === 'base' ? 'базе' : to === 'judges' ? 'судейской' : roomNames[to]
+  return names.length === 1
+    ? `${names[0]} теперь в ${destination}.`
+    : `${roomNames[from]}: ${names.length} участников теперь в ${destination}.`
+}

@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
 from uuid import uuid4
 
@@ -13,6 +15,7 @@ from debatemeet.media.application.ports import (
     MediaStore,
     PublisherLease,
     PublisherWakeup,
+    RemovalEffect,
 )
 from debatemeet.round.application.ports import RoundReader
 from debatemeet.round.contract.snapshot import snapshot_of
@@ -21,6 +24,13 @@ from debatemeet.shared.application.errors import MediaUnavailableError, Unreadab
 
 log = structlog.get_logger(__name__)
 METADATA_INTERVAL = timedelta(seconds=2)
+REMOVAL_TIMEOUT_SECONDS = 5
+
+
+@dataclass(frozen=True, slots=True)
+class _RemovalDelivery:
+    effect: RemovalEffect
+    task: asyncio.Task[bool]
 
 
 class SnapshotPublisher:
@@ -47,9 +57,7 @@ class SnapshotPublisher:
                     if leader is None:
                         await asyncio.sleep(1)
                         continue
-                    while True:
-                        await self._publish_batch(leader)
-                        await leader.wait()
+                    await self._serve_leader(leader)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -61,6 +69,67 @@ class SnapshotPublisher:
         async with self._lease.acquire() as leader:
             if leader is not None:
                 await self._publish_batch(leader)
+                for effect in await self._store.pending_effects(self._clock.now()):
+                    await leader.assert_alive()
+                    pending = self._start_removal(effect)
+                    try:
+                        await self._finish_removal(leader, pending)
+                    finally:
+                        await self._cancel_removal(pending)
+
+    async def _serve_leader(self, leader: PublisherWakeup) -> None:
+        pending: _RemovalDelivery | None = None
+        try:
+            while True:
+                await leader.assert_alive()
+                if pending is not None and pending.task.done():
+                    await self._finish_removal(leader, pending)
+                    pending = None
+                if pending is None:
+                    effects = await self._store.pending_effects(self._clock.now())
+                    if effects:
+                        await leader.assert_alive()
+                        pending = self._start_removal(effects[0])
+                await self._publish_batch(leader)
+                # NOTIFY still wakes snapshots immediately; the one-second fallback also
+                # observes a slow removal's completion without another lease-query task.
+                if pending is None or not pending.task.done():
+                    await leader.wait()
+        finally:
+            # No SDK task outlives the lease it was launched under. Its result is not
+            # acknowledged after lease loss; a successor retries the idempotent removal.
+            if pending is not None:
+                await self._cancel_removal(pending)
+
+    def _start_removal(self, effect: RemovalEffect) -> _RemovalDelivery:
+        return _RemovalDelivery(
+            effect, asyncio.create_task(self._call_removal(effect), name="media-removal")
+        )
+
+    async def _call_removal(self, effect: RemovalEffect) -> bool:
+        # This task performs SDK I/O only. The coordinator alone uses the lease connection,
+        # so snapshot delivery and removal acknowledgements cannot overlap asyncpg queries.
+        try:
+            async with asyncio.timeout(REMOVAL_TIMEOUT_SECONDS):
+                await self._api.remove_participant(effect.round_id, effect.participant_id)
+        except MediaUnavailableError, TimeoutError:
+            return False
+        return True
+
+    async def _finish_removal(self, leader: PublisherWakeup, pending: _RemovalDelivery) -> None:
+        succeeded = await pending.task
+        await leader.assert_alive()
+        if succeeded:
+            await self._store.effect_delivered(pending.effect, self._clock.now())
+        else:
+            await self._store.effect_failed(pending.effect, self._clock.now())
+            log.warning("media_effect_retrying", operation="remove_participant")
+
+    @staticmethod
+    async def _cancel_removal(pending: _RemovalDelivery) -> None:
+        pending.task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await pending.task
 
     async def _publish_batch(self, leader: PublisherWakeup) -> None:
         await leader.assert_alive()

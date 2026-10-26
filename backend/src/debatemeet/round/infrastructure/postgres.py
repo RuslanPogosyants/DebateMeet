@@ -1,7 +1,7 @@
 """Round ports on SQLAlchemy Core: one connection and transaction per command."""
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -9,7 +9,12 @@ from sqlalchemy import RowMapping, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from debatemeet.round.application.ports import ArchivedParticipant, CommittedRound, RoundTransaction
+from debatemeet.round.application.ports import (
+    ArchivedParticipant,
+    CommittedRound,
+    MediaOutbox,
+    RoundTransaction,
+)
 from debatemeet.round.domain.ids import ParticipantId, RoundId
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.mapper import decode_round, encode_round
@@ -100,6 +105,13 @@ class _ParticipantArchive:
             {"round_id": round_id, "participant_id": participant_id, "name": name, "now": now},
         )
 
+    async def revoke(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        await self._connection.execute(
+            text("""UPDATE participants SET revoked = true
+                WHERE round_id = :round_id AND participant_id = :participant_id"""),
+            {"round_id": round_id, "participant_id": participant_id},
+        )
+
 
 class _ChangeNotifier:
     def __init__(self, connection: AsyncConnection) -> None:
@@ -112,19 +124,25 @@ class _ChangeNotifier:
 
 
 class _Transaction:
-    def __init__(self, connection: AsyncConnection) -> None:
+    def __init__(
+        self, connection: AsyncConnection, outbox_factory: Callable[[AsyncConnection], MediaOutbox]
+    ) -> None:
         self.rounds = _RoundRepository(connection)
         self.archive = _ParticipantArchive(connection)
         self.events = PostgresEventLog(connection)
         self.command_keys = PostgresCommandKeys(connection)
         self.notifier = _ChangeNotifier(connection)
+        self.media_outbox = outbox_factory(connection)
 
 
 class PostgresRounds:
     """RoundTransactions, RoundReader and SystemState over the same engine."""
 
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(
+        self, engine: AsyncEngine, outbox_factory: Callable[[AsyncConnection], MediaOutbox]
+    ) -> None:
         self._engine = engine
+        self._outbox_factory = outbox_factory
 
     @asynccontextmanager
     async def begin(self) -> AsyncIterator[RoundTransaction]:
@@ -134,7 +152,7 @@ class PostgresRounds:
                 await connection.execute(
                     text("SET LOCAL idle_in_transaction_session_timeout = '5s'")
                 )
-                yield _Transaction(connection)
+                yield _Transaction(connection, self._outbox_factory)
         except DBAPIError as error:
             # asyncpg's adapter exposes PostgreSQL SQLSTATE on its original exception.
             if getattr(error.orig, "sqlstate", None) == "55P03":

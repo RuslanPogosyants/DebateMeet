@@ -6,3 +6,11 @@ import { afterEach } from 'vitest'
 afterEach(() => {
   cleanup()
 })
+
+// Native dialog behavior is exercised by Chromium E2E; jsdom supplies no modal methods.
+HTMLDialogElement.prototype.showModal = function () {
+  this.open = true
+}
+HTMLDialogElement.prototype.close = function () {
+  this.open = false
+}
