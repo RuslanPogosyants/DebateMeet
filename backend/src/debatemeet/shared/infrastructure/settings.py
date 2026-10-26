@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # The key LiveKit signs its webhooks with; locally the one of deploy/dev/livekit.yaml.
     livekit_api_key: str
     livekit_api_secret: SecretStr
+    # Client-facing signalling address and the loopback server API are separate on servers.
+    livekit_url: str = "ws://localhost:7880"
+    livekit_server_url: str = "http://127.0.0.1:7880"
 
     @model_validator(mode="after")
     def refuse_the_dev_key_on_servers(self) -> Self:

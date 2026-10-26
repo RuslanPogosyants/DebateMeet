@@ -24,3 +24,11 @@ class RoundBusyError(Exception):
 
 class RequestConflictError(Exception):
     """An idempotency key reused with another request: 422."""
+
+
+class MediaUnavailableError(Exception):
+    """The media service did not answer; entry can be retried: 503."""
+
+
+class UnreadableRoundError(Exception):
+    """An unsupported or damaged persisted document: 503, never an implicit reset."""

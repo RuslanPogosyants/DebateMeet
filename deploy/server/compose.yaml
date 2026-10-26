@@ -50,6 +50,8 @@ services:
       DM_DATABASE_URL: postgresql+asyncpg://debatemeet:${DM_POSTGRES_PASSWORD:?}@127.0.0.1:5432/debatemeet
       DM_LIVEKIT_API_KEY: ${DM_LIVEKIT_API_KEY:?}
       DM_LIVEKIT_API_SECRET: ${DM_LIVEKIT_API_SECRET:?}
+      DM_LIVEKIT_URL: wss://${DM_LIVEKIT_DOMAIN:?}
+      DM_LIVEKIT_SERVER_URL: http://127.0.0.1:7880
     depends_on:
       postgres:
         condition: service_healthy

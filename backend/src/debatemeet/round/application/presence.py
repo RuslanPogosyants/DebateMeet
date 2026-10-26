@@ -55,6 +55,7 @@ class ConnectParticipant:
                 # commands.
                 log.warning("unknown_participant_connected", participant=participant_id)
                 return
+            now = self._clock.now()
             try:
                 round_.connect(participant_id, known.name, sid, now)
             except DomainError as refused:
@@ -81,6 +82,7 @@ class DisconnectParticipant:
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:
                 return
+            now = self._clock.now()
             round_.disconnect(participant_id, sid, now, cause=DisconnectCause.MEDIA)
             await commit_changes(tx, round_, SYSTEM, now)
 
@@ -100,10 +102,10 @@ class SyncPresence:
         if observation is None:
             log.warning("presence_not_observed")
             return
-        now = self._clock.now()
         async with self._transactions.begin() as tx:
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:
                 return
+            now = self._clock.now()
             round_.sync_presence(observation.sessions, observation.at, now)
             await commit_changes(tx, round_, SYSTEM, now)

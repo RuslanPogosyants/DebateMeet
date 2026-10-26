@@ -1,8 +1,10 @@
+import json
 import logging
 
 import structlog
 from structlog.typing import Processor
 
+from debatemeet.shared.infrastructure.redaction import RoundPathFilter, safe_exception_trace
 from debatemeet.shared.infrastructure.settings import Environment
 
 
@@ -15,11 +17,16 @@ def configure_logging(*, environment: Environment, level: str) -> None:
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
     ]
-    renderer: list[Processor] = (
-        [structlog.dev.ConsoleRenderer()]
+    renderer: list[Processor] = [
+        structlog.processors.ExceptionRenderer(
+            (lambda exc_info: json.dumps(safe_exception_trace(exc_info), ensure_ascii=False))
+            if environment == "dev"
+            else safe_exception_trace
+        ),
+        structlog.dev.ConsoleRenderer()
         if environment == "dev"
-        else [structlog.processors.dict_tracebacks, structlog.processors.JSONRenderer()]
-    )
+        else structlog.processors.JSONRenderer(),
+    ]
     structlog.configure(
         processors=[*shared, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -27,6 +34,7 @@ def configure_logging(*, environment: Environment, level: str) -> None:
         cache_logger_on_first_use=True,
     )
     handler = logging.StreamHandler()
+    handler.addFilter(RoundPathFilter())
     handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(
             foreign_pre_chain=shared,

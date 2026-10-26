@@ -38,16 +38,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create */
+        post: operations["create_api_rounds_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rounds/{round_id}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Join */
+        post: operations["join_api_rounds__round_id__join_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rounds/{round_id}/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Leave */
+        post: operations["leave_api_rounds__round_id__leave_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rounds/{round_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Snapshot */
+        get: operations["snapshot_api_rounds__round_id__snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CreateRoundResponse */
+        CreateRoundResponse: {
+            id: components["schemas"]["RoundCode"];
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /** Code */
             code: string;
             /** Message */
             message: string;
+        };
+        /** FormerHolderView */
+        FormerHolderView: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** HealthResponse */
         HealthResponse: {
@@ -59,10 +138,106 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** JoinBody */
+        JoinBody: {
+            /** Name */
+            name: string;
+            participantId?: components["schemas"]["ParticipantCode"] | null;
+            secret?: components["schemas"]["ParticipantSecret"] | null;
+        };
+        /** JoinResponse */
+        JoinResponse: {
+            participantId: components["schemas"]["ParticipantCode"];
+            secret: components["schemas"]["ParticipantSecret"] | null;
+            /** Mediaurl */
+            mediaUrl: string;
+            /** Token */
+            token: string;
+            snapshot: components["schemas"]["RoundSnapshot"];
+        };
+        /** JudgeFlagView */
+        JudgeFlagView: {
+            /** Holder */
+            holder: string | null;
+            lastHolder: components["schemas"]["FormerHolderView"] | null;
+            releasedReason: components["schemas"]["ReleaseReason"] | null;
+            /** Releasedat */
+            releasedAt: number | null;
+        };
+        /** LeaveBody */
+        LeaveBody: {
+            /** Sid */
+            sid: string;
+        };
+        ParticipantCode: string;
+        ParticipantSecret: string;
+        /** ParticipantView */
+        ParticipantView: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            room: components["schemas"]["Room"];
+            presence: components["schemas"]["PresenceView"];
+        };
+        /** PresenceView */
+        PresenceView: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "connected" | "disconnected";
+            /** Since */
+            since: number;
+        };
+        /**
+         * ReleaseReason
+         * @enum {string}
+         */
+        ReleaseReason: "by_holder" | "holder_disconnected" | "admin";
+        /**
+         * Room
+         * @description One of the six logical rooms of a round; all of them exist from the start.
+         *
+         *     `room` without a prefix is always a logical room: a LiveKit room is a MediaRoom.
+         * @enum {string}
+         */
+        Room: "base" | "og" | "oo" | "cg" | "co" | "judges";
+        RoundCode: string;
+        /** RoundSnapshot */
+        RoundSnapshot: {
+            /** Roundid */
+            roundId: string;
+            /** Epoch */
+            epoch: number;
+            /** Version */
+            version: number;
+            /** Committedat */
+            committedAt: number;
+            /** Appversion */
+            appVersion: string;
+            /** Participants */
+            participants: components["schemas"]["ParticipantView"][];
+            /** Entryclosed */
+            entryClosed: boolean;
+            judgeFlag: components["schemas"]["JudgeFlagView"];
+        };
         /** TimeResponse */
         TimeResponse: {
             /** Servertime */
             serverTime: number;
+        };
+        /** StatePacket */
+        StatePacket: {
+            /**
+             * Topic
+             * @default state
+             * @constant
+             */
+            topic: "state";
+            /** Nonce */
+            nonce: string;
+            snapshot: components["schemas"]["RoundSnapshot"];
         };
     };
     responses: never;
@@ -118,6 +293,324 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TimeResponse"];
+                };
+            };
+        };
+    };
+    create_api_rounds_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateRoundResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    join_api_rounds__round_id__join_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JoinBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    leave_api_rounds__round_id__leave_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaveBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    snapshot_api_rounds__round_id__snapshot_get: {
+        parameters: {
+            query?: {
+                epoch?: number | null;
+                since?: number | null;
+            };
+            header?: never;
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundSnapshot"];
+                };
+            };
+            /** @description Not Modified */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

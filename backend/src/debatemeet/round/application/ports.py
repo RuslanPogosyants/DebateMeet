@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
+from debatemeet.round.domain.ids import ParticipantId as ParticipantId
+from debatemeet.round.domain.ids import RoundId as RoundId
+from debatemeet.round.domain.ids import SessionId as SessionId
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.ports import CommandKeys, EventLog
 

@@ -1,4 +1,5 @@
 from livekit.api import TokenVerifier, WebhookReceiver
+from livekit.protocol.models import DisconnectReason
 
 from debatemeet.media.application.webhooks import InvalidWebhookError, MediaEvent
 
@@ -22,4 +23,10 @@ class LiveKitWebhookVerifier:
             media_room=event.room.name,
             participant_identity=event.participant.identity or None,
             participant_sid=event.participant.sid or None,
+            room_sid=event.room.sid or None,
+            disconnect_reason=(
+                DisconnectReason.Name(event.participant.disconnect_reason)
+                if event.participant.disconnect_reason
+                else None
+            ),
         )

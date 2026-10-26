@@ -50,10 +50,430 @@
           }
         }
       }
+    },
+    "/api/rounds": {
+      "post": {
+        "summary": "Create",
+        "operationId": "create_api_rounds_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRoundResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rounds/{round_id}/join": {
+      "post": {
+        "summary": "Join",
+        "operationId": "join_api_rounds__round_id__join_post",
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/rounds/{round_id}/leave": {
+      "post": {
+        "summary": "Leave",
+        "operationId": "leave_api_rounds__round_id__leave_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaveBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/rounds/{round_id}/snapshot": {
+      "get": {
+        "summary": "Snapshot",
+        "operationId": "snapshot_api_rounds__round_id__snapshot_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          },
+          {
+            "name": "epoch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Epoch"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoundSnapshot"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "304": {
+            "description": "Not Modified"
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "CreateRoundResponse": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RoundCode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "CreateRoundResponse"
+      },
       "ErrorResponse": {
         "properties": {
           "code": {
@@ -71,6 +491,24 @@
           "message"
         ],
         "title": "ErrorResponse"
+      },
+      "FormerHolderView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "FormerHolderView"
       },
       "HealthResponse": {
         "properties": {
@@ -91,6 +529,279 @@
         ],
         "title": "HealthResponse"
       },
+      "JoinBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Name"
+          },
+          "participantId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParticipantCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParticipantSecret"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "JoinBody"
+      },
+      "JoinResponse": {
+        "properties": {
+          "participantId": {
+            "$ref": "#/components/schemas/ParticipantCode"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParticipantSecret"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mediaUrl": {
+            "type": "string",
+            "title": "Mediaurl"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/RoundSnapshot"
+          }
+        },
+        "type": "object",
+        "required": [
+          "participantId",
+          "secret",
+          "mediaUrl",
+          "token",
+          "snapshot"
+        ],
+        "title": "JoinResponse"
+      },
+      "JudgeFlagView": {
+        "properties": {
+          "holder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holder"
+          },
+          "lastHolder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FormerHolderView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "releasedReason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "releasedAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Releasedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "holder",
+          "lastHolder",
+          "releasedReason",
+          "releasedAt"
+        ],
+        "title": "JudgeFlagView"
+      },
+      "LeaveBody": {
+        "properties": {
+          "sid": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Sid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sid"
+        ],
+        "title": "LeaveBody"
+      },
+      "ParticipantCode": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{12}$"
+      },
+      "ParticipantSecret": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{43}$"
+      },
+      "ParticipantView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "room": {
+            "$ref": "#/components/schemas/Room"
+          },
+          "presence": {
+            "$ref": "#/components/schemas/PresenceView"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "room",
+          "presence"
+        ],
+        "title": "ParticipantView"
+      },
+      "PresenceView": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "connected",
+              "disconnected"
+            ],
+            "title": "Status"
+          },
+          "since": {
+            "type": "integer",
+            "title": "Since"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "since"
+        ],
+        "title": "PresenceView"
+      },
+      "ReleaseReason": {
+        "type": "string",
+        "enum": [
+          "by_holder",
+          "holder_disconnected",
+          "admin"
+        ],
+        "title": "ReleaseReason"
+      },
+      "Room": {
+        "type": "string",
+        "enum": [
+          "base",
+          "og",
+          "oo",
+          "cg",
+          "co",
+          "judges"
+        ],
+        "title": "Room",
+        "description": "One of the six logical rooms of a round; all of them exist from the start.\n\n`room` without a prefix is always a logical room: a LiveKit room is a MediaRoom."
+      },
+      "RoundCode": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{22}$"
+      },
+      "RoundSnapshot": {
+        "properties": {
+          "roundId": {
+            "type": "string",
+            "title": "Roundid"
+          },
+          "epoch": {
+            "type": "integer",
+            "title": "Epoch"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "committedAt": {
+            "type": "integer",
+            "title": "Committedat"
+          },
+          "appVersion": {
+            "type": "string",
+            "title": "Appversion"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipantView"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "entryClosed": {
+            "type": "boolean",
+            "title": "Entryclosed"
+          },
+          "judgeFlag": {
+            "$ref": "#/components/schemas/JudgeFlagView"
+          }
+        },
+        "type": "object",
+        "required": [
+          "roundId",
+          "epoch",
+          "version",
+          "committedAt",
+          "appVersion",
+          "participants",
+          "entryClosed",
+          "judgeFlag"
+        ],
+        "title": "RoundSnapshot"
+      },
       "TimeResponse": {
         "properties": {
           "serverTime": {
@@ -103,6 +814,35 @@
           "serverTime"
         ],
         "title": "TimeResponse"
+      },
+      "StatePacket": {
+        "properties": {
+          "topic": {
+            "const": "state",
+            "default": "state",
+            "title": "Topic",
+            "type": "string"
+          },
+          "nonce": {
+            "title": "Nonce",
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/RoundSnapshot"
+          }
+        },
+        "required": [
+          "nonce",
+          "snapshot"
+        ],
+        "title": "StatePacket",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   }

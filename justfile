@@ -32,6 +32,7 @@ dev: up
 
 # Run the backend with reload on :8000; LiveKit reaches it through host.docker.internal
 dev-backend:
+    cd backend && uv run python -m debatemeet.migrate
     cd backend && uv run uvicorn debatemeet.main:create_app --factory --reload --host 0.0.0.0 --port 8000
 
 # Run Vite on :5173; it proxies /api to the backend on :8000
@@ -44,6 +45,10 @@ test: up
     python3 -m unittest discover -s deploy/server/tests
     cd backend && uv run pytest
     cd frontend && pnpm test
+
+# Built application, real Postgres/LiveKit and Chromium with fake camera/microphone
+test-e2e: up
+    cd frontend && pnpm test:e2e
 
 # Linters, type checks and layer rules
 lint:

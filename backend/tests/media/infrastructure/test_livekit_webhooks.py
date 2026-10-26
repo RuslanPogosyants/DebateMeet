@@ -4,7 +4,7 @@ import hashlib
 import pytest
 from google.protobuf.json_format import MessageToJson
 from livekit import api
-from livekit.protocol.models import ParticipantInfo, Room
+from livekit.protocol.models import DisconnectReason, ParticipantInfo, Room
 from livekit.protocol.webhook import WebhookEvent
 
 from bots import dev
@@ -72,3 +72,23 @@ def test_a_token_signed_with_another_secret_is_rejected() -> None:
 def test_a_webhook_without_a_token_is_rejected() -> None:
     with pytest.raises(InvalidWebhookError):
         VERIFIER.verify(PARTICIPANT_JOINED, "")
+
+
+def test_room_sid_and_disconnect_reason_survive_verification() -> None:
+    body = body_of(
+        WebhookEvent(
+            event="participant_left",
+            id="EV_replaced",
+            room=Room(name="round-1", sid="RM_new"),
+            participant=ParticipantInfo(
+                identity="participant-1",
+                sid="PA_old",
+                disconnect_reason=DisconnectReason.DUPLICATE_IDENTITY,
+            ),
+        )
+    )
+
+    event = VERIFIER.verify(body, signed(body))
+
+    assert event.room_sid == "RM_new"
+    assert event.disconnect_reason == "DUPLICATE_IDENTITY"
