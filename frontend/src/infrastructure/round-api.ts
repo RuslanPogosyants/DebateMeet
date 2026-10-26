@@ -30,6 +30,17 @@ export class HttpRoundApi implements RoundApi {
     return value
   }
 
+  async time(): Promise<number> {
+    const value = await this.accepted(await this.request('/api/time'))
+    if (
+      !record(value) ||
+      typeof value.serverTime !== 'number' ||
+      !Number.isSafeInteger(value.serverTime)
+    )
+      throw new ClientError('invalid_response')
+    return value.serverTime
+  }
+
   async healthy(): Promise<boolean> {
     try {
       return (await this.request('/api/health')).ok
@@ -113,6 +124,16 @@ export class HttpRoundApi implements RoundApi {
       },
       body: JSON.stringify(payload),
     })
+    if (response.status === 404) {
+      const error = await this.accepted(response).catch((failure: unknown) => failure)
+      if (error instanceof ClientError && error.code === 'not_found') {
+        // An older compatible backend may lack this command while the round still exists.
+        const existing = await this.snapshot(roundId, credentials, null)
+        if (existing === null) throw new ClientError('invalid_response')
+        throw new ClientError('command_unavailable')
+      }
+      throw error instanceof Error ? error : new ClientError('invalid_response')
+    }
     const snapshot = readSnapshot(await this.accepted(response), roundId)
     if (snapshot === null) throw new ClientError('invalid_response')
     return snapshot

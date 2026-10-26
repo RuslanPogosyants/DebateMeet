@@ -393,10 +393,16 @@ async def test_startup_retries_a_busy_round_without_stopping_healthy_delivery(
             await eventually(healthy_update_delivered, seconds=2)
 
         async def revoked_connection_removed() -> bool:
-            return sdk.removed == [(busy_id, removed)]
+            async with media_engine.connect() as connection:
+                delivered = await connection.scalar(
+                    text("""SELECT count(*) FROM media_outbox
+                        WHERE round_id = :round_id AND participant_id = :participant_id
+                          AND delivered_at IS NOT NULL"""),
+                    {"round_id": busy_id, "participant_id": removed},
+                )
+            return sdk.removed == [(busy_id, removed)] and delivered == 1
 
         await eventually(revoked_connection_removed, seconds=4)
-        assert await store.pending_effects(T0) == []
     finally:
         await runtime.close()
 

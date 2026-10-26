@@ -4,6 +4,7 @@ import type { Snapshot } from '@/domain/snapshot'
 export type Joined = components['schemas']['JoinResponse']
 export type Credentials = { participantId: string; secret: string }
 export type LogicalRoom = components['schemas']['Room']
+export type TimerKind = components['schemas']['TimerKind']
 export type SubRoom = Exclude<LogicalRoom, 'base'>
 export type RoundCommand =
   | { type: 'enter'; room: LogicalRoom }
@@ -12,6 +13,12 @@ export type RoundCommand =
   | { type: 'judge/hand-over'; participantId: string }
   | { type: 'recall'; room: SubRoom }
   | { type: 'recall-all' }
+  | {
+      type: `timers/${TimerKind}/start` | `timers/${TimerKind}/pause` | `timers/${TimerKind}/reset`
+    }
+  | { type: `timers/${TimerKind}/set`; remainingMs: number }
+  | { type: `timers/${TimerKind}/configure`; durationMs: number }
+  | { type: 'speech/next' | 'speech/undo' }
 
 export type RecentRound = { id: string; visitedAt: number }
 
@@ -24,6 +31,7 @@ export class ClientError extends Error {
 }
 
 export interface RoundApi {
+  time(): Promise<number>
   healthy(): Promise<boolean>
   create(): Promise<string>
   join(roundId: string, name: string, credentials: Credentials | null): Promise<Joined>
@@ -105,8 +113,25 @@ export interface SessionOwnership {
   release(): void
 }
 
+export interface ClientClock {
+  now(): number
+  wallNow(): number
+}
+
+export type TimerCue = { id: string; delayMs: number }
+export type TimerAudioState = 'running' | 'blocked' | 'closed'
+export type TimerAudioEvents = { state(value: TimerAudioState): void }
+export interface TimerAudio {
+  resume(): Promise<boolean>
+  replace(cues: readonly TimerCue[]): void
+  silence(): void
+  close(): void
+}
+
 export interface Services {
   api: RoundApi
+  clientClock: ClientClock
+  timerAudio(events: TimerAudioEvents): TimerAudio
   preferences: Preferences
   devices: Devices
   media(): Promise<MediaSession>

@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import { SubscriptionManager } from './subscription-manager'
+import { TimerSession } from './timer-session'
 import { AloneWatchdog } from './alone-watchdog'
 import { readSnapshot, type Snapshot } from '@/domain/snapshot'
 import {
@@ -33,6 +34,7 @@ export type RoundState = {
 }
 
 export class RoundController {
+  readonly timers: TimerSession
   readonly store = createStore<RoundState>(() => ({
     stage: 'prejoin',
     snapshot: null,
@@ -80,11 +82,15 @@ export class RoundController {
     this.roundId = roundId
     this.services = services
     this.ownership = services.ownership(roundId)
+    this.timers = new TimerSession(services.api, services.clientClock, (events) =>
+      services.timerAudio(events),
+    )
   }
 
   private async accept(value: unknown, ownCommand = false): Promise<void> {
     const next = readSnapshot(value, this.roundId)
     if (next === null) return
+    this.timers.accept(next)
     const generation = this.generation
     if (
       !(await this.subscriptions.apply(next, this.credentials?.participantId ?? null, this.session))
@@ -132,6 +138,8 @@ export class RoundController {
     this.credentials = this.services.preferences.credentials(this.roundId)
     const generation = ++this.generation
     this.store.setState({ stage: 'joining', error: null, ended: null, deviceError: null })
+    this.timers.start()
+    this.timers.resume()
     try {
       const acquired = await this.ownership.acquire(this.credentials !== null, () =>
         this.ownershipLost(),
@@ -150,6 +158,7 @@ export class RoundController {
       if (generation !== this.generation) return
       await this.session?.disconnect()
       this.session = null
+      this.timers.close()
       this.ownership.release()
       this.store.setState({
         stage: 'prejoin',
@@ -162,12 +171,15 @@ export class RoundController {
     if (this.store.getState().stage !== 'transfer') return
     const generation = ++this.generation
     this.store.setState({ stage: 'joining', error: null })
+    this.timers.start()
+    this.timers.resume()
     try {
       await this.connect(generation, true)
     } catch (error) {
       if (generation !== this.generation) return
       await this.session?.disconnect()
       this.session = null
+      this.timers.close()
       this.ownership.release()
       this.store.setState({
         stage: 'prejoin',
@@ -177,10 +189,12 @@ export class RoundController {
   }
 
   cancelTransfer(): void {
+    this.timers.close()
     this.store.setState({ stage: 'prejoin' })
   }
 
   private ownershipLost(): void {
+    this.timers.close()
     ++this.generation
     this.stopPolling()
     this.stopAlone()
@@ -201,6 +215,7 @@ export class RoundController {
     const expectedIdentity = takeover ? this.credentials?.participantId : null
     if (takeover && expectedIdentity === undefined) throw new ClientError('credentials_unavailable')
     if (!takeover && !(await this.ownership.current())) throw new ClientError('session_replaced')
+    this.timers.start()
     const joined = await this.services.api.join(this.roundId, this.name, this.credentials)
     if (generation !== this.generation) return
     if (takeover && joined.participantId !== expectedIdentity)
@@ -253,6 +268,7 @@ export class RoundController {
             reconnected: () => {
               if (!connected || generation !== this.generation) return
               this.store.setState({ stage: 'connected' })
+              this.timers.foreground()
               void this.refresh()
             },
             ended: (reason) => {
@@ -293,6 +309,8 @@ export class RoundController {
   }
 
   private async disconnected(reason: EndReason): Promise<void> {
+    if (reason === 'network') this.timers.suspend()
+    else this.timers.close()
     const generation = ++this.generation
     if (reason === 'network' && this.pendingIntent !== null)
       this.store.setState({ commandPending: false, commandUncertain: true })
@@ -324,6 +342,7 @@ export class RoundController {
     } catch (error) {
       if (generation !== this.generation) return
       const code = error instanceof ClientError ? error.code : 'media_unavailable'
+      this.timers.close()
       this.store.setState({
         stage: 'left',
         ended: code === 'participant_removed' ? 'removed' : 'network',
@@ -436,11 +455,16 @@ export class RoundController {
   }
 
   async startAudio(): Promise<void> {
+    this.timers.resume()
     try {
       await this.session?.startAudio()
     } catch (deviceError) {
       this.store.setState({ deviceError })
     }
+  }
+
+  foreground(): void {
+    this.timers.foreground()
   }
 
   attachVideo(identity: string, element: HTMLVideoElement): () => void {
@@ -467,6 +491,7 @@ export class RoundController {
   }
 
   async leave(reason: EndReason = 'left'): Promise<void> {
+    this.timers.close()
     this.pageHidden()
     this.ownership.release()
     ++this.generation
@@ -488,6 +513,7 @@ export class RoundController {
   }
 
   dispose(): void {
+    this.timers.close()
     this.pageHidden()
     this.ownership.release()
     ++this.generation

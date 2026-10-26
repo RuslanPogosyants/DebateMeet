@@ -1,4 +1,4 @@
-"""Participant room commands share authorization, idempotency and the round transaction."""
+"""Round commands share authorization, idempotency and the round transaction."""
 
 import hashlib
 import json
@@ -16,6 +16,7 @@ from debatemeet.round.application.ports import (
 from debatemeet.round.application.presence import reconcile_observation
 from debatemeet.round.domain.ids import ParticipantId, RoundId
 from debatemeet.round.domain.room import Room
+from debatemeet.round.domain.timer import TimerKind
 from debatemeet.shared.application.clock import Clock
 from debatemeet.shared.application.errors import (
     NotFoundError,
@@ -55,10 +56,62 @@ class RecallAll:
     pass
 
 
-type RoundCommand = Enter | ClaimJudge | ReleaseJudge | HandOverJudge | Recall | RecallAll
+@dataclass(frozen=True, slots=True)
+class StartTimer:
+    kind: TimerKind
+
+
+@dataclass(frozen=True, slots=True)
+class PauseTimer:
+    kind: TimerKind
+
+
+@dataclass(frozen=True, slots=True)
+class ResetTimer:
+    kind: TimerKind
+
+
+@dataclass(frozen=True, slots=True)
+class SetTimer:
+    kind: TimerKind
+    remaining_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigureTimer:
+    kind: TimerKind
+    duration_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class NextSpeech:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class UndoNextSpeech:
+    pass
+
+
+type RoundCommand = (
+    Enter
+    | ClaimJudge
+    | ReleaseJudge
+    | HandOverJudge
+    | Recall
+    | RecallAll
+    | StartTimer
+    | PauseTimer
+    | ResetTimer
+    | SetTimer
+    | ConfigureTimer
+    | NextSpeech
+    | UndoNextSpeech
+)
 
 
 def _request_hash(command: RoundCommand) -> str:
+    payload: dict[str, str | int]
     match command:
         case Enter(room):
             operation, payload = "enter", {"room": str(room)}
@@ -72,6 +125,20 @@ def _request_hash(command: RoundCommand) -> str:
             operation, payload = "recall", {"room": str(room)}
         case RecallAll():
             operation, payload = "recall-all", {}
+        case StartTimer(kind):
+            operation, payload = f"timers/{kind}/start", {}
+        case PauseTimer(kind):
+            operation, payload = f"timers/{kind}/pause", {}
+        case ResetTimer(kind):
+            operation, payload = f"timers/{kind}/reset", {}
+        case SetTimer(kind, remaining_ms):
+            operation, payload = f"timers/{kind}/set", {"remainingMs": remaining_ms}
+        case ConfigureTimer(kind, duration_ms):
+            operation, payload = f"timers/{kind}/configure", {"durationMs": duration_ms}
+        case NextSpeech():
+            operation, payload = "speech/next", {}
+        case UndoNextSpeech():
+            operation, payload = "speech/undo", {}
     canonical = json.dumps([operation, payload], sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -135,6 +202,20 @@ class ExecuteRoundCommand:
                         round_.recall(actor, room, now)
                     case RecallAll():
                         round_.recall_all(actor, now)
+                    case StartTimer(kind):
+                        round_.start_timer(actor, kind, now)
+                    case PauseTimer(kind):
+                        round_.pause_timer(actor, kind, now)
+                    case ResetTimer(kind):
+                        round_.reset_timer(actor, kind, now)
+                    case SetTimer(kind, remaining_ms):
+                        round_.set_timer(actor, kind, remaining_ms, now)
+                    case ConfigureTimer(kind, duration_ms):
+                        round_.configure_timer(actor, kind, duration_ms, now)
+                    case NextSpeech():
+                        round_.next_speech(actor, now)
+                    case UndoNextSpeech():
+                        round_.undo_next_speech(actor, now)
                 await commit_changes(tx, round_, actor, now)
         committed = await self._reader.committed(round_id)
         if committed is None:

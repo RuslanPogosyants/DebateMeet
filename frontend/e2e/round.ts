@@ -50,29 +50,59 @@ export async function mediaSid(page: Page, identity: string): Promise<string | n
   return null
 }
 
-export async function snapshot(page: Page): Promise<Snapshot> {
+async function requestSnapshot(
+  page: Page,
+  operation: string,
+  body: Record<string, unknown> | null,
+): Promise<Snapshot> {
   const roundId = new URL(page.url()).pathname.split('/').at(-1) ?? ''
-  const value: unknown = await page.evaluate(async (id) => {
-    const raw: unknown = JSON.parse(localStorage.getItem(`debatemeet.credentials.${id}`) ?? 'null')
-    if (
-      raw === null ||
-      typeof raw !== 'object' ||
-      !('participantId' in raw) ||
-      !('secret' in raw) ||
-      typeof raw.participantId !== 'string' ||
-      typeof raw.secret !== 'string'
-    )
-      throw new Error('Participant credentials are unavailable')
-    const response = await fetch(`/api/rounds/${id}/snapshot`, {
-      headers: { Authorization: `Bearer ${raw.participantId}.${raw.secret}` },
-    })
-    if (!response.ok) throw new Error(`Snapshot returned ${response.status}`)
-    const body: unknown = await response.json()
-    return body
-  }, roundId)
+  const value: unknown = await page.evaluate(
+    async ({ id, operation: action, body: payload }) => {
+      const raw: unknown = JSON.parse(
+        localStorage.getItem(`debatemeet.credentials.${id}`) ?? 'null',
+      )
+      if (
+        raw === null ||
+        typeof raw !== 'object' ||
+        !('participantId' in raw) ||
+        !('secret' in raw) ||
+        typeof raw.participantId !== 'string' ||
+        typeof raw.secret !== 'string'
+      )
+        throw new Error('Participant credentials are unavailable')
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${raw.participantId}.${raw.secret}`,
+      }
+      if (payload !== null) {
+        headers['Content-Type'] = 'application/json'
+        headers['Idempotency-Key'] = crypto.randomUUID()
+      }
+      const response = await fetch(`/api/rounds/${id}/${action}`, {
+        method: payload === null ? 'GET' : 'POST',
+        headers,
+        body: payload === null ? undefined : JSON.stringify(payload),
+      })
+      if (!response.ok) throw new Error(`${action} returned ${response.status}`)
+      const result: unknown = await response.json()
+      return result
+    },
+    { id: roundId, operation, body },
+  )
   const parsed = readSnapshot(value, roundId)
   if (parsed === null) throw new Error('Invalid round snapshot')
   return parsed
+}
+
+export function snapshot(page: Page): Promise<Snapshot> {
+  return requestSnapshot(page, 'snapshot', null)
+}
+
+export function command(
+  page: Page,
+  operation: string,
+  body: Record<string, unknown> = {},
+): Promise<Snapshot> {
+  return requestSnapshot(page, operation, body)
 }
 
 export async function join(page: Page, name: string) {

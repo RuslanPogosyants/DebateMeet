@@ -11,6 +11,9 @@ import type {
   RoundCommand,
   Services,
   SessionOwnership,
+  TimerAudio,
+  TimerAudioEvents,
+  TimerCue,
 } from '@/application/ports'
 
 export const ROUND_ID = 'r'.repeat(22)
@@ -69,6 +72,9 @@ export class FakeApi implements RoundApi {
     snapshot: snapshot(),
   }
   failure: Error | null = null
+  time() {
+    return Promise.resolve(Date.now())
+  }
   healthy() {
     return Promise.resolve(true)
   }
@@ -171,13 +177,47 @@ export class FakeOwnership implements SessionOwnership {
   }
 }
 
+export class FakeTimerAudio implements TimerAudio {
+  readonly events: TimerAudioEvents
+  plans: readonly TimerCue[][] = []
+  resumes = 0
+  silences = 0
+  closed = 0
+  constructor(events: TimerAudioEvents) {
+    this.events = events
+  }
+  resume() {
+    this.resumes += 1
+    this.events.state('running')
+    return Promise.resolve(true)
+  }
+  replace(cues: readonly TimerCue[]) {
+    this.plans = [...this.plans, [...cues]]
+  }
+  silence() {
+    this.silences += 1
+    this.replace([])
+  }
+  close() {
+    this.closed += 1
+    this.events.state('closed')
+  }
+}
+
 export function fixture() {
   const api = new FakeApi()
   const preferences = new MemoryPreferences()
   const media: FakeMedia[] = []
   const ownership = new FakeOwnership()
+  const timerAudio: FakeTimerAudio[] = []
   const services: Services = {
     api,
+    clientClock: { now: () => Date.now(), wallNow: () => Date.now() },
+    timerAudio: (events) => {
+      const audio = new FakeTimerAudio(events)
+      timerAudio.push(audio)
+      return audio
+    },
     preferences,
     devices: new FakeDevices(),
     ownership: () => ownership,
@@ -187,5 +227,5 @@ export function fixture() {
       return Promise.resolve(session)
     },
   }
-  return { api, preferences, media, services, ownership }
+  return { api, preferences, media, services, ownership, timerAudio }
 }

@@ -6,11 +6,13 @@ export function Sheet({
   closeLabel = strings.round.closePanel,
   onClose,
   children,
+  pinned,
 }: {
   title: string
   closeLabel?: string
   onClose: () => void
   children: ReactNode
+  pinned?: ReactNode
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const close = useRef<HTMLButtonElement>(null)
@@ -49,6 +51,7 @@ export function Sheet({
           {strings.round.closePanel}
         </button>
       </header>
+      {pinned && <div className="sheet-pinned">{pinned}</div>}
       <div className="sheet-content">{children}</div>
     </dialog>
   )

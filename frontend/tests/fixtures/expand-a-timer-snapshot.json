@@ -1,0 +1,58 @@
+{
+  "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+  "epoch": 9,
+  "version": 17,
+  "committedAt": 1790704810000,
+  "appVersion": "compat-expand-a",
+  "participants": [
+    {
+      "id": "aaaaaaaaaaaa",
+      "name": "Алиса",
+      "room": "base",
+      "presence": {
+        "status": "connected",
+        "since": 1790704800000
+      }
+    },
+    {
+      "id": "bbbbbbbbbbbb",
+      "name": "Борис",
+      "room": "oo",
+      "presence": {
+        "status": "connected",
+        "since": 1790704800000
+      }
+    }
+  ],
+  "entryClosed": false,
+  "judgeFlag": {
+    "holder": "aaaaaaaaaaaa",
+    "lastHolder": null,
+    "releasedReason": null,
+    "releasedAt": null
+  },
+  "timers": {
+    "prep": {
+      "durationMs": 1234567,
+      "status": "running",
+      "endsAt": 1790704924456,
+      "remainingMs": null
+    },
+    "speech": {
+      "durationMs": 765432,
+      "status": "running",
+      "endsAt": 1790705457321,
+      "remainingMs": null
+    }
+  },
+  "speechNo": 2,
+  "speechUndo": {
+    "speechNo": 1,
+    "timer": {
+      "durationMs": 765432,
+      "status": "running",
+      "endsAt": 1790705301123,
+      "remainingMs": null
+    }
+  }
+}

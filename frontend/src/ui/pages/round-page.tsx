@@ -9,6 +9,7 @@ import { RoomMap, RoomNavigation, JudgeControl } from '@/ui/components/round-too
 import { useMeetingLayout } from '@/ui/use-meeting-layout'
 import { ConfirmDialog } from '@/ui/components/confirm-dialog'
 import { DevicePreview } from '@/ui/components/device-preview'
+import { RoundTimers, TimerHealth } from '@/ui/components/round-timers'
 import { useServices } from '@/ui/services'
 import {
   deviceErrorText,
@@ -217,6 +218,7 @@ function Meeting({ controller }: { controller: RoundController }) {
         <JudgeControl controller={controller} panel={layout === 'narrow'} />
         <CopyLink />
       </header>
+      <TimerHealth controller={controller} />
       {state.stage === 'reconnecting' && (
         <p className="meeting-banner" role="status">
           {strings.round.reconnecting}
@@ -226,20 +228,6 @@ function Meeting({ controller }: { controller: RoundController }) {
         <p className="meeting-banner" role="status">
           {strings.round.unavailable}
         </p>
-      )}
-      {state.playbackBlocked && (
-        <div className="meeting-banner" role="alert">
-          <span>{strings.round.playback}</span>
-          <button
-            className="action"
-            type="button"
-            onClick={() => {
-              void controller.startAudio()
-            }}
-          >
-            {strings.round.enableAudio}
-          </button>
-        </div>
       )}
       {state.deviceError !== null && (
         <p className="meeting-banner" role="alert">
@@ -286,6 +274,7 @@ function Meeting({ controller }: { controller: RoundController }) {
         </div>
       )}
       {layout !== 'full' && <RoomNavigation controller={controller} layout={layout} />}
+      <RoundTimers controller={controller} layout={layout} />
       <div className={`meeting-workspace${layout !== 'full' ? ' meeting-workspace-compact' : ''}`}>
         {layout === 'full' && <RoomMap controller={controller} />}
         <div className="meeting-scene">
@@ -415,9 +404,16 @@ export function RoundPage() {
     const hide = () => {
       controller.pageHidden()
     }
+    const foreground = () => {
+      if (document.visibilityState === 'visible') controller.foreground()
+    }
     window.addEventListener('pagehide', hide)
+    window.addEventListener('pageshow', foreground)
+    document.addEventListener('visibilitychange', foreground)
     return () => {
       window.removeEventListener('pagehide', hide)
+      window.removeEventListener('pageshow', foreground)
+      document.removeEventListener('visibilitychange', foreground)
       controller.dispose()
     }
   }, [controller])

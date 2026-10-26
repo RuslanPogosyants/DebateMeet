@@ -22,8 +22,14 @@ export function ConfirmDialog({
   const dialog = useRef<HTMLDialogElement>(null)
   const safe = useRef<HTMLButtonElement>(null)
   useEffect(() => {
-    dialog.current?.showModal()
+    const element = dialog.current
+    const previous = document.activeElement
+    element?.showModal()
     safe.current?.focus()
+    return () => {
+      element?.close()
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
   }, [])
   return (
     <dialog

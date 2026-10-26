@@ -1,6 +1,6 @@
 """The Round aggregate: everything behind a link but the chat (docs/architecture.md, section 3).
 
-Entry, presence, rooms and the judge flag share this aggregate. Timers, motion, hands and the drum
+Entry, presence, rooms, timers and the judge flag share this aggregate. Motion, hands and the drum
 arrive with their slices. Every command starts by evicting whoever has been absent too long:
 eviction is lazy, it happens on any command of the round.
 """
@@ -23,6 +23,14 @@ from debatemeet.round.domain.events import (
     ParticipantRemoved,
     ParticipantsRecalled,
     RoundCreated,
+    SpeechAdvanced,
+    SpeechAdvanceUndone,
+    TimerConfigured,
+    TimerPaused,
+    TimerReset,
+    TimerSet,
+    TimerStarted,
+    timer_state,
 )
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
@@ -38,8 +46,10 @@ from debatemeet.round.domain.room import SUBROOMS, Room
 from debatemeet.round.domain.timer import (
     DEFAULT_PREP_MS,
     DEFAULT_SPEECH_MS,
+    JS_MAX_SAFE_INTEGER,
     SpeechUndo,
     Timer,
+    TimerKind,
     TimerStatus,
 )
 from debatemeet.shared.domain.errors import DomainError
@@ -261,6 +271,99 @@ class Round:
         self._evict_absent(now)
         if self.judge_flag.holder is not None:
             self._release_flag(self.participants[self.judge_flag.holder], ReleaseReason.ADMIN, now)
+
+    def start_timer(self, actor: ParticipantId, kind: TimerKind, now: datetime) -> None:
+        previous = self._timer_for_judge(actor, kind, now)
+        timer = previous.start(now)
+        if timer == previous:
+            return
+        self._set_timer(kind, timer)
+        self._record(TimerStarted(at=now, kind=kind, timer=timer_state(timer)))
+
+    def pause_timer(self, actor: ParticipantId, kind: TimerKind, now: datetime) -> None:
+        previous = self._timer_for_judge(actor, kind, now)
+        timer = previous.pause(now)
+        if timer == previous:
+            return
+        self._set_timer(kind, timer)
+        self._record(TimerPaused(at=now, kind=kind, timer=timer_state(timer)))
+
+    def reset_timer(self, actor: ParticipantId, kind: TimerKind, now: datetime) -> None:
+        previous = self._timer_for_judge(actor, kind, now)
+        timer = previous.reset()
+        if timer == previous:
+            return
+        self._set_timer(kind, timer)
+        self._record(TimerReset(at=now, kind=kind, timer=timer_state(timer)))
+
+    def set_timer(
+        self, actor: ParticipantId, kind: TimerKind, remaining_ms: int, now: datetime
+    ) -> None:
+        previous = self._timer_for_judge(actor, kind, now)
+        timer = previous.set(remaining_ms, now)
+        if timer == previous:
+            return
+        self._set_timer(kind, timer)
+        self._record(TimerSet(at=now, kind=kind, timer=timer_state(timer)))
+
+    def configure_timer(
+        self, actor: ParticipantId, kind: TimerKind, duration_ms: int, now: datetime
+    ) -> None:
+        previous = self._timer_for_judge(actor, kind, now)
+        maximum = 1_800_000 if kind is TimerKind.PREP else 900_000
+        if type(duration_ms) is not int or not 60_000 <= duration_ms <= maximum:
+            raise DomainError("invalid_timer_value")
+        timer = Timer(duration_ms, TimerStatus.STOPPED, None, duration_ms)
+        if timer == previous:
+            return
+        self._set_timer(kind, timer)
+        self._record(TimerConfigured(at=now, kind=kind, timer=timer_state(timer)))
+
+    def next_speech(self, actor: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        self._judge(actor)
+        if type(self.speech_no) is not int or not 1 <= self.speech_no < JS_MAX_SAFE_INTEGER:
+            raise DomainError("invalid_timer_value")
+        previous = SpeechUndo(self.speech_no, self.speech_timer)
+        self.speech_undo = previous
+        self.speech_no += 1
+        self.speech_timer = self.speech_timer.reset()
+        self._record(
+            SpeechAdvanced(
+                at=now,
+                previous_speech_no=previous.speech_no,
+                previous_timer=timer_state(previous.timer),
+                speech_no=self.speech_no,
+            )
+        )
+
+    def undo_next_speech(self, actor: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        self._judge(actor)
+        previous = self.speech_undo
+        if previous is None:
+            return
+        self.speech_no = previous.speech_no
+        self.speech_timer = previous.timer
+        self.speech_undo = None
+        self._record(
+            SpeechAdvanceUndone(
+                at=now, speech_no=self.speech_no, timer=timer_state(self.speech_timer)
+            )
+        )
+
+    def _timer_for_judge(self, actor: ParticipantId, kind: TimerKind, now: datetime) -> Timer:
+        self._evict_absent(now)
+        self._judge(actor)
+        if not isinstance(kind, TimerKind):
+            raise DomainError("invalid_timer_value")
+        return self.prep_timer if kind is TimerKind.PREP else self.speech_timer
+
+    def _set_timer(self, kind: TimerKind, timer: Timer) -> None:
+        if kind is TimerKind.PREP:
+            self.prep_timer = timer
+        else:
+            self.speech_timer = timer
 
     def admin_remove_participant(self, participant_id: ParticipantId, now: datetime) -> None:
         """The use case checked the archive and revokes its secret in the same transaction.
