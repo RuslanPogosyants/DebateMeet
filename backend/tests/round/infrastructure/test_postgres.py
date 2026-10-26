@@ -29,9 +29,11 @@ from debatemeet.round.application.room_commands import (
     ExecuteRoundCommand,
     RecallAll,
 )
+from debatemeet.round.contract.snapshot import snapshot_of
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.presence import Connected
 from debatemeet.round.domain.room import Room
+from debatemeet.round.domain.timer import SpeechUndo, Timer, TimerStatus
 from debatemeet.round.infrastructure.postgres import PostgresRounds
 from debatemeet.shared.application.errors import (
     RequestConflictError,
@@ -539,3 +541,122 @@ async def test_recall_and_enter_follow_the_serialized_order(
     expected = Room.OO if recall_first else Room.BASE
     assert current.round.participants[person.participant_id].room is expected
     assert current.round.judge_flag.holder == judge.participant_id
+
+
+async def test_readonly_timer_state_survives_sql_and_an_existing_room_command(world: World) -> None:
+    round_id = await world.create(IP)
+    person = await connected_person(world, round_id, "Alice")
+    prep = Timer(1800000, TimerStatus.RUNNING, at(100), None)
+    speech = Timer(60000, TimerStatus.PAUSED, None, -1500)
+    previous = SpeechUndo(2, Timer(300000, TimerStatus.RUNNING, at(-2), None))
+    async with world.rounds.begin() as tx:
+        round_ = await tx.rounds.get_for_update(round_id)
+        assert round_ is not None
+        round_.prep_timer = prep
+        round_.speech_timer = speech
+        round_.speech_no = 3
+        round_.speech_undo = previous
+        await tx.rounds.save(round_, T0)
+
+    committed = await world.command(round_id, credentials_of(person), str(uuid4()), Enter(Room.CO))
+    loaded = await world.rounds.committed(round_id)
+    assert loaded is not None
+    assert loaded.round.prep_timer == prep
+    assert loaded.round.speech_timer == speech
+    assert loaded.round.speech_no == 3
+    assert loaded.round.speech_undo == previous
+    assert loaded.round.participants[person.participant_id].room is Room.CO
+    assert loaded.round.version == committed.round.version
+    snapshot = snapshot_of(
+        loaded.round, epoch=loaded.epoch, committed_at=loaded.committed_at, app_version="A"
+    )
+    assert snapshot.timers.prep.ends_at == int(at(100).timestamp() * 1000)
+    assert snapshot.timers.speech.remaining_ms == -1500
+    assert snapshot.speech_no == 3
+    assert snapshot.speech_undo is not None
+    assert snapshot.speech_undo.timer.ends_at == int(at(-2).timestamp() * 1000)
+
+
+async def test_legacy_sql_document_gains_timer_defaults_on_a_room_write(world: World) -> None:
+    round_id = await world.create(IP)
+    person = await connected_person(world, round_id, "Alice")
+    async with world.engine.begin() as connection:
+        await connection.execute(
+            text("""UPDATE rounds SET state = state - 'timers' - 'speech_no' - 'speech_undo'
+                WHERE id = :id"""),
+            {"id": round_id},
+        )
+
+    committed = await world.command(round_id, credentials_of(person), str(uuid4()), Enter(Room.OG))
+
+    assert committed.round.participants[person.participant_id].room is Room.OG
+    assert committed.round.prep_timer == Timer(900000, TimerStatus.STOPPED, None, 900000)
+    assert committed.round.speech_timer == Timer(420000, TimerStatus.STOPPED, None, 420000)
+    assert committed.round.speech_no == 1
+    assert committed.round.speech_undo is None
+    async with world.engine.connect() as connection:
+        has_extension = await connection.scalar(
+            text("""SELECT state ?& ARRAY['timers', 'speech_no', 'speech_undo']
+                FROM rounds WHERE id = :id"""),
+            {"id": round_id},
+        )
+    assert has_extension is True
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        """UPDATE rounds SET state =
+            jsonb_set(state, '{timers,speech,remaining_ms}', 'true'::jsonb) WHERE id = :id""",
+        "UPDATE rounds SET state = state - 'speech_undo' WHERE id = :id",
+    ],
+)
+async def test_corrupt_timer_sql_returns_503_and_never_resets_state_or_claims_a_key(
+    world: World, mutation: str
+) -> None:
+    round_id = await world.create(IP)
+    person = await connected_person(world, round_id, "Alice")
+    async with world.engine.begin() as connection:
+        await connection.execute(
+            text(mutation),
+            {"id": round_id},
+        )
+    async with world.engine.connect() as connection:
+        before = await connection.scalar(
+            text("SELECT state::text FROM rounds WHERE id = :id"), {"id": round_id}
+        )
+    before_keys = await world.number("SELECT count(*) FROM command_keys")
+    app = build_app(
+        clock=world.clock,
+        health_probe=StubHealthProbe(),
+        webhook_verifier=StubWebhookVerifier(),
+        media_events=RecordingMediaEvents(),
+        version="A",
+        round_commands=RoundEndpoints(
+            world.create,
+            world.join,
+            LeaveRound(world.rounds, world.clock, world.rounds, world.limits),
+            ReadSnapshot(world.rounds),
+        ),
+        room_commands=world.command,
+    )
+    credentials = credentials_of(person)
+    headers = {
+        "Authorization": f"Bearer {credentials.participant_id}.{credentials.secret}",
+        "Idempotency-Key": str(uuid4()),
+    }
+    async with http_client(app) as client:
+        read = await client.get(f"/api/rounds/{round_id}/snapshot", headers=headers)
+        command = await client.post(
+            f"/api/rounds/{round_id}/enter", json={"room": "og"}, headers=headers
+        )
+    for response in (read, command):
+        assert response.status_code == 503
+        assert response.json()["code"] == "round_unreadable"
+        assert response.headers["cache-control"] == "no-store"
+    async with world.engine.connect() as connection:
+        after = await connection.scalar(
+            text("SELECT state::text FROM rounds WHERE id = :id"), {"id": round_id}
+        )
+    assert before == after
+    assert await world.number("SELECT count(*) FROM command_keys") == before_keys

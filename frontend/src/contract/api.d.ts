@@ -341,11 +341,41 @@ export interface components {
             /** Entryclosed */
             entryClosed: boolean;
             judgeFlag: components["schemas"]["JudgeFlagView"];
+            timers: components["schemas"]["TimersView"];
+            /** Speechno */
+            speechNo: number;
+            speechUndo: components["schemas"]["SpeechUndoView"] | null;
+        };
+        /** SpeechUndoView */
+        SpeechUndoView: {
+            /** Speechno */
+            speechNo: number;
+            timer: components["schemas"]["TimerView"];
         };
         /** TimeResponse */
         TimeResponse: {
             /** Servertime */
             serverTime: number;
+        };
+        /**
+         * TimerStatus
+         * @enum {string}
+         */
+        TimerStatus: "stopped" | "running" | "paused";
+        /** TimerView */
+        TimerView: {
+            /** Durationms */
+            durationMs: number;
+            status: components["schemas"]["TimerStatus"];
+            /** Endsat */
+            endsAt: number | null;
+            /** Remainingms */
+            remainingMs: number | null;
+        };
+        /** TimersView */
+        TimersView: {
+            prep: components["schemas"]["TimerView"];
+            speech: components["schemas"]["TimerView"];
         };
         /** StatePacket */
         StatePacket: {

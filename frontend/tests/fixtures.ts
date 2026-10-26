@@ -31,6 +31,12 @@ export function snapshot(version = 1, epoch = 1): Snapshot {
       { id: SELF, name: 'Вика', room: 'base', presence: { status: 'pending', since: 1000 } },
     ],
     judgeFlag: { holder: null, lastHolder: null, releasedReason: null, releasedAt: null },
+    timers: {
+      prep: { durationMs: 900000, status: 'stopped', endsAt: null, remainingMs: 900000 },
+      speech: { durationMs: 420000, status: 'stopped', endsAt: null, remainingMs: 420000 },
+    },
+    speechNo: 1,
+    speechUndo: null,
   }
 }
 

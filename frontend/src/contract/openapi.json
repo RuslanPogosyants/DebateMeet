@@ -1590,6 +1590,23 @@
           },
           "judgeFlag": {
             "$ref": "#/components/schemas/JudgeFlagView"
+          },
+          "timers": {
+            "$ref": "#/components/schemas/TimersView"
+          },
+          "speechNo": {
+            "type": "integer",
+            "title": "Speechno"
+          },
+          "speechUndo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpeechUndoView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -1601,9 +1618,29 @@
           "appVersion",
           "participants",
           "entryClosed",
-          "judgeFlag"
+          "judgeFlag",
+          "timers",
+          "speechNo",
+          "speechUndo"
         ],
         "title": "RoundSnapshot"
+      },
+      "SpeechUndoView": {
+        "properties": {
+          "speechNo": {
+            "type": "integer",
+            "title": "Speechno"
+          },
+          "timer": {
+            "$ref": "#/components/schemas/TimerView"
+          }
+        },
+        "type": "object",
+        "required": [
+          "speechNo",
+          "timer"
+        ],
+        "title": "SpeechUndoView"
       },
       "TimeResponse": {
         "properties": {
@@ -1617,6 +1654,72 @@
           "serverTime"
         ],
         "title": "TimeResponse"
+      },
+      "TimerStatus": {
+        "type": "string",
+        "enum": [
+          "stopped",
+          "running",
+          "paused"
+        ],
+        "title": "TimerStatus"
+      },
+      "TimerView": {
+        "properties": {
+          "durationMs": {
+            "type": "integer",
+            "title": "Durationms"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TimerStatus"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endsat"
+          },
+          "remainingMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remainingms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "durationMs",
+          "status",
+          "endsAt",
+          "remainingMs"
+        ],
+        "title": "TimerView"
+      },
+      "TimersView": {
+        "properties": {
+          "prep": {
+            "$ref": "#/components/schemas/TimerView"
+          },
+          "speech": {
+            "$ref": "#/components/schemas/TimerView"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prep",
+          "speech"
+        ],
+        "title": "TimersView"
       },
       "StatePacket": {
         "properties": {

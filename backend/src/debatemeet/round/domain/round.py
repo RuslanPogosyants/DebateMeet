@@ -35,6 +35,13 @@ from debatemeet.round.domain.presence import (
     absent_since,
 )
 from debatemeet.round.domain.room import SUBROOMS, Room
+from debatemeet.round.domain.timer import (
+    DEFAULT_PREP_MS,
+    DEFAULT_SPEECH_MS,
+    SpeechUndo,
+    Timer,
+    TimerStatus,
+)
 from debatemeet.shared.domain.errors import DomainError
 from debatemeet.shared.domain.events import DomainEvent
 
@@ -62,6 +69,16 @@ class Round:
     # Closed entry refuses new participants; a returning one comes in. Only the admin changes it.
     entry_closed: bool = False
     judge_flag: JudgeFlag = field(default_factory=JudgeFlag)
+    prep_timer: Timer = field(
+        default_factory=lambda: Timer(DEFAULT_PREP_MS, TimerStatus.STOPPED, None, DEFAULT_PREP_MS)
+    )
+    speech_timer: Timer = field(
+        default_factory=lambda: Timer(
+            DEFAULT_SPEECH_MS, TimerStatus.STOPPED, None, DEFAULT_SPEECH_MS
+        )
+    )
+    speech_no: int = 1
+    speech_undo: SpeechUndo | None = None
     # Set by the repository: every committed command moves it by one.
     version: int = 0
     _events: list[DomainEvent] = field(default_factory=list, init=False, repr=False)
