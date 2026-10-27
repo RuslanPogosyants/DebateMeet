@@ -6,6 +6,8 @@ nothing loudly: a rule that says no is logged. Duplicates are cut by the event i
 same in every repeat of a webhook.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 import structlog
@@ -25,6 +27,19 @@ from debatemeet.shared.application.ports import SYSTEM, KeyClaim
 from debatemeet.shared.domain.errors import DomainError
 
 log = structlog.get_logger(__name__)
+
+
+class _MissingRoundError(Exception):
+    """Roll back a webhook receipt without asking LiveKit to retry a deleted round."""
+
+
+@asynccontextmanager
+async def _media_transaction(transactions: RoundTransactions) -> AsyncIterator[RoundTransaction]:
+    try:
+        async with transactions.begin() as tx:
+            yield tx
+    except _MissingRoundError:
+        pass
 
 
 async def _first_time(
@@ -61,13 +76,13 @@ class ConnectParticipant:
         self, round_id: RoundId, participant_id: ParticipantId, sid: SessionId, event_id: str
     ) -> None:
         now = self._clock.now()
-        async with self._transactions.begin() as tx:
+        async with _media_transaction(self._transactions) as tx:
             if not await _first_time(tx, round_id, event_id, now):
                 return
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:
                 log.warning("media_event_without_round", event_id=event_id)
-                return
+                raise _MissingRoundError
             known = await tx.archive.find(round_id, participant_id)
             if known is None or known.revoked:
                 now = self._clock.now()
@@ -95,12 +110,12 @@ class DisconnectParticipant:
         self, round_id: RoundId, participant_id: ParticipantId, sid: SessionId, event_id: str
     ) -> None:
         now = self._clock.now()
-        async with self._transactions.begin() as tx:
+        async with _media_transaction(self._transactions) as tx:
             if not await _first_time(tx, round_id, event_id, now):
                 return
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:
-                return
+                raise _MissingRoundError
             now = self._clock.now()
             round_.disconnect(participant_id, sid, now, cause=DisconnectCause.MEDIA)
             await commit_changes(tx, round_, SYSTEM, now)

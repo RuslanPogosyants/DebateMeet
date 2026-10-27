@@ -47,6 +47,17 @@ class RemovalEffect:
 
 
 @dataclass(frozen=True, slots=True)
+class DeleteRoomEffect:
+    id: int
+    round_id: RoundId
+    attempts: int
+    revision: int = 1
+
+
+type RemovalDeliveryEffect = RemovalEffect | DeleteRoomEffect
+
+
+@dataclass(frozen=True, slots=True)
 class PacketEffect:
     id: int
     round_id: RoundId
@@ -82,7 +93,7 @@ class ControlEffect:
         return self.created_at + CONTROL_LIFETIME
 
 
-type MediaEffect = RemovalEffect | PacketEffect | ControlEffect
+type MediaEffect = RemovalDeliveryEffect | PacketEffect | ControlEffect
 
 
 class LiveKitApi(Protocol):
@@ -106,7 +117,11 @@ class LiveKitApi(Protocol):
 
     async def create_room(self, round_id: RoundId, metadata: str) -> MediaRoom: ...
 
-    async def rooms(self) -> Sequence[MediaRoom]: ...
+    async def rooms(self, round_ids: Sequence[RoundId] | None = None) -> Sequence[MediaRoom]: ...
+
+    async def delete_room(self, round_id: RoundId) -> None:
+        """Close the room and its participants; an already absent room is success."""
+        ...
 
     async def participants(self, round_id: RoundId) -> Mapping[ParticipantId, SessionId]: ...
 
@@ -138,9 +153,17 @@ class MediaStore(Protocol):
         """Persist an exactly confirmed result before any notice delivery."""
         ...
 
-    async def started(self, round_id: RoundId, room_sid: str) -> None:
-        """Register a new media room, resetting delivery only when its SID changed."""
+    async def started(self, round_id: RoundId, room_sid: str, now: datetime | None = None) -> bool:
+        """Register a live round or rearm cleanup of a deleted one; false if it is absent."""
         ...
+
+    async def deleted_rounds(
+        self, after_round: RoundId | None, limit: int = 100
+    ) -> Sequence[RoundId]: ...
+
+    async def rearm_deleted(
+        self, round_ids: Sequence[RoundId], now: datetime | None = None
+    ) -> None: ...
 
     async def finished(self, round_id: RoundId, room_sid: str) -> None:
         """Clear only the matching room: a late close must not close its replacement."""
@@ -157,6 +180,12 @@ class MediaStore(Protocol):
     async def maintain(self, now: datetime) -> None: ...
 
     async def pending_effects(self, now: datetime) -> Sequence[RemovalEffect]: ...
+
+    async def next_removal(
+        self, now: datetime, after_round: RoundId | None
+    ) -> RemovalDeliveryEffect | None:
+        """One ready removal after the round cursor, wrapping once; retries are not FIFO."""
+        ...
 
     async def packet_heads(self, now: datetime) -> Sequence[PacketEffect]:
         """Eligible first undelivered packet per round; a waiting retry blocks its successors."""

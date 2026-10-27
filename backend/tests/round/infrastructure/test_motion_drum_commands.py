@@ -20,13 +20,13 @@ from debatemeet.round.chat.application.post_message import PostMessage
 from debatemeet.round.chat.domain.message import Message
 from debatemeet.round.chat.infrastructure.postgres import PostgresMessages
 from debatemeet.round.chat.infrastructure.transactions import (
-    CHAT_NAMESPACE,
     PostgresChatTransactions,
     PostgresMessageRepository,
     PostgresSystemMessages,
 )
 from debatemeet.round.domain.timer import TimerKind, TimerStatus
 from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
+from debatemeet.shared.infrastructure.lifecycle import ROUND_LIFECYCLE_NAMESPACE
 from tests.media.livekit import eventually
 from tests.round.infrastructure.test_postgres import IP, World, connected_person, credentials_of
 from tests.round.infrastructure.test_postgres import world as world
@@ -151,7 +151,7 @@ async def test_draw_waits_for_chat_guard_before_round_lock_while_timer_progresse
                         WHERE locktype='advisory' AND NOT granted AND classid=:namespace
                         AND database=(SELECT oid FROM pg_database
                             WHERE datname=current_database())"""),
-                    {"namespace": CHAT_NAMESPACE},
+                    {"namespace": ROUND_LIFECYCLE_NAMESPACE},
                 )
                 return count == 1
 

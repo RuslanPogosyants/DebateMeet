@@ -15,13 +15,14 @@ from debatemeet.media.application.control_delivery import (
     ControlResult,
 )
 from debatemeet.media.application.ports import (
+    DeleteRoomEffect,
     LiveKitApi,
     MediaRoomMissingError,
     MediaStore,
     PacketEffect,
     PublisherLease,
     PublisherWakeup,
-    RemovalEffect,
+    RemovalDeliveryEffect,
 )
 from debatemeet.round.application.ports import ChatPacketReader, RoundId, RoundReader
 from debatemeet.round.contract.snapshot import snapshot_of
@@ -38,7 +39,7 @@ MAX_PACKET_TASKS = 2
 
 @dataclass(frozen=True, slots=True)
 class _EffectDelivery:
-    effect: RemovalEffect | PacketEffect
+    effect: RemovalDeliveryEffect | PacketEffect
     task: asyncio.Task[bool]
 
 
@@ -82,7 +83,13 @@ class SnapshotPublisher:
         async with self._lease.acquire() as leader:
             if leader is not None:
                 await self._publish_batch(leader)
-                for effect in await self._store.pending_effects(self._clock.now()):
+                after_round: RoundId | None = None
+                visited: set[int] = set()
+                while effect := await self._store.next_removal(self._clock.now(), after_round):
+                    if effect.id in visited:
+                        break
+                    visited.add(effect.id)
+                    after_round = effect.round_id
                     await leader.assert_alive()
                     pending = self._start_removal(effect)
                     try:
@@ -111,6 +118,7 @@ class SnapshotPublisher:
 
     async def _serve_leader(self, leader: PublisherWakeup) -> None:
         removal: _EffectDelivery | None = None
+        last_removal_round: RoundId | None = None
         packets: dict[RoundId, _EffectDelivery] = {}
         last_round: RoundId | None = None
         control: ControlDelivery | None = None
@@ -132,10 +140,11 @@ class SnapshotPublisher:
                     control = await self._controls.finish(leader, control)
                     progressed = True
                 if removal is None:
-                    effects = await self._store.pending_effects(self._clock.now())
-                    if effects:
+                    effect = await self._store.next_removal(self._clock.now(), last_removal_round)
+                    if effect is not None:
                         await leader.assert_alive()
-                        removal = self._start_removal(effects[0])
+                        last_removal_round = effect.round_id
+                        removal = self._start_removal(effect)
                 if len(packets) < MAX_PACKET_TASKS:
                     heads = [
                         head
@@ -203,7 +212,7 @@ class SnapshotPublisher:
             if control is not None:
                 await self._cancel_delivery(control)
 
-    def _start_removal(self, effect: RemovalEffect) -> _EffectDelivery:
+    def _start_removal(self, effect: RemovalDeliveryEffect) -> _EffectDelivery:
         return _EffectDelivery(
             effect, asyncio.create_task(self._call_removal(effect), name="media-removal")
         )
@@ -233,10 +242,15 @@ class SnapshotPublisher:
             effect, asyncio.create_task(self._call_packet(effect, payload), name="media-packet")
         )
 
-    async def _call_removal(self, effect: RemovalEffect) -> bool:
+    async def _call_removal(self, effect: RemovalDeliveryEffect) -> bool:
         try:
             async with asyncio.timeout(REMOVAL_TIMEOUT_SECONDS):
-                await self._api.remove_participant(effect.round_id, effect.participant_id)
+                if isinstance(effect, DeleteRoomEffect):
+                    await self._api.delete_room(effect.round_id)
+                else:
+                    await self._api.remove_participant(effect.round_id, effect.participant_id)
+        except MediaRoomMissingError:
+            return True
         except MediaUnavailableError, TimeoutError:
             return False
         return True
@@ -256,11 +270,11 @@ class SnapshotPublisher:
             await self._store.effect_delivered(pending.effect, self._clock.now())
         else:
             await self._store.effect_failed(pending.effect, self._clock.now())
-            operation = (
-                "publish_packet"
-                if isinstance(pending.effect, PacketEffect)
-                else "remove_participant"
-            )
+            operation = "remove_participant"
+            if isinstance(pending.effect, PacketEffect):
+                operation = "publish_packet"
+            elif isinstance(pending.effect, DeleteRoomEffect):
+                operation = "delete_room"
             log.warning("media_effect_retrying", operation=operation)
 
     @staticmethod

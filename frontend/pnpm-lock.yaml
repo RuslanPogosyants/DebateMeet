@@ -165,6 +165,9 @@ settings:
 overrides:
   why-is-node-running: 3.2.1
 
+patchedDependencies:
+  livekit-client@2.22.3: c365661f39a5f68e733ae16125dcac2498793a4dfcd5b139f3a0c43b96765396
+
 importers:
 
   .:
@@ -186,7 +189,7 @@ importers:
         version: 2.1.1
       livekit-client:
         specifier: ^2.22.3
-        version: 2.22.3(@types/dom-mediacapture-record@1.0.22)
+        version: 2.22.3(patch_hash=c365661f39a5f68e733ae16125dcac2498793a4dfcd5b139f3a0c43b96765396)(@types/dom-mediacapture-record@1.0.22)
       openapi-fetch:
         specifier: ^0.17.0
         version: 0.17.0
@@ -2473,7 +2476,7 @@ snapshots:
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
 
-  livekit-client@2.22.3(@types/dom-mediacapture-record@1.0.22):
+  livekit-client@2.22.3(patch_hash=c365661f39a5f68e733ae16125dcac2498793a4dfcd5b139f3a0c43b96765396)(@types/dom-mediacapture-record@1.0.22):
     dependencies:
       '@livekit/mutex': 1.1.1
       '@livekit/protocol': 1.50.4

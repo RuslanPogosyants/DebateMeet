@@ -27,6 +27,7 @@ from debatemeet.round.domain.round import SOFT_LIMIT
 from debatemeet.shared.application.errors import (
     NotFoundError,
     RateLimitedError,
+    RoundBusyError,
     UnauthorizedError,
 )
 from tests.fakes import FixedClock
@@ -72,6 +73,37 @@ def world() -> World:
 
 
 class TestCreateRound:
+    async def test_a_link_collision_is_retried_without_spending_another_rate_limit(
+        self, world: World
+    ) -> None:
+        first = await world.create(IP)
+        world.random.issued = 0
+
+        second = await world.create(IP)
+
+        assert second != first
+        assert len(world.rounds.store.rounds) == 2
+        assert len(world.rounds.store.log) == 2
+        assert world.limits.hits == [f"create_round:{IP}"] * 2
+
+    async def test_a_broken_random_source_has_a_bounded_number_of_retries(
+        self, world: World
+    ) -> None:
+        first = await world.create(IP)
+
+        class RepeatingRandom(SequentialRandom):
+            def token(self, size: int) -> str:
+                self.issued += 1
+                return first
+
+        broken = RepeatingRandom()
+        create = CreateRound(world.rounds, world.clock, broken, world.limits)
+        with pytest.raises(RoundBusyError):
+            await create(IP)
+
+        assert broken.issued == 3
+        assert len(world.rounds.store.rounds) == len(world.rounds.store.log) == 1
+
     async def test_a_round_starts_empty_at_version_one(self, world: World) -> None:
         round_id = await world.create(IP)
 

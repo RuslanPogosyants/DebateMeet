@@ -77,6 +77,7 @@ class TestConnect:
         await world.connect(RoundId("R" * 22), ParticipantId("p" * 12), S1, "EV_1")
 
         assert world.rounds.store.rounds == {}
+        assert world.rounds.store.keys == {}
 
     async def test_a_participant_back_from_the_archive_takes_the_archived_name(self) -> None:
         world, round_id, vika = await a_round_with_vika()
@@ -88,6 +89,14 @@ class TestConnect:
 
 
 class TestDisconnect:
+    async def test_a_late_leave_for_a_missing_round_keeps_no_receipt(self) -> None:
+        world = PresenceWorld()
+
+        await world.disconnect(RoundId("R" * 22), ParticipantId("p" * 12), S1, "EV_late")
+
+        assert world.rounds.store.keys == {}
+        assert world.rounds.store.log == []
+
     async def test_the_session_closes(self) -> None:
         world, round_id, vika = await a_round_with_vika()
         await world.connect(round_id, vika, S1, "EV_1")

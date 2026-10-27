@@ -29,17 +29,12 @@ from debatemeet.round.chat.infrastructure.postgres import _epoch, _message
 from debatemeet.shared.application.errors import NotFoundError
 from debatemeet.shared.application.ports import ADMIN, SYSTEM
 from debatemeet.shared.infrastructure.database import command_transaction
+from debatemeet.shared.infrastructure.lifecycle import acquire_round_lifecycle
 from debatemeet.shared.infrastructure.persistence import PostgresCommandKeys, PostgresEventLog
-
-CHAT_NAMESPACE = 1145917526
 
 
 async def prepare_chat(connection: AsyncConnection, round_id: RoundId) -> None:
-    # Two-int advisory locks occupy a different keyspace from the publisher's bigint lock.
-    await connection.execute(
-        text("SELECT pg_advisory_xact_lock(:namespace, hashtext(:round_id))"),
-        {"namespace": CHAT_NAMESPACE, "round_id": round_id},
-    )
+    await acquire_round_lifecycle(connection, round_id)
     if (
         await connection.scalar(
             text("SELECT 1 FROM rounds WHERE id=:round_id"), {"round_id": round_id}

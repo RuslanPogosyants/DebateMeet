@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from bots import dev
 from bots.bot import delete_media_room, livekit_api
 from debatemeet.media.application.gateway import RoundMediaGateway
-from debatemeet.media.application.ports import MediaEffect, MediaRoom
+from debatemeet.media.application.ports import MediaEffect, MediaRoom, MediaRoomMissingError
 from debatemeet.media.application.publisher import SnapshotPublisher
 from debatemeet.media.application.webhooks import HandleMediaEvent
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
@@ -331,29 +331,47 @@ async def test_restart_delivers_other_round_removal_despite_unreadable_state(
         await runtime.close()
 
 
-@pytest.mark.parametrize("unobserved_once", [False, True])
+@pytest.mark.parametrize(
+    ("unobserved_once", "next_sid"),
+    [(False, "RM_old"), (True, "RM_old"), (False, "RM_new"), (False, None)],
+    ids=["same", "same-unobserved", "replaced", "disappeared"],
+)
 async def test_startup_retries_a_busy_round_without_stopping_healthy_delivery(
     media_engine: AsyncEngine,
     unobserved_once: bool,
+    next_sid: str | None,
 ) -> None:
     busy_id, rounds = await seed(media_engine)
     healthy, _ = await seed(media_engine)
     removed = ParticipantId("removed-one")
-    clock, store = FixedClock(T0), PostgresMediaStore(media_engine)
-    await store.started(busy_id, "RM_busy")
-    await store.started(healthy, "RM_healthy")
-    async with rounds.begin() as tx:
-        await tx.archive.add(busy_id, removed, "Alice", b"hash", T0)
-        await tx.archive.revoke(busy_id, removed)
     busy_seen, healthy_delivered, observation_failed = (
         asyncio.Event(),
         asyncio.Event(),
         asyncio.Event(),
     )
+
+    class ObservedStore(PostgresMediaStore):
+        async def started(
+            self, round_id: RoundId, room_sid: str, now: datetime | None = None
+        ) -> bool:
+            try:
+                return await super().started(round_id, room_sid, now)
+            except RoundBusyError:
+                busy_seen.set()
+                raise
+
+    clock, store = FixedClock(T0), ObservedStore(media_engine)
+    await store.started(busy_id, "RM_old")
+    await store.started(healthy, "RM_healthy")
+    async with rounds.begin() as tx:
+        await tx.archive.add(busy_id, removed, "Alice", b"hash", T0)
+        await tx.archive.revoke(busy_id, removed)
     healthy_versions: list[int] = []
 
     class RecoveryApi(FakeApi):
         async def participants(self, round_id: RoundId) -> Mapping[ParticipantId, SessionId]:
+            if round_id == busy_id and busy_seen.is_set() and next_sid is None:
+                raise MediaRoomMissingError
             if (
                 round_id == busy_id
                 and unobserved_once
@@ -371,7 +389,7 @@ async def test_startup_retries_a_busy_round_without_stopping_healthy_delivery(
                 healthy_delivered.set()
 
     sdk = RecoveryApi()
-    sdk.media_rooms = [MediaRoom(busy_id, "RM_busy"), MediaRoom(healthy, "RM_healthy")]
+    sdk.media_rooms = [MediaRoom(busy_id, "RM_old"), MediaRoom(healthy, "RM_healthy")]
     gateway = RoundMediaGateway(rounds, sdk, store, clock, "ws://media.test", "test")
 
     class ObservedSync(SyncPresence):
@@ -410,6 +428,11 @@ async def test_startup_retries_a_busy_round_without_stopping_healthy_delivery(
             await runtime.start()
             await asyncio.wait_for(busy_seen.wait(), 4)
             await asyncio.wait_for(healthy_delivered.wait(), 1)
+            # Registration actually reached PostgreSQL's lock_timeout. Replace or
+            # remove the SDK room before releasing that same blocking transaction.
+            sdk.media_rooms = [MediaRoom(healthy, "RM_healthy")]
+            if next_sid is not None:
+                sdk.media_rooms.append(MediaRoom(busy_id, next_sid))
 
         if unobserved_once:
             await asyncio.wait_for(observation_failed.wait(), 2)
@@ -434,7 +457,38 @@ async def test_startup_retries_a_busy_round_without_stopping_healthy_delivery(
                 )
             return sdk.removed == [(busy_id, removed)] and delivered == 1
 
-        await eventually(revoked_connection_removed, seconds=4)
+        if next_sid is None:
+
+            async def room_disappeared() -> bool:
+                return all(state.round_id != busy_id for state in await store.active())
+
+            await eventually(room_disappeared, seconds=4)
+            assert sdk.removed == []
+            async with media_engine.connect() as connection:
+                assert (
+                    await connection.scalar(
+                        text("SELECT count(*) FROM media_outbox WHERE round_id=:id"),
+                        {"id": busy_id},
+                    )
+                    == 0
+                )
+        else:
+            await eventually(revoked_connection_removed, seconds=4)
+            current = next(state for state in await store.active() if state.round_id == busy_id)
+            assert current.room_sid == next_sid
+
+            async def registration_progressed() -> bool:
+                current = next(state for state in await store.active() if state.round_id == busy_id)
+                return current.data_version == 1 and current.metadata_version == 1
+
+            await eventually(registration_progressed, seconds=2)
+            if next_sid != "RM_old":
+                current = next(state for state in await store.active() if state.round_id == busy_id)
+                await store.finished(busy_id, "RM_old")
+                assert (
+                    next(state for state in await store.active() if state.round_id == busy_id)
+                    == current
+                )
     finally:
         await runtime.close()
 

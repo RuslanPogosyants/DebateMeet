@@ -3,6 +3,7 @@
 !package.json
 !pnpm-lock.yaml
 !pnpm-workspace.yaml
+!patches/
 !index.html
 !vite.config.ts
 !tsconfig*.json

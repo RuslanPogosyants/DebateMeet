@@ -45,12 +45,24 @@ class LiveKitApiAdapter:
             raise MediaUnavailableError from error
         return MediaRoom(RoundId(room.name), room.sid)
 
-    async def rooms(self) -> Sequence[MediaRoom]:
+    async def rooms(self, round_ids: Sequence[RoundId] | None = None) -> Sequence[MediaRoom]:
         try:
-            response = await self._api().room.list_rooms(api.ListRoomsRequest())
+            response = await self._api().room.list_rooms(
+                api.ListRoomsRequest(names=list(round_ids) if round_ids is not None else [])
+            )
         except (api.TwirpError, aiohttp.ClientError, TimeoutError) as error:
             raise MediaUnavailableError from error
         return [MediaRoom(RoundId(room.name), room.sid) for room in response.rooms]
+
+    async def delete_room(self, round_id: RoundId) -> None:
+        try:
+            await self._api().room.delete_room(api.DeleteRoomRequest(room=round_id))
+        except api.TwirpError as error:
+            if error.code == "not_found":
+                return
+            raise MediaUnavailableError from error
+        except (aiohttp.ClientError, TimeoutError) as error:
+            raise MediaUnavailableError from error
 
     async def participants(self, round_id: RoundId) -> Mapping[ParticipantId, SessionId]:
         try:

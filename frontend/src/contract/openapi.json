@@ -3725,10 +3725,319 @@
           }
         }
       }
+    },
+    "/api/rounds/{round_id}/telemetry": {
+      "post": {
+        "summary": "Telemetry",
+        "operationId": "telemetry_api_rounds__round_id__telemetry_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelemetryBatchBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/rounds/{round_id}/client-errors": {
+      "post": {
+        "summary": "Client Errors",
+        "operationId": "client_errors_api_rounds__round_id__client_errors_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientErrorsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "BatchId": {
+        "type": "string",
+        "format": "uuid4"
+      },
+      "ClientErrorView": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/Phase"
+          },
+          "class": {
+            "$ref": "#/components/schemas/ErrorClass"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/CodeFrameView"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Frames"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "phase",
+          "class",
+          "frames"
+        ],
+        "title": "ClientErrorView"
+      },
+      "ClientErrorsBody": {
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schemaversion"
+          },
+          "batchId": {
+            "$ref": "#/components/schemas/BatchId"
+          },
+          "clientSessionId": {
+            "$ref": "#/components/schemas/BatchId"
+          },
+          "appVersion": {
+            "type": "string",
+            "pattern": "^(?:dev|test|[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]{12}(?:-dirty)?)$",
+            "title": "Appversion"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ClientErrorView"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Errors"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProblemReportView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "batchId",
+          "clientSessionId",
+          "appVersion",
+          "errors",
+          "report"
+        ],
+        "title": "ClientErrorsBody"
+      },
+      "CodeFrameView": {
+        "properties": {
+          "asset": {
+            "type": "string",
+            "maxLength": 160,
+            "pattern": "^(?:index|[A-Za-z0-9_-]+)-[A-Za-z0-9_-]{8,64}\\.js$",
+            "title": "Asset"
+          },
+          "line": {
+            "type": "integer",
+            "maximum": 10000000.0,
+            "minimum": 1.0,
+            "title": "Line"
+          },
+          "column": {
+            "type": "integer",
+            "maximum": 10000000.0,
+            "minimum": 1.0,
+            "title": "Column"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "asset",
+          "line",
+          "column"
+        ],
+        "title": "CodeFrameView"
+      },
       "ConfigureDrumBody": {
         "properties": {
           "enabled": {
@@ -3785,6 +4094,47 @@
         "type": "string",
         "pattern": "^(0|[1-9][0-9]{0,18})$"
       },
+      "DiagnosticClockView": {
+        "properties": {
+          "synchronized": {
+            "type": "boolean",
+            "title": "Synchronized"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "ageMs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionDuration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uncertaintyMs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "synchronized",
+          "degraded",
+          "ageMs",
+          "uncertaintyMs"
+        ],
+        "title": "DiagnosticClockView"
+      },
       "DrawResultView": {
         "properties": {
           "position": {
@@ -3823,6 +4173,27 @@
           "drawNo"
         ],
         "title": "DrawnPositionView"
+      },
+      "DroppedView": {
+        "properties": {
+          "records": {
+            "$ref": "#/components/schemas/SafeInt"
+          },
+          "errors": {
+            "$ref": "#/components/schemas/SafeInt"
+          },
+          "events": {
+            "$ref": "#/components/schemas/SafeInt"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "records",
+          "errors",
+          "events"
+        ],
+        "title": "DroppedView"
       },
       "DrumView": {
         "properties": {
@@ -3869,6 +4240,11 @@
         ],
         "title": "DrumView"
       },
+      "Duration": {
+        "type": "number",
+        "maximum": 86400000.0,
+        "minimum": 0.0
+      },
       "EmptyCommandBody": {
         "properties": {},
         "additionalProperties": false,
@@ -3887,6 +4263,29 @@
           "room"
         ],
         "title": "EnterBody"
+      },
+      "ErrorClass": {
+        "type": "string",
+        "enum": [
+          "Error",
+          "TypeError",
+          "RangeError",
+          "DOMException",
+          "unknown"
+        ]
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "unexpected_error",
+          "unhandled_rejection",
+          "preload_error",
+          "media_unavailable",
+          "device_unavailable",
+          "playback_blocked",
+          "control_unavailable",
+          "diagnostics_unavailable"
+        ]
       },
       "ErrorResponse": {
         "properties": {
@@ -4096,6 +4495,206 @@
         ],
         "title": "LeaveBody"
       },
+      "MediaRecordView": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "media",
+            "title": "Kind"
+          },
+          "elapsedMs": {
+            "$ref": "#/components/schemas/SessionDuration"
+          },
+          "observedMs": {
+            "type": "number",
+            "maximum": 7500.0,
+            "minimum": 0.0,
+            "title": "Observedms"
+          },
+          "unknownMs": {
+            "$ref": "#/components/schemas/SessionDuration"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/Quality"
+          },
+          "playbackAllowed": {
+            "type": "boolean",
+            "title": "Playbackallowed"
+          },
+          "wantedAudio": {
+            "type": "integer",
+            "maximum": 40.0,
+            "minimum": 0.0,
+            "title": "Wantedaudio"
+          },
+          "attachedAudio": {
+            "type": "integer",
+            "maximum": 40.0,
+            "minimum": 0.0,
+            "title": "Attachedaudio"
+          },
+          "decodedActiveAudio": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 40.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decodedactiveaudio"
+          },
+          "jitterMs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rtt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audioRtcpRttMs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rtt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "iceRttMs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Rtt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receivedPacketsDelta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafeInt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lostPacketsDelta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafeInt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receivedBytesDelta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafeInt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bitrateBps": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bitratebps"
+          },
+          "candidateType": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "host",
+                  "srflx",
+                  "prflx",
+                  "relay"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidatetype"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "udp",
+                  "tcp",
+                  "tls"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "qualityLimitation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "cpu",
+                  "bandwidth",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualitylimitation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "elapsedMs",
+          "observedMs",
+          "unknownMs",
+          "quality",
+          "playbackAllowed",
+          "wantedAudio",
+          "attachedAudio",
+          "decodedActiveAudio",
+          "jitterMs",
+          "audioRtcpRttMs",
+          "iceRttMs",
+          "receivedPacketsDelta",
+          "lostPacketsDelta",
+          "receivedBytesDelta",
+          "bitrateBps",
+          "candidateType",
+          "protocol",
+          "qualityLimitation"
+        ],
+        "title": "MediaRecordView"
+      },
       "MessageId": {
         "type": "string",
         "pattern": "^[1-9][0-9]{0,18}$"
@@ -4253,6 +4852,17 @@
         ],
         "title": "MotionView"
       },
+      "Outcome": {
+        "type": "string",
+        "enum": [
+          "observed",
+          "empty_room",
+          "not_observed",
+          "cancelled",
+          "superseded",
+          "unknown"
+        ]
+      },
       "ParticipantBody": {
         "properties": {
           "participantId": {
@@ -4313,6 +4923,16 @@
           "handRaisedAt"
         ],
         "title": "ParticipantView"
+      },
+      "Phase": {
+        "type": "string",
+        "enum": [
+          "prejoin",
+          "joining",
+          "connected",
+          "reconnecting",
+          "left"
+        ]
       },
       "Position": {
         "type": "string",
@@ -4385,9 +5005,82 @@
         ],
         "title": "PresenceView"
       },
+      "ProblemReportView": {
+        "properties": {
+          "phase": {
+            "$ref": "#/components/schemas/Phase"
+          },
+          "epoch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafeInt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafeInt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clock": {
+            "$ref": "#/components/schemas/DiagnosticClockView"
+          },
+          "media": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MediaRecordView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/SafeEvent"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Events"
+          },
+          "dropped": {
+            "$ref": "#/components/schemas/DroppedView"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase",
+          "epoch",
+          "version",
+          "clock",
+          "media",
+          "events",
+          "dropped"
+        ],
+        "title": "ProblemReportView"
+      },
       "PublicId": {
         "type": "string",
         "pattern": "^[A-Za-z0-9_-]{12}$"
+      },
+      "Quality": {
+        "type": "string",
+        "enum": [
+          "excellent",
+          "good",
+          "poor",
+          "lost",
+          "unknown"
+        ]
       },
       "ReactionBody": {
         "properties": {
@@ -4537,6 +5230,45 @@
         ],
         "title": "RoundSnapshot"
       },
+      "Rtt": {
+        "type": "number",
+        "maximum": 60000.0,
+        "minimum": 0.0
+      },
+      "SafeEvent": {
+        "type": "string",
+        "enum": [
+          "join_started",
+          "join_connected",
+          "join_cancelled",
+          "room_switch_started",
+          "room_switch_completed",
+          "reconnect_started",
+          "reconnect_completed",
+          "snapshot_applied",
+          "clock_synchronized",
+          "clock_degraded",
+          "media_quality_changed",
+          "playback_blocked",
+          "playback_resumed",
+          "device_changed",
+          "device_failed",
+          "control_failed",
+          "diagnostics_dropped",
+          "preload_failed",
+          "call_left"
+        ]
+      },
+      "SafeInt": {
+        "type": "integer",
+        "maximum": 9007199254740991.0,
+        "minimum": 0.0
+      },
+      "SessionDuration": {
+        "type": "number",
+        "maximum": 604800000.0,
+        "minimum": 0.0
+      },
       "SetMotionBody": {
         "properties": {
           "text": {
@@ -4574,6 +5306,75 @@
         ],
         "title": "SetTimerBody"
       },
+      "SliName": {
+        "type": "string",
+        "enum": [
+          "join_decoded_playback_ms",
+          "room_switch_decoded_playback_ms",
+          "reconnect_media_ms",
+          "snapshot_delivery_ms",
+          "clock_offset_uncertainty_ms"
+        ]
+      },
+      "SliRecordView": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "sli",
+            "title": "Kind"
+          },
+          "name": {
+            "$ref": "#/components/schemas/SliName"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/Outcome"
+          },
+          "elapsedMs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolutionMs": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolutionms"
+          },
+          "clockUncertaintyMs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "outcome",
+          "elapsedMs",
+          "resolutionMs",
+          "clockUncertaintyMs"
+        ],
+        "title": "SliRecordView"
+      },
       "SpeechUndoView": {
         "properties": {
           "speechNo": {
@@ -4590,6 +5391,63 @@
           "timer"
         ],
         "title": "SpeechUndoView"
+      },
+      "TelemetryBatchBody": {
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schemaversion"
+          },
+          "batchId": {
+            "$ref": "#/components/schemas/BatchId"
+          },
+          "clientSessionId": {
+            "$ref": "#/components/schemas/BatchId"
+          },
+          "appVersion": {
+            "type": "string",
+            "pattern": "^(?:dev|test|[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]{12}(?:-dirty)?)$",
+            "title": "Appversion"
+          },
+          "records": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/SliRecordView"
+                },
+                {
+                  "$ref": "#/components/schemas/MediaRecordView"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "kind",
+                "mapping": {
+                  "media": "#/components/schemas/MediaRecordView",
+                  "sli": "#/components/schemas/SliRecordView"
+                }
+              }
+            },
+            "type": "array",
+            "maxItems": 24,
+            "minItems": 1,
+            "title": "Records"
+          },
+          "droppedRecords": {
+            "$ref": "#/components/schemas/SafeInt"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "batchId",
+          "clientSessionId",
+          "appVersion",
+          "records",
+          "droppedRecords"
+        ],
+        "title": "TelemetryBatchBody"
       },
       "TimeResponse": {
         "properties": {

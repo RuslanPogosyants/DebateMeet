@@ -1,0 +1,26 @@
+diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
+index 0bdf98540d93d7deb581737dca7afb299308d307..af5978b4a9d410a63f3652360878986a0a1c7dca 100644
+--- a/dist/livekit-client.esm.mjs
++++ b/dist/livekit-client.esm.mjs
+@@ -35126,7 +35126,7 @@ class Room extends eventsExports.EventEmitter {
+           try {
+             if (_this3.options.webAudioMix) {
+               // @ts-expect-error setSinkId is not yet in the typescript type of AudioContext
+-              (_f = _this3.audioContext) === null || _f === void 0 ? void 0 : _f.setSinkId(deviceId);
++              yield ((_f = _this3.audioContext) === null || _f === void 0 ? void 0 : _f.setSinkId(deviceId));
+             }
+             // also set audio output on all audio elements, even if webAudioMix is enabled in order to workaround echo cancellation not working on chrome with non-default output devices
+             // see https://issues.chromium.org/issues/40252911#comment7
+diff --git a/src/room/Room.ts b/src/room/Room.ts
+index 6a3462c624e9d1069b2b8530a32053ca55ba0189..4b8281639565918ff914960ffde395f63e68dec2 100644
+--- a/src/room/Room.ts
++++ b/src/room/Room.ts
+@@ -1531,7 +1531,7 @@ class Room extends (EventEmitter as new () => TypedEmitter<RoomEventCallbacks>)
+       try {
+         if (this.options.webAudioMix) {
+           // @ts-expect-error setSinkId is not yet in the typescript type of AudioContext
+-          this.audioContext?.setSinkId(deviceId);
++          await this.audioContext?.setSinkId(deviceId);
+         }
+ 
+         // also set audio output on all audio elements, even if webAudioMix is enabled in order to workaround echo cancellation not working on chrome with non-default output devices

@@ -37,7 +37,7 @@ class CommittedRound:
 
 class RoundRepository(Protocol):
     async def add(self, round_: Round, now: datetime) -> None:
-        """Insert a new round as version 1."""
+        """Insert at version 1; a live or deleted link raises RoundIdCollisionError."""
         ...
 
     async def get_for_update(self, round_id: RoundId) -> Round | None:

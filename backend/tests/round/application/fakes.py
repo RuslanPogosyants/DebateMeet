@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
+from debatemeet.round.application.errors import RoundIdCollisionError
 from debatemeet.round.application.ports import (
     ArchivedParticipant,
     CommittedRound,
@@ -59,7 +60,8 @@ class _Rounds:
         self._store = store
 
     async def add(self, round_: Round, now: datetime) -> None:
-        assert round_.id not in self._store.rounds
+        if round_.id in self._store.rounds:
+            raise RoundIdCollisionError
         round_.version = 1
         self._store.rounds[round_.id] = _stored(round_)
         self._store.committed_at[round_.id] = now

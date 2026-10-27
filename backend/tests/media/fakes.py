@@ -6,12 +6,14 @@ from datetime import datetime, timedelta
 
 from debatemeet.media.application.ports import (
     ControlEffect,
+    DeleteRoomEffect,
     DeliveryState,
     MediaEffect,
     MediaRoom,
     MediaRoomMissingError,
     MicrophoneTarget,
     PacketEffect,
+    RemovalDeliveryEffect,
     RemovalEffect,
 )
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
@@ -41,13 +43,17 @@ class Reader:
 class MemoryMedia:
     def __init__(self) -> None:
         self.states: dict[RoundId, DeliveryState] = {}
-        self.effects: dict[int, RemovalEffect] = {}
+        self.effects: dict[int, RemovalDeliveryEffect] = {}
+        self.tombstones: set[RoundId] = set()
         self.packets: dict[int, PacketEffect] = {}
         self.controls: dict[int, ControlEffect] = {}
         self.retry_at: dict[int, datetime] = {}
         self.delivered: list[int] = []
 
-    async def started(self, round_id: RoundId, room_sid: str) -> None:
+    async def started(self, round_id: RoundId, room_sid: str, now: datetime | None = None) -> bool:
+        if round_id in self.tombstones:
+            await self.rearm_deleted([round_id], now)
+            return False
         current = self.states.get(round_id)
         if current is None or current.room_sid != room_sid:
             self.states[round_id] = DeliveryState(round_id, room_sid, 0, 0, None)
@@ -70,6 +76,39 @@ class MemoryMedia:
                     control, revision=control.revision + 1, attempts=0
                 )
                 self.retry_at.pop(control.id, None)
+        return True
+
+    async def deleted_rounds(
+        self, after_round: RoundId | None, limit: int = 100
+    ) -> Sequence[RoundId]:
+        return sorted(
+            round_id
+            for round_id in self.tombstones
+            if after_round is None or round_id > after_round
+        )[:limit]
+
+    async def rearm_deleted(
+        self, round_ids: Sequence[RoundId], now: datetime | None = None
+    ) -> None:
+        for round_id in round_ids:
+            if round_id not in self.tombstones:
+                continue
+            current = next(
+                (
+                    effect
+                    for effect in self.effects.values()
+                    if isinstance(effect, DeleteRoomEffect) and effect.round_id == round_id
+                ),
+                None,
+            )
+            if current is not None:
+                self.effects[current.id] = replace(
+                    current, revision=current.revision + 1, attempts=0
+                )
+                self.retry_at.pop(current.id, None)
+            else:
+                identity = max([0, *self.effects, *self.packets, *self.controls]) + 1
+                self.effects[identity] = DeleteRoomEffect(identity, round_id, 0)
 
     async def finished(self, round_id: RoundId, room_sid: str) -> None:
         if (current := self.states.get(round_id)) is not None and current.room_sid == room_sid:
@@ -103,8 +142,27 @@ class MemoryMedia:
         return [
             effect
             for effect in self.effects.values()
-            if effect.id not in self.retry_at or self.retry_at[effect.id] <= now
+            if isinstance(effect, RemovalEffect)
+            and (effect.id not in self.retry_at or self.retry_at[effect.id] <= now)
         ]
+
+    async def next_removal(
+        self, now: datetime, after_round: RoundId | None
+    ) -> RemovalDeliveryEffect | None:
+        ready = sorted(
+            (
+                effect
+                for effect in self.effects.values()
+                if effect.id not in self.retry_at or self.retry_at[effect.id] <= now
+            ),
+            key=lambda effect: (effect.round_id, self.retry_at.get(effect.id, T0), effect.id),
+        )
+        if not ready:
+            return None
+        return next(
+            (effect for effect in ready if after_round is None or effect.round_id > after_round),
+            ready[0],
+        )
 
     async def packet_heads(self, now: datetime) -> Sequence[PacketEffect]:
         heads: dict[RoundId, PacketEffect] = {}
@@ -200,6 +258,7 @@ class FakeApi(LiveKitApiAdapter):
         self.metadata: list[str] = []
         self.created: list[tuple[RoundId, str]] = []
         self.removed: list[tuple[RoundId, ParticipantId]] = []
+        self.deleted: list[RoundId] = []
         self.microphones: dict[tuple[RoundId, ParticipantId], MicrophoneTarget] = {}
         self.muted: list[tuple[RoundId, ParticipantId, str]] = []
         self.controls: list[tuple[RoundId, ControlTopic, bytes, ParticipantId]] = []
@@ -222,9 +281,14 @@ class FakeApi(LiveKitApiAdapter):
         self.created.append((round_id, metadata))
         return MediaRoom(round_id, "RM_1")
 
-    async def rooms(self) -> Sequence[MediaRoom]:
+    async def rooms(self, round_ids: Sequence[RoundId] | None = None) -> Sequence[MediaRoom]:
         self._check()
-        return self.media_rooms
+        return [room for room in self.media_rooms if round_ids is None or room.name in round_ids]
+
+    async def delete_room(self, round_id: RoundId) -> None:
+        self._check()
+        self.deleted.append(round_id)
+        self.media_rooms = [room for room in self.media_rooms if room.name != round_id]
 
     async def participants(self, round_id: RoundId) -> Mapping[ParticipantId, SessionId]:
         self._check()

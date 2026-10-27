@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import RowMapping, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from debatemeet.round.application.errors import RoundIdCollisionError
 from debatemeet.round.application.ports import (
     ArchivedParticipant,
     CommittedRound,
@@ -19,6 +20,7 @@ from debatemeet.round.domain.ids import ParticipantId, RoundId
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.mapper import decode_round, encode_round
 from debatemeet.shared.infrastructure.database import command_transaction
+from debatemeet.shared.infrastructure.lifecycle import acquire_round_lifecycle
 from debatemeet.shared.infrastructure.persistence import PostgresCommandKeys, PostgresEventLog
 
 
@@ -38,11 +40,22 @@ class _RoundRepository:
         self._connection = connection
 
     async def add(self, round_: Round, now: datetime) -> None:
-        await self._connection.execute(
+        await acquire_round_lifecycle(self._connection, round_.id)
+        if (
+            await self._connection.scalar(
+                text("SELECT 1 FROM deleted_rounds WHERE round_id=:id"), {"id": round_.id}
+            )
+            is not None
+        ):
+            raise RoundIdCollisionError
+        result = await self._connection.execute(
             text("""INSERT INTO rounds (id, state, version, created_at, updated_at)
-                VALUES (:id, CAST(:state AS jsonb), 1, :now, :now)"""),
+                VALUES (:id, CAST(:state AS jsonb), 1, :now, :now)
+                ON CONFLICT (id) DO NOTHING RETURNING id"""),
             {"id": round_.id, "state": json.dumps(encode_round(round_)), "now": now},
         )
+        if result.scalar_one_or_none() is None:
+            raise RoundIdCollisionError
         round_.version = 1
 
     async def get_for_update(self, round_id: RoundId) -> Round | None:
