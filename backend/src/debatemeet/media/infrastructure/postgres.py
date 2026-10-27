@@ -1,6 +1,7 @@
 """Media delivery progress and the publisher lease belong to Media's database adapter."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
@@ -9,8 +10,8 @@ from typing import Protocol, cast, runtime_checkable
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from debatemeet.media.application.ports import DeliveryState, RemovalEffect
-from debatemeet.round.application.ports import ParticipantId, RoundId
+from debatemeet.media.application.ports import DeliveryState, PacketEffect, RemovalEffect
+from debatemeet.round.application.ports import PacketTopic, ParticipantId, RoundId
 
 # A session lock on a dedicated connection, never the transaction of a round command.
 PUBLISHER_LOCK = 1145917525
@@ -36,6 +37,28 @@ class PostgresMediaOutbox:
                     available_at = EXCLUDED.available_at, attempts = 0
             """),
             {"round_id": round_id, "participant_id": participant_id, "now": now},
+        )
+        await self._connection.execute(
+            text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
+        )
+
+    async def publish_packet(
+        self, round_id: RoundId, topic: PacketTopic, payload: bytes, now: datetime
+    ) -> None:
+        if topic not in {"chat", "chat_deleted"} or not 0 < len(payload) <= 15 * 1024:
+            raise ValueError("Invalid server packet")
+        value = json.loads(payload.decode("utf-8"))
+        if (
+            not isinstance(value, dict)
+            or value.get("topic") != topic
+            or value.get("roundId") != round_id
+        ):
+            raise ValueError("Server packet does not match its destination")
+        await self._connection.execute(
+            text("""INSERT INTO media_outbox
+                (round_id, operation, topic, payload, created_at, available_at)
+                VALUES (:round_id, 'publish_packet', :topic, :payload, :now, :now)"""),
+            {"round_id": round_id, "topic": topic, "payload": payload, "now": now},
         )
         await self._connection.execute(
             text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
@@ -75,6 +98,22 @@ class PostgresMediaStore:
                     WHERE media_rooms.room_sid IS DISTINCT FROM EXCLUDED.room_sid
                 """),
                 {"id": round_id, "sid": room_sid},
+            )
+            # A successful join can confirm that an existing MediaRoom recovered too.
+            # Wake independently of SID changes, without resetting snapshot progress.
+            # The revision also fences late SDK acknowledgements/failures before this wake.
+            await connection.execute(
+                text("""UPDATE media_outbox SET revision = revision + 1,
+                        available_at = created_at, attempts = 0
+                    WHERE id = (SELECT min(id) FROM media_outbox
+                        WHERE round_id = :id AND operation = 'publish_packet'
+                            AND delivered_at IS NULL)
+                      AND EXISTS (SELECT 1 FROM media_rooms
+                          WHERE round_id = :id AND room_sid = :sid)"""),
+                {"id": round_id, "sid": room_sid},
+            )
+            await connection.execute(
+                text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
             )
 
     async def finished(self, round_id: RoundId, room_sid: str) -> None:
@@ -133,7 +172,8 @@ class PostgresMediaStore:
             rows = await connection.execute(
                 text("""
                     SELECT id, round_id, participant_id, attempts, revision FROM media_outbox
-                    WHERE delivered_at IS NULL AND available_at <= :now
+                    WHERE operation = 'remove_participant'
+                        AND delivered_at IS NULL AND available_at <= :now
                     ORDER BY available_at, id LIMIT 100
                 """),
                 {"now": now},
@@ -149,7 +189,31 @@ class PostgresMediaStore:
                 for row in rows.mappings()
             ]
 
-    async def effect_delivered(self, effect: RemovalEffect, at: datetime) -> None:
+    async def packet_heads(self, now: datetime) -> Sequence[PacketEffect]:
+        async with self._engine.connect() as connection:
+            rows = await connection.execute(
+                text("""SELECT * FROM (
+                    SELECT DISTINCT ON (round_id)
+                        id, round_id, topic, payload, attempts, revision, available_at
+                    FROM media_outbox
+                    WHERE operation = 'publish_packet' AND delivered_at IS NULL
+                    ORDER BY round_id, id
+                ) AS heads WHERE available_at <= :now ORDER BY round_id"""),
+                {"now": now},
+            )
+            return [
+                PacketEffect(
+                    int(row["id"]),
+                    RoundId(row["round_id"]),
+                    cast(PacketTopic, row["topic"]),
+                    bytes(row["payload"]),
+                    int(row["attempts"]),
+                    int(row["revision"]),
+                )
+                for row in rows.mappings()
+            ]
+
+    async def effect_delivered(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None:
         async with self._engine.begin() as connection:
             await connection.execute(
                 # A newer connect can enqueue while the SDK removal is in flight. Its
@@ -159,7 +223,7 @@ class PostgresMediaStore:
                 {"id": effect.id, "revision": effect.revision, "at": at},
             )
 
-    async def effect_failed(self, effect: RemovalEffect, at: datetime) -> None:
+    async def effect_failed(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None:
         # Keep pending effects indefinitely; the capped delay prevents a failing identity
         # from monopolizing every tick while healthy rounds continue to be delivered.
         retry_at = at + timedelta(seconds=min(2 ** min(effect.attempts, 6), 60))
@@ -190,9 +254,12 @@ class PostgresWakeup:
     def notified(self, _: ListenerConnection, _pid: int, _channel: str, _payload: str) -> None:
         self._changed.set()
 
-    async def assert_alive(self) -> None:
+    def _assert_open(self) -> None:
         if self._connection.is_closed():
             raise ConnectionError("publisher connection closed")
+
+    async def assert_alive(self) -> None:
+        self._assert_open()
         try:
             async with asyncio.timeout(1):
                 await self._connection.execute("SELECT 1")
@@ -200,11 +267,13 @@ class PostgresWakeup:
             raise ConnectionError("publisher connection lost") from error
 
     async def wait(self) -> None:
-        await self.assert_alive()
+        # The coordinator also wakes on SDK completion and alone owns lease SQL.
+        # This notification wait may therefore run beside SDK tasks, without queries.
+        self._assert_open()
         with suppress(TimeoutError):
             await asyncio.wait_for(self._changed.wait(), 1)
         self._changed.clear()
-        await self.assert_alive()
+        self._assert_open()
 
 
 class PostgresPublisherLease:

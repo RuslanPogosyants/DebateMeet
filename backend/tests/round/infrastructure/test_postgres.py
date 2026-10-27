@@ -135,6 +135,24 @@ async def test_real_ports_persist_the_round_archive_and_events_together(world: W
     assert await world.number("SELECT count(*) FROM event_log") == 3
 
 
+async def test_a_chat_foreign_key_does_not_wait_for_the_production_round_writer_lock(
+    world: World,
+) -> None:
+    round_id = await world.create(IP)
+    async with world.rounds.begin() as locked:
+        assert await locked.rounds.get_for_update(round_id) is not None
+        # This insert and commit must complete while the first connection still owns
+        # its row lock. FOR UPDATE would block the FK's KEY SHARE here.
+        async with asyncio.timeout(1):
+            async with world.engine.begin() as writer:
+                await writer.execute(
+                    text("""INSERT INTO messages (round_id, kind, text, created_at)
+                        VALUES (:round_id, 'system', 'A system line', :now)"""),
+                    {"round_id": round_id, "now": T0},
+                )
+        assert await world.number("SELECT count(*) FROM messages") == 1
+
+
 async def test_twenty_nine_plus_two_concurrent_joins_has_one_winner(world: World) -> None:
     round_id = await world.create(IP)
     for n in range(29):

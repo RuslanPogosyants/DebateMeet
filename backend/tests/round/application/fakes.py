@@ -37,6 +37,7 @@ class Store:
     notified: list[RoundId] = field(default_factory=list)
     commits: int = 0
     media_removals: list[tuple[RoundId, ParticipantId, datetime]] = field(default_factory=list)
+    media_packets: list[tuple[RoundId, str, bytes, datetime]] = field(default_factory=list)
 
 
 def _stored(round_: Round) -> Round:
@@ -76,6 +77,11 @@ class _Archive:
     ) -> ArchivedParticipant | None:
         return self._store.archive.get((round_id, participant_id))
 
+    async def find_shared(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> ArchivedParticipant | None:
+        return await self.find(round_id, participant_id)
+
     async def add(
         self,
         round_id: RoundId,
@@ -109,6 +115,11 @@ class _MediaOutbox:
         self, round_id: RoundId, participant_id: ParticipantId, now: datetime
     ) -> None:
         self._store.media_removals.append((round_id, participant_id, now))
+
+    async def publish_packet(
+        self, round_id: RoundId, topic: str, payload: bytes, now: datetime
+    ) -> None:
+        self._store.media_packets.append((round_id, topic, payload, now))
 
 
 class _EventLog:

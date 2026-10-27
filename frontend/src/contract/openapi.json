@@ -2123,6 +2123,127 @@
           }
         }
       }
+    },
+    "/api/rounds/{round_id}/messages": {
+      "get": {
+        "summary": "Messages",
+        "operationId": "messages_api_rounds__round_id__messages_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,18})$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageView"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2155,6 +2276,94 @@
           "id"
         ],
         "title": "CreateRoundResponse"
+      },
+      "Cursor": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]{0,18})$"
+      },
+      "DrawResultView": {
+        "properties": {
+          "position": {
+            "$ref": "#/components/schemas/Position"
+          },
+          "drawNo": {
+            "type": "integer",
+            "title": "Drawno"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "drawNo",
+          "at"
+        ],
+        "title": "DrawResultView"
+      },
+      "DrawnPositionView": {
+        "properties": {
+          "position": {
+            "$ref": "#/components/schemas/Position"
+          },
+          "drawNo": {
+            "type": "integer",
+            "title": "Drawno"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position",
+          "drawNo"
+        ],
+        "title": "DrawnPositionView"
+      },
+      "DrumView": {
+        "properties": {
+          "enabled": {
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "type": "array",
+            "title": "Enabled"
+          },
+          "drawn": {
+            "items": {
+              "$ref": "#/components/schemas/DrawnPositionView"
+            },
+            "type": "array",
+            "title": "Drawn"
+          },
+          "removeDrawn": {
+            "type": "boolean",
+            "title": "Removedrawn"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DrawResultView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "drawCount": {
+            "type": "integer",
+            "title": "Drawcount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "drawn",
+          "removeDrawn",
+          "last",
+          "drawCount"
+        ],
+        "title": "DrumView"
       },
       "EmptyCommandBody": {
         "properties": {},
@@ -2383,6 +2592,163 @@
         ],
         "title": "LeaveBody"
       },
+      "MessageId": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]{0,18}$"
+      },
+      "MessageKind": {
+        "type": "string",
+        "enum": [
+          "user",
+          "system"
+        ],
+        "title": "MessageKind"
+      },
+      "MessagePageView": {
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Epoch"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Messages"
+          },
+          "asOfCursor": {
+            "$ref": "#/components/schemas/Cursor"
+          },
+          "nextBefore": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextAfter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hasMore": {
+            "type": "boolean",
+            "title": "Hasmore"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "epoch",
+          "messages",
+          "asOfCursor",
+          "nextBefore",
+          "nextAfter",
+          "hasMore"
+        ],
+        "title": "MessagePageView"
+      },
+      "MessageView": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/MessageId"
+          },
+          "changeId": {
+            "$ref": "#/components/schemas/MessageId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MessageKind"
+          },
+          "authorId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorname"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "deletedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "changeId",
+          "kind",
+          "authorId",
+          "authorName",
+          "text",
+          "createdAt",
+          "deletedAt"
+        ],
+        "title": "MessageView"
+      },
+      "MotionView": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "infoslide": {
+            "type": "string",
+            "title": "Infoslide"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "infoslide"
+        ],
+        "title": "MotionView"
+      },
       "ParticipantCode": {
         "type": "string",
         "pattern": "^[A-Za-z0-9_-]{12}$"
@@ -2417,6 +2783,16 @@
         ],
         "title": "ParticipantView"
       },
+      "Position": {
+        "type": "string",
+        "enum": [
+          "og",
+          "oo",
+          "cg",
+          "co"
+        ],
+        "title": "Position"
+      },
       "PresenceView": {
         "properties": {
           "status": {
@@ -2439,6 +2815,10 @@
           "since"
         ],
         "title": "PresenceView"
+      },
+      "PublicId": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{12}$"
       },
       "RecallBody": {
         "properties": {
@@ -2539,6 +2919,12 @@
                 "type": "null"
               }
             ]
+          },
+          "motion": {
+            "$ref": "#/components/schemas/MotionView"
+          },
+          "drum": {
+            "$ref": "#/components/schemas/DrumView"
           }
         },
         "type": "object",
@@ -2553,7 +2939,9 @@
           "judgeFlag",
           "timers",
           "speechNo",
-          "speechUndo"
+          "speechUndo",
+          "motion",
+          "drum"
         ],
         "title": "RoundSnapshot"
       },
@@ -2677,6 +3065,11 @@
         ],
         "title": "TimersView"
       },
+      "Timestamp": {
+        "type": "integer",
+        "maximum": 253402300799999.0,
+        "minimum": -62135596800000.0
+      },
       "StatePacket": {
         "properties": {
           "topic": {
@@ -2698,6 +3091,117 @@
           "snapshot"
         ],
         "title": "StatePacket",
+        "type": "object"
+      },
+      "ChatPacket": {
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "const": "chat",
+            "default": "chat",
+            "title": "Topic",
+            "type": "string"
+          },
+          "roundId": {
+            "$ref": "#/components/schemas/RoundCode"
+          },
+          "epoch": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Epoch",
+            "type": "integer"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessageView"
+          }
+        },
+        "required": [
+          "roundId",
+          "epoch",
+          "message"
+        ],
+        "title": "ChatPacket",
+        "type": "object"
+      },
+      "DeletedMessageView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/MessageId"
+          },
+          "changeId": {
+            "$ref": "#/components/schemas/MessageId"
+          },
+          "deletedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "changeId",
+          "deletedAt"
+        ],
+        "title": "DeletedMessageView",
+        "type": "object"
+      },
+      "ChatDeletedPacket": {
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "const": "chat_deleted",
+            "default": "chat_deleted",
+            "title": "Topic",
+            "type": "string"
+          },
+          "roundId": {
+            "$ref": "#/components/schemas/RoundCode"
+          },
+          "epoch": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Epoch",
+            "type": "integer"
+          },
+          "deleted": {
+            "items": {
+              "$ref": "#/components/schemas/DeletedMessageView"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Deleted",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roundId",
+          "epoch",
+          "deleted"
+        ],
+        "title": "ChatDeletedPacket",
+        "type": "object"
+      },
+      "PostedMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "epoch": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Epoch",
+            "type": "integer"
+          },
+          "asOfCursor": {
+            "$ref": "#/components/schemas/Cursor"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessageView"
+          }
+        },
+        "required": [
+          "epoch",
+          "asOfCursor",
+          "message"
+        ],
+        "title": "PostedMessage",
         "type": "object"
       }
     },

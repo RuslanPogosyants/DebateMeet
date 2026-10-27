@@ -40,6 +40,14 @@ export function snapshot(version = 1, epoch = 1): Snapshot {
     },
     speechNo: 1,
     speechUndo: null,
+    motion: { text: '', infoslide: '' },
+    drum: {
+      enabled: ['og', 'oo', 'cg', 'co'],
+      drawn: [],
+      removeDrawn: true,
+      last: null,
+      drawCount: 0,
+    },
   }
 }
 

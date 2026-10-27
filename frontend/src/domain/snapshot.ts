@@ -6,6 +6,11 @@ export type Participant = Snapshot['participants'][number]
 const rooms = new Set(['base', 'og', 'oo', 'cg', 'co', 'judges'])
 const statuses = new Set(['pending', 'connected', 'disconnected'])
 const reasons = new Set(['by_holder', 'holder_disconnected', 'admin'])
+const positions = new Set(['og', 'oo', 'cg', 'co'])
+// Python str.strip() whitespace after forbidden C0/C1 controls have been rejected.
+// JavaScript trim() also strips U+FEFF, which is valid and preserved by the server.
+const untrimmedText =
+  /^[\t\n \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]|[\t\n \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]$/u
 
 export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -29,7 +34,8 @@ export function isSnapshot(value: unknown): value is Snapshot {
     !Array.isArray(value.participants) ||
     value.participants.length > 40 ||
     !record(value.judgeFlag) ||
-    !timerExtension(value)
+    !timerExtension(value) ||
+    !motionAndDrum(value)
   )
     return false
   const identities = new Set<string>()
@@ -99,10 +105,80 @@ function timerExtension(value: Record<string, unknown>): boolean {
   )
 }
 
+function plainText(value: unknown, maxPoints: number, maxBytes: number): boolean {
+  if (typeof value !== 'string' || untrimmedText.test(value)) return false
+  const points = Array.from(value)
+  return (
+    points.length <= maxPoints &&
+    points.every((character) => {
+      const point = character.codePointAt(0) ?? 0
+      return (
+        point === 9 ||
+        point === 10 ||
+        (point >= 32 && (point < 127 || point > 159) && (point < 0xd800 || point > 0xdfff))
+      )
+    }) &&
+    new TextEncoder().encode(value).byteLength <= maxBytes
+  )
+}
+
+function position(value: unknown): value is string {
+  return typeof value === 'string' && positions.has(value)
+}
+
+function motionAndDrum(value: Record<string, unknown>): boolean {
+  const motion = value.motion
+  const drum = value.drum
+  if (
+    !record(motion) ||
+    !plainText(motion.text, 300, 600) ||
+    !plainText(motion.infoslide, 1500, 3000) ||
+    !record(drum) ||
+    !Array.isArray(drum.enabled) ||
+    !drum.enabled.every(position) ||
+    new Set(drum.enabled).size !== drum.enabled.length ||
+    !Array.isArray(drum.drawn) ||
+    drum.drawn.length > 4 ||
+    typeof drum.removeDrawn !== 'boolean' ||
+    !integer(drum.drawCount)
+  )
+    return false
+  const last = drum.last
+  if (
+    last !== null &&
+    (!record(last) ||
+      !position(last.position) ||
+      !integer(last.drawNo) ||
+      last.drawNo < 1 ||
+      last.drawNo !== drum.drawCount ||
+      !signedInteger(last.at))
+  )
+    return false
+  const drawnPositions = new Set<string>()
+  const drawnNumbers = new Set<number>()
+  for (const drawn of drum.drawn) {
+    if (
+      !record(drawn) ||
+      !position(drawn.position) ||
+      !integer(drawn.drawNo) ||
+      drawn.drawNo < 1 ||
+      drawn.drawNo > drum.drawCount ||
+      drawnPositions.has(drawn.position) ||
+      drawnNumbers.has(drawn.drawNo) ||
+      last === null ||
+      (record(last) && drawn.drawNo === last.drawNo && drawn.position !== last.position)
+    )
+      return false
+    drawnPositions.add(drawn.position)
+    drawnNumbers.add(drawn.drawNo)
+  }
+  return true
+}
+
 export function readSnapshot(value: unknown, roundId: string): Snapshot | null {
   // Only the complete pre-A format has defaults. A damaged additive extension must
   // not silently stop an existing timer or discard the judge's undo state.
-  const normalized =
+  const withTimers =
     record(value) && !('timers' in value) && !('speechNo' in value) && !('speechUndo' in value)
       ? {
           ...value,
@@ -114,6 +190,20 @@ export function readSnapshot(value: unknown, roundId: string): Snapshot | null {
           speechUndo: null,
         }
       : value
+  const normalized =
+    record(withTimers) && !('motion' in withTimers) && !('drum' in withTimers)
+      ? {
+          ...withTimers,
+          motion: { text: '', infoslide: '' },
+          drum: {
+            enabled: ['og', 'oo', 'cg', 'co'],
+            drawn: [],
+            removeDrawn: true,
+            last: null,
+            drawCount: 0,
+          },
+        }
+      : withTimers
   return isSnapshot(normalized) && normalized.roundId === roundId ? normalized : null
 }
 

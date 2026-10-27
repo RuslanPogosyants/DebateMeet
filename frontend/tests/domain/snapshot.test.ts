@@ -214,3 +214,268 @@ describe('valid transported timer state properties', () => {
     )
   })
 })
+
+function extendedSnapshot() {
+  return {
+    ...timedSnapshot(),
+    motion: { text: 'Эта палата\nподдерживает\tизменение.', infoslide: 'Инфослайд: <b>текст</b>' },
+    drum: {
+      enabled: ['oo'],
+      drawn: [{ position: 'og', drawNo: 5 }],
+      removeDrawn: false,
+      last: { position: 'co', drawNo: 6, at: 1234 },
+      drawCount: 6,
+    },
+  }
+}
+
+describe('motion and drum extension compatibility boundary A4', () => {
+  it('preserves nondefault motion, disabled historic positions, draw numbers and timer undo', () => {
+    const value = extendedSnapshot()
+    expect(readSnapshot(value, ROUND_ID)).toEqual(value)
+    expect(isSnapshot(value)).toBe(true)
+  })
+
+  it('normalizes only the completely absent extension without changing its source', () => {
+    const historical = Object.fromEntries(
+      Object.entries(timedSnapshot()).filter(([key]) => !['motion', 'drum'].includes(key)),
+    )
+    const parsed = readSnapshot(historical, ROUND_ID)
+    expect(parsed).toEqual({
+      ...historical,
+      motion: { text: '', infoslide: '' },
+      drum: {
+        enabled: ['og', 'oo', 'cg', 'co'],
+        drawn: [],
+        removeDrawn: true,
+        last: null,
+        drawCount: 0,
+      },
+    })
+    expect(historical).not.toHaveProperty('motion')
+    expect(historical).not.toHaveProperty('drum')
+    expect(isSnapshot(historical)).toBe(false)
+  })
+
+  it.each(['motion', 'drum'])('rejects a partial extension missing %s', (field) => {
+    const value = Object.fromEntries(
+      Object.entries(extendedSnapshot()).filter(([key]) => key !== field),
+    )
+    expect(readSnapshot(value, ROUND_ID)).toBeNull()
+  })
+
+  it('applies both complete legacy defaults independently and never repairs a partial timer extension', () => {
+    const legacy = Object.fromEntries(
+      Object.entries(timedSnapshot()).filter(
+        ([key]) => !['timers', 'speechNo', 'speechUndo', 'motion', 'drum'].includes(key),
+      ),
+    )
+    expect(readSnapshot(legacy, ROUND_ID)).toMatchObject({
+      motion: { text: '', infoslide: '' },
+      drum: { drawCount: 0 },
+      speechNo: 1,
+      speechUndo: null,
+    })
+    expect(readSnapshot({ ...legacy, speechNo: 2 }, ROUND_ID)).toBeNull()
+  })
+
+  it.each([
+    null,
+    {},
+    { text: '' },
+    { infoslide: '' },
+    { text: null, infoslide: '' },
+    { text: '', infoslide: null },
+    { text: 'a'.repeat(301), infoslide: '' },
+    { text: '', infoslide: 'a'.repeat(1501) },
+    { text: '界'.repeat(201), infoslide: '' },
+    { text: '', infoslide: '界'.repeat(1001) },
+    { text: '\uD800', infoslide: '' },
+    { text: '', infoslide: '\uDFFF' },
+    { text: 'line\rbreak', infoslide: '' },
+    { text: '', infoslide: 'line\r\nbreak' },
+    { text: ' leading', infoslide: '' },
+    { text: '', infoslide: 'trailing\n' },
+    { text: '\u2000edge', infoslide: '' },
+  ])('rejects malformed or oversized motion %j', (motion) => {
+    expect(readSnapshot({ ...extendedSnapshot(), motion }, ROUND_ID)).toBeNull()
+  })
+
+  it.each([0, 1, 8, 11, 12, 14, 31, 127, 128, 159])(
+    'rejects C0/C1 control U+%i in either plain text field',
+    (code) => {
+      const invalid = `before${String.fromCodePoint(code)}after`
+      for (const field of ['text', 'infoslide']) {
+        const value = extendedSnapshot()
+        expect(
+          readSnapshot({ ...value, motion: { ...value.motion, [field]: invalid } }, ROUND_ID),
+        ).toBeNull()
+      }
+    },
+  )
+
+  it('accepts exact code point and UTF-8 limits, independent empty text and plain markup', () => {
+    for (const motion of [
+      { text: '', infoslide: 'Инфослайд без резолюции' },
+      { text: 'я'.repeat(300), infoslide: 'я'.repeat(1500) },
+      { text: '😀'.repeat(150), infoslide: '😀'.repeat(750) },
+      { text: 'a'.repeat(300), infoslide: 'a'.repeat(1500) },
+      { text: '<script>alert(1)</script>', infoslide: '<img src=x onerror=alert(1)>' },
+      { text: '\uFEFFpreserved\uFEFF', infoslide: '\uFEFF' },
+    ]) {
+      const value = { ...extendedSnapshot(), motion }
+      expect(readSnapshot(value, ROUND_ID)).toEqual(value)
+    }
+  })
+
+  it.each([
+    null,
+    { enabled: null },
+    { enabled: ['judges'] },
+    { enabled: ['OG'] },
+    { enabled: ['og', 'og'] },
+    { drawn: null },
+    { drawn: ['og'] },
+    { drawn: [{ position: 'base', drawNo: 1 }] },
+    { drawn: [{ position: 'og', drawNo: 0 }] },
+    { drawn: [{ position: 'og', drawNo: 1.5 }] },
+    { drawn: [{ position: 'og', drawNo: Number.MAX_SAFE_INTEGER + 1 }] },
+    { drawn: [{ position: 'og' }] },
+    {
+      drawn: [
+        { position: 'og', drawNo: 1 },
+        { position: 'og', drawNo: 2 },
+      ],
+    },
+    {
+      drawn: [
+        { position: 'og', drawNo: 1 },
+        { position: 'oo', drawNo: 1 },
+      ],
+    },
+    { removeDrawn: 1 },
+    { last: {} },
+    { last: { position: 'og', drawNo: 1 } },
+    { last: { position: 'og', drawNo: 0, at: 1234 } },
+    { last: { position: 'og', drawNo: 1, at: 1.5 } },
+    { last: { position: 'og', drawNo: 1, at: Number.MAX_SAFE_INTEGER + 1 } },
+    { drawCount: -1 },
+    { drawCount: 1.5 },
+    { drawCount: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects malformed drum structure %j', (fields) => {
+    const value = extendedSnapshot()
+    const drum = fields === null ? null : { ...value.drum, ...fields }
+    expect(readSnapshot({ ...value, drum }, ROUND_ID)).toBeNull()
+  })
+
+  it.each(['enabled', 'drawn', 'removeDrawn', 'last', 'drawCount'])(
+    'requires the drum field %s even when the other extension is valid',
+    (field) => {
+      const value = extendedSnapshot()
+      const drum = Object.fromEntries(Object.entries(value.drum).filter(([key]) => key !== field))
+      expect(readSnapshot({ ...value, drum }, ROUND_ID)).toBeNull()
+    },
+  )
+
+  it.each([
+    { drawCount: 0 },
+    { drawn: [{ position: 'og', drawNo: 7 }] },
+    { last: { position: 'co', drawNo: 5, at: 1234 } },
+    { drawn: [{ position: 'og', drawNo: 6 }] },
+    { last: null },
+  ])('rejects inconsistent drum numbers and missing last results %j', (fields) => {
+    const value = extendedSnapshot()
+    expect(readSnapshot({ ...value, drum: { ...value.drum, ...fields } }, ROUND_ID)).toBeNull()
+  })
+
+  it('keeps valid reset counters, signed timestamps and mode changes without inventing eligibility rules', () => {
+    const value = extendedSnapshot()
+    for (const drum of [
+      { enabled: [], drawn: [], removeDrawn: true, last: null, drawCount: 0 },
+      { enabled: [], drawn: [], removeDrawn: false, last: null, drawCount: 81 },
+      {
+        enabled: [],
+        drawn: [],
+        removeDrawn: true,
+        last: { position: 'co', drawNo: Number.MAX_SAFE_INTEGER, at: -1234 },
+        drawCount: Number.MAX_SAFE_INTEGER,
+      },
+      {
+        enabled: ['oo'],
+        drawn: [
+          { position: 'co', drawNo: 6 },
+          { position: 'og', drawNo: 3 },
+        ],
+        removeDrawn: false,
+        last: { position: 'co', drawNo: 6, at: 1234 },
+        drawCount: 6,
+      },
+      { ...value.drum, removeDrawn: true },
+    ]) {
+      expect(readSnapshot({ ...value, drum }, ROUND_ID)).toEqual({ ...value, drum })
+    }
+  })
+})
+
+const positionStates = fc.constantFrom('og', 'oo', 'cg', 'co')
+const textStates = (maximum: number) =>
+  fc
+    .array(fc.constantFrom('a', 'я', '界', '😀', '\uFEFF', '\t', '\n', '<', '>'), {
+      maxLength: maximum,
+    })
+    .map((characters) => `x${characters.join('')}x`)
+
+describe('valid transported motion and drum state properties', () => {
+  it('preserves canonical Unicode and arbitrary eligible-independent drum configurations over JSON', () => {
+    fc.assert(
+      fc.property(
+        textStates(100),
+        textStates(500),
+        fc.record({
+          enabled: fc.uniqueArray(positionStates, { maxLength: 4 }),
+          drawn: fc.uniqueArray(positionStates, { maxLength: 4 }),
+          numbers: fc.uniqueArray(fc.integer({ min: 1, max: 1000000 }), {
+            minLength: 4,
+            maxLength: 4,
+          }),
+          removeDrawn: fc.boolean(),
+          extra: fc.integer({ min: 0, max: 1000000 }),
+          lastPosition: positionStates,
+          at: fc.maxSafeInteger(),
+          hasLast: fc.boolean(),
+        }),
+        (text, infoslide, generated) => {
+          const drawn = generated.drawn.map((position, index) => ({
+            position,
+            drawNo: generated.numbers[index] ?? 1,
+          }))
+          const drawCount = Math.max(0, ...drawn.map((item) => item.drawNo)) + generated.extra
+          const last =
+            drawCount > 0 && (drawn.length > 0 || generated.hasLast)
+              ? {
+                  position:
+                    drawn.find((item) => item.drawNo === drawCount)?.position ??
+                    generated.lastPosition,
+                  drawNo: drawCount,
+                  at: generated.at,
+                }
+              : null
+          const value = {
+            ...extendedSnapshot(),
+            motion: { text, infoslide },
+            drum: {
+              enabled: generated.enabled,
+              drawn,
+              removeDrawn: generated.removeDrawn,
+              last,
+              drawCount,
+            },
+          }
+          const transported: unknown = JSON.parse(JSON.stringify(value))
+          expect(readSnapshot(transported, ROUND_ID)).toEqual(value)
+          expect(isSnapshot(transported)).toBe(true)
+        },
+      ),
+    )
+  })
+})

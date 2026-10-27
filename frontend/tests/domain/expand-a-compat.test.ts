@@ -1,13 +1,23 @@
 import { expect, it } from 'vitest'
-import { isSnapshot, readSnapshot } from '@/domain/snapshot'
+import { isSnapshot, readSnapshot, record } from '@/domain/snapshot'
 import snapshotJson from '../fixtures/expand-a-timer-snapshot.json?raw'
 
-it('B preserves the public timer/undo snapshot emitted by the actual frozen A serializer', () => {
+it('preserves the public timer/undo snapshot emitted by the actual frozen A3 serializer', () => {
   // Python regenerates this response through committed A source and checks the same golden.
   const transported: unknown = JSON.parse(snapshotJson)
+  if (!record(transported)) throw new Error('The frozen A3 snapshot must be an object')
   const parsed = readSnapshot(transported, 'R'.repeat(22))
-  expect(isSnapshot(transported)).toBe(true)
-  expect(parsed).toEqual(transported)
+  expect(isSnapshot(transported)).toBe(false)
+  expect(isSnapshot(parsed)).toBe(true)
+  expect(parsed).toMatchObject(transported)
+  expect(parsed?.motion).toEqual({ text: '', infoslide: '' })
+  expect(parsed?.drum).toEqual({
+    enabled: ['og', 'oo', 'cg', 'co'],
+    drawn: [],
+    removeDrawn: true,
+    last: null,
+    drawCount: 0,
+  })
   expect(parsed?.timers.prep).toEqual({
     durationMs: 1234567,
     status: 'running',

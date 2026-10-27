@@ -33,6 +33,10 @@ from debatemeet.round.application.presence import (
     SyncPresence,
 )
 from debatemeet.round.application.room_commands import ExecuteRoundCommand
+from debatemeet.round.chat.api.messages import message_router
+from debatemeet.round.chat.application.read_messages import ReadMessages
+from debatemeet.round.chat.contract.messages import ChatDeletedPacket, ChatPacket, PostedMessage
+from debatemeet.round.chat.infrastructure.postgres import PostgresMessages
 from debatemeet.round.contract.entry import StatePacket
 from debatemeet.round.infrastructure.postgres import PostgresRounds
 from debatemeet.shared.api.errors import install_error_handlers
@@ -61,6 +65,7 @@ def build_app(
     lifespan: Lifespan | None = None,
     round_commands: RoundEndpoints | None = None,
     room_commands: ExecuteRoundCommand | None = None,
+    messages: ReadMessages | None = None,
 ) -> FastAPI:
     """The HTTP app over ports; tests call it with fakes."""
     app = FastAPI(
@@ -77,13 +82,15 @@ def build_app(
     app.include_router(webhook_router(webhook_verifier, media_events))
     app.include_router(entry_router(round_commands, version))
     app.include_router(room_router(room_commands, version))
+    app.include_router(message_router(messages))
     # Data packets travel through LiveKit, but their schema belongs to the same public contract.
     schema = app.openapi()
-    packet_schema = StatePacket.model_json_schema(ref_template="#/components/schemas/{model}")
     schemas = schema.setdefault("components", {}).setdefault("schemas", {})
-    for name, definition in packet_schema.pop("$defs", {}).items():
-        schemas.setdefault(name, definition)
-    schemas["StatePacket"] = packet_schema
+    for packet in (StatePacket, ChatPacket, ChatDeletedPacket, PostedMessage):
+        packet_schema = packet.model_json_schema(ref_template="#/components/schemas/{model}")
+        for name, definition in packet_schema.pop("$defs", {}).items():
+            schemas.setdefault(name, definition)
+        schemas[packet.__name__] = packet_schema
     return app
 
 
@@ -93,6 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     engine = create_engine(settings.database_url)
     clock = SystemClock()
     rounds = PostgresRounds(engine, PostgresMediaOutbox)
+    messages = PostgresMessages(engine)
     limiter = PostgresRateLimiter(engine)
     random = SecureRandom()
     livekit = LiveKitApiAdapter(
@@ -113,7 +121,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     runtime = MediaRuntime(
         SnapshotPublisher(
-            rounds, livekit, delivery, PostgresPublisherLease(engine), clock, settings.app_version
+            rounds,
+            livekit,
+            delivery,
+            PostgresPublisherLease(engine),
+            clock,
+            settings.app_version,
+            packets=messages,
         ),
         handler,
         livekit,
@@ -147,4 +161,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ReadSnapshot(rounds),
         ),
         room_commands=ExecuteRoundCommand(rounds, media, rounds, clock, limiter),
+        messages=ReadMessages(messages, rounds),
     )

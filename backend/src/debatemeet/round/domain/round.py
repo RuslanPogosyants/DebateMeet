@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from debatemeet.round.domain.drum import Drum
 from debatemeet.round.domain.events import (
     DisconnectCause,
     EntryChanged,
@@ -34,6 +35,7 @@ from debatemeet.round.domain.events import (
 )
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
+from debatemeet.round.domain.motion import Motion
 from debatemeet.round.domain.presence import (
     EVICT_AFTER,
     Connected,
@@ -89,6 +91,8 @@ class Round:
     )
     speech_no: int = 1
     speech_undo: SpeechUndo | None = None
+    motion: Motion = field(default_factory=Motion)
+    drum: Drum = field(default_factory=Drum)
     # Set by the repository: every committed command moves it by one.
     version: int = 0
     _events: list[DomainEvent] = field(default_factory=list, init=False, repr=False)
