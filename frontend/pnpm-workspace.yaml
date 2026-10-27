@@ -8,6 +8,6 @@ overrides:
   # 3.2.2 lost the provenance 3.2.1 had; vitest asks for ^3.2.1.
   why-is-node-running: 3.2.1
 
-# Keep output failures observable until the pinned SDK awaits AudioContext.setSinkId upstream.
+# Keep output promises and source capture cancellation fenced in the pinned SDK.
 patchedDependencies:
   livekit-client@2.22.3: patches/livekit-client@2.22.3.patch

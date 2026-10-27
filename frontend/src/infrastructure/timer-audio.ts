@@ -1,4 +1,5 @@
 import type { TimerAudio, TimerAudioEvents, TimerAudioState, TimerCue } from '@/application/ports'
+import { routeOutput } from './audio-output'
 
 type ScheduledCue = { source: OscillatorNode; gain: GainNode; startsAt: number }
 
@@ -9,9 +10,39 @@ export class WebAudioTimerAudio implements TimerAudio {
   private readonly played = new Set<string>()
   private closed = false
   private reported: TimerAudioState = 'closed'
+  private outputQueue: Promise<void> = Promise.resolve()
 
   constructor(events: TimerAudioEvents) {
     this.events = events
+  }
+
+  async output(id: string): Promise<string> {
+    if (this.closed) throw new DOMException('Timer audio closed', 'InvalidStateError')
+    const context = this.ensureContext()
+    const job = this.outputQueue.then(() => {
+      if (this.closed || this.context !== context)
+        throw new DOMException('Timer audio closed', 'InvalidStateError')
+      return routeOutput(context, id)
+    })
+    this.outputQueue = job.then(
+      () => {},
+      () => {},
+    )
+    return job
+  }
+
+  private ensureContext(): AudioContext {
+    if (this.context !== null) return this.context
+    const context = new AudioContext()
+    this.context = context
+    context.addEventListener('statechange', () => {
+      if (this.closed || this.context !== context) return
+      if (context.state !== 'running') this.cancel()
+      this.report(
+        context.state === 'running' ? 'running' : context.state === 'closed' ? 'closed' : 'blocked',
+      )
+    })
+    return context
   }
 
   async resume(): Promise<boolean> {
@@ -19,24 +50,14 @@ export class WebAudioTimerAudio implements TimerAudio {
     this.cancel()
     if (this.context === null) {
       try {
-        this.context = new AudioContext()
-        this.context.addEventListener('statechange', () => {
-          if (this.closed || this.context === null) return
-          if (this.context.state !== 'running') this.cancel()
-          this.report(
-            this.context.state === 'running'
-              ? 'running'
-              : this.context.state === 'closed'
-                ? 'closed'
-                : 'blocked',
-          )
-        })
+        this.ensureContext()
       } catch {
         this.report('blocked')
         return false
       }
     }
     const context = this.context
+    if (context === null) return false
     this.report(context.state === 'running' ? 'running' : 'blocked')
     try {
       await context.resume()

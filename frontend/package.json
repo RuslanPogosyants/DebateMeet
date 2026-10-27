@@ -12,7 +12,7 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:e2e": "vite build && playwright test",
+    "test:e2e": "docker build -f ../deploy/dev/netem.Dockerfile --tag debatemeet-netem:dev ../deploy/dev && VITE_APP_VERSION=\"$(../tools/app-version.sh)\" vite build && playwright test",
     "measure:rooms": "vite build && playwright test --config playwright.measure.config.ts",
     "depcruise": "depcruise src",
     "budget": "node scripts/check-budget.ts",
@@ -33,6 +33,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",

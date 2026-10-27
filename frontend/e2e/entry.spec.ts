@@ -26,8 +26,18 @@ test('two participants join with muted microphones, hear a remote tone and retur
   try {
     await second.goto(link)
     await join(second, 'Борис')
-    await expect(page.getByText('Борис', { exact: true }).first()).toBeVisible()
-    await expect(second.getByText('Алиса', { exact: true }).first()).toBeVisible()
+    await expect(
+      page
+        .getByRole('article', { name: 'Борис', exact: true })
+        .locator('.tile-caption')
+        .getByText('Борис', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      second
+        .getByRole('article', { name: 'Алиса', exact: true })
+        .locator('.tile-caption')
+        .getByText('Алиса', { exact: true }),
+    ).toBeVisible()
     expect(await outputLevel(page)).toBeLessThan(0.001)
 
     await second.getByRole('button', { name: 'Микрофон выключен', exact: true }).click()

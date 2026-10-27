@@ -1,6 +1,24 @@
 import type { Devices, Preview } from '@/application/ports'
+import { routeOutput } from './audio-output'
 
 export class BrowserDevices implements Devices {
+  private outputId = ''
+  private soundContext: AudioContext | null = null
+  private outputQueue: Promise<void> = Promise.resolve()
+
+  output(id: string): Promise<string | null> {
+    this.outputId = id
+    const context = this.soundContext
+    if (context === null) return Promise.resolve(null)
+    const job = this.outputQueue.then(() =>
+      this.soundContext === context ? routeOutput(context, this.outputId) : null,
+    )
+    this.outputQueue = job.then(
+      () => {},
+      () => {},
+    )
+    return job
+  }
   async preview(cameraId?: string, microphoneId?: string): Promise<Preview> {
     const stream = new MediaStream()
     let cameraError: unknown = null
@@ -64,8 +82,11 @@ export class BrowserDevices implements Devices {
   }
 
   async sound(): Promise<void> {
+    if (this.soundContext !== null) return
     const context = new AudioContext()
+    this.soundContext = context
     try {
+      await this.output(this.outputId)
       await context.resume()
       const oscillator = context.createOscillator()
       const gain = context.createGain()
@@ -78,6 +99,7 @@ export class BrowserDevices implements Devices {
       })
       oscillator.stop()
     } finally {
+      if (this.soundContext === context) this.soundContext = null
       await context.close()
     }
   }

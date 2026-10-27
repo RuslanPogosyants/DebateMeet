@@ -30,6 +30,19 @@ export class BrowserPreferences implements Preferences {
     return this.get(NAME) ?? ''
   }
 
+  sceneLayout(): 'speaker' | 'grid' {
+    return this.get('debatemeet.sceneLayout') === 'grid' ? 'grid' : 'speaker'
+  }
+  setSceneLayout(value: 'speaker' | 'grid'): void {
+    this.set('debatemeet.sceneLayout', value)
+  }
+  selfVisible(): boolean {
+    return this.get('debatemeet.selfVisible') !== 'false'
+  }
+  setSelfVisible(value: boolean): void {
+    this.set('debatemeet.selfVisible', String(value))
+  }
+
   volume(roundId: string, participantId: string): number {
     const raw = this.get(`debatemeet.volume.${roundId}.${participantId}`)
     if (raw === null || raw.trim() === '') return 1

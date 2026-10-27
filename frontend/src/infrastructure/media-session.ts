@@ -1,5 +1,6 @@
 import {
   ConnectionState,
+  ConnectionQuality,
   DefaultReconnectPolicy,
   DisconnectReason,
   RemoteAudioTrack,
@@ -9,10 +10,20 @@ import {
   setLogLevel,
 } from 'livekit-client'
 import type { RemoteTrack } from 'livekit-client'
-import type { DeviceSelection, EndReason, MediaEvents, MediaSession } from '@/application/ports'
+import type {
+  ClientClock,
+  DeviceKind,
+  DeviceSelection,
+  EndReason,
+  MediaEvents,
+  MediaSession,
+} from '@/application/ports'
 import { record, subscriptions, type Snapshot } from '@/domain/snapshot'
 import { readChatEvent } from '@/domain/chat'
 import { readMicrophoneEvent, readReaction } from '@/domain/social'
+import { MediaDevices } from './media-devices'
+import { MediaStats, type StatsSource } from './media-stats'
+import { BrowserClientClock } from './client-clock'
 
 function ended(reason: DisconnectReason | undefined): EndReason {
   if (reason === DisconnectReason.DUPLICATE_IDENTITY) return 'replaced'
@@ -34,19 +45,31 @@ export class LiveKitMediaSession implements MediaSession {
   private readonly audio = new Map<string, { track: RemoteAudioTrack; element: HTMLMediaElement }>()
   private readonly video = new Map<string, HTMLVideoElement>()
   private readonly volumes = new Map<string, number>()
+  private readonly context: AudioContext
+  private readonly stats: MediaStats
+  private devices: MediaDevices | null = null
 
-  constructor() {
+  constructor(clock: ClientClock = new BrowserClientClock()) {
     // The round name is an access key. SDK debug logs must not print connection URLs/tokens.
     setLogLevel('silent')
     const retries = new DefaultReconnectPolicy()
+    this.context = new AudioContext()
     this.room = new Room({
       adaptiveStream: true,
       dynacast: true,
-      webAudioMix: true,
+      webAudioMix: { audioContext: this.context },
       reconnectPolicy: {
         nextRetryDelayInMs: (context) =>
           this.events?.mayReconnect() === false ? null : retries.nextRetryDelayInMs(context),
       },
+    })
+    this.stats = new MediaStats(
+      () => this.statsSource(),
+      clock,
+      (value) => this.events?.diagnostics(value),
+    )
+    this.room.on(RoomEvent.ConnectionQualityChanged, () => {
+      this.people()
     })
     this.room.on(RoomEvent.ParticipantConnected, () => {
       this.refresh()
@@ -128,16 +151,19 @@ export class LiveKitMediaSession implements MediaSession {
       }
     })
     this.room.on(RoomEvent.Reconnecting, () => {
+      this.stats.close()
       this.events?.reconnecting()
     })
     this.room.on(RoomEvent.Reconnected, () => {
       this.refresh()
+      this.stats.start()
       this.events?.reconnected()
     })
     this.room.on(RoomEvent.AudioPlaybackStatusChanged, (playing) => {
       this.events?.playback(!playing)
     })
     this.room.on(RoomEvent.Disconnected, (reason) => {
+      this.stats.close()
       this.clearTracks()
       if (!this.intentional) this.events?.ended(ended(reason))
     })
@@ -158,42 +184,62 @@ export class LiveKitMediaSession implements MediaSession {
     devices: DeviceSelection = {},
   ): Promise<void> {
     this.events = events
+    this.devices = new MediaDevices(
+      this.room,
+      this.context,
+      () => [...this.audio.values()].map((entry) => entry.element),
+      events,
+    )
     this.intentional = false
     await this.room.connect(url, token, { autoSubscribe: false })
     this.self = this.room.localParticipant.identity
+    if (devices.outputId !== undefined)
+      await this.devices.select('audiooutput', devices.outputId).catch((error: unknown) => {
+        events.deviceError(error)
+      })
     if (devices.cameraId)
-      await this.room.switchActiveDevice('videoinput', devices.cameraId).catch((error: unknown) => {
+      await this.devices.select('videoinput', devices.cameraId).catch((error: unknown) => {
         events.deviceError(error)
       })
     if (devices.microphoneId)
-      await this.room
-        .switchActiveDevice('audioinput', devices.microphoneId)
-        .catch((error: unknown) => {
-          events.deviceError(error)
-        })
+      await this.devices.select('audioinput', devices.microphoneId).catch((error: unknown) => {
+        events.deviceError(error)
+      })
     this.metadata(this.room.metadata ?? '')
     await this.room.startAudio().catch(() => {
       events.playback(true)
     })
     // Never publish a microphone until its owner explicitly switches it on.
     if (camera)
-      await this.room.localParticipant.setCameraEnabled(true).catch((error: unknown) => {
+      await this.devices.camera(true).catch((error: unknown) => {
         events.deviceError(error)
       })
     if (this.room.state !== ConnectionState.Connected) {
       throw new Error('The media session ended before entry completed')
     }
     this.refresh()
+    this.stats.start()
+    this.stats.measure()
   }
 
   async disconnect(): Promise<void> {
     this.intentional = true
+    this.stats.close()
+    this.devices?.close()
     await this.room.disconnect()
     this.clearTracks()
+    await this.context.close().catch(() => {})
   }
 
   apply(snapshot: Snapshot, self: string): Promise<void> {
     this.cancelTransition?.()
+    const previous = this.snapshot
+    if (
+      previous?.epoch !== snapshot.epoch ||
+      previous.participants.find((person) => person.id === self)?.room !==
+        snapshot.participants.find((person) => person.id === self)?.room
+    )
+      this.stats.measure()
     this.snapshot = snapshot
     this.self = self
     // refresh detaches old audio synchronously before requesting any new subscriptions.
@@ -229,13 +275,75 @@ export class LiveKitMediaSession implements MediaSession {
   }
 
   async microphone(enabled: boolean): Promise<void> {
-    await this.room.localParticipant.setMicrophoneEnabled(enabled)
+    await this.devices?.microphone(enabled)
     this.refresh()
   }
 
   async camera(enabled: boolean): Promise<void> {
-    await this.room.localParticipant.setCameraEnabled(enabled)
+    await this.devices?.camera(enabled)
     this.refresh()
+  }
+  readDevices() {
+    return (
+      this.devices?.read() ??
+      Promise.resolve({ available: [], selected: {}, outputSupported: false })
+    )
+  }
+  selectDevice(kind: DeviceKind, id: string) {
+    if (this.devices === null) return Promise.reject(new Error('Media unavailable'))
+    return this.devices.select(kind, id)
+  }
+  subscribedVideoIds(): readonly string[] {
+    return [...this.room.remoteParticipants.values()]
+      .filter(
+        (person) =>
+          this.wanted.has(person.identity) &&
+          [...person.videoTrackPublications.values()].some(
+            (publication) => publication.isSubscribed,
+          ),
+      )
+      .map((person) => person.identity)
+  }
+  measureAudio(): void {
+    this.stats.measure()
+  }
+
+  private statsSource(): StatsSource {
+    const quality = this.room.localParticipant.connectionQuality
+    return {
+      quality:
+        quality === ConnectionQuality.Excellent
+          ? 'excellent'
+          : quality === ConnectionQuality.Good
+            ? 'good'
+            : quality === ConnectionQuality.Poor
+              ? 'poor'
+              : quality === ConnectionQuality.Lost
+                ? 'lost'
+                : 'unknown',
+      playbackAllowed: this.room.canPlaybackAudio,
+      contextRunning: this.context.state === 'running',
+      visible: typeof document === 'undefined' || document.visibilityState === 'visible',
+      tracks: [this.room.localParticipant, ...this.room.remoteParticipants.values()].flatMap(
+        (person) =>
+          [...person.trackPublications.values()].flatMap((publication) =>
+            publication.track === undefined
+              ? []
+              : [
+                  {
+                    track: publication.track,
+                    sid: publication.trackSid,
+                    local: person === this.room.localParticipant,
+                    audio: publication.kind === Track.Kind.Audio,
+                    wanted: this.wanted.has(person.identity),
+                    attached: this.audio.has(person.identity),
+                    muted: publication.isMuted,
+                    volume: this.volumes.get(person.identity) ?? 1,
+                  },
+                ],
+          ),
+      ),
+    }
   }
 
   async startAudio(): Promise<void> {
@@ -306,12 +414,20 @@ export class LiveKitMediaSession implements MediaSession {
   }
 
   private people(): void {
+    const people = [this.room.localParticipant, ...this.room.remoteParticipants.values()]
+    const priority = new Map(
+      (this.room.activeSpeakers ?? []).map((speaker, index) => [speaker.identity, index]),
+    )
+    const ordered = people.toSorted(
+      (left, right) => (priority.get(left.identity) ?? 100) - (priority.get(right.identity) ?? 100),
+    )
     this.events?.people(
-      [this.room.localParticipant, ...this.room.remoteParticipants.values()].map((person) => ({
+      ordered.map((person) => ({
         id: person.identity,
         microphone: person.isMicrophoneEnabled,
         camera: person.isCameraEnabled,
         speaking: person.isSpeaking,
+        quality: person.connectionQuality,
       })),
     )
   }
@@ -333,6 +449,7 @@ export class LiveKitMediaSession implements MediaSession {
       element.dataset.participant = identity
       track.attach(element)
       document.body.append(element)
+      void this.devices?.audioAttached(element)
       this.audio.set(identity, { track, element })
     } else {
       this.refreshVideo(identity)

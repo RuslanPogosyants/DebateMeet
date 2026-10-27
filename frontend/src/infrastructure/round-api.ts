@@ -9,6 +9,10 @@ import { readSnapshot, record, type Snapshot } from '@/domain/snapshot'
 import type { ReactionCode } from '@/domain/social'
 
 export class HttpRoundApi implements RoundApi {
+  private readonly observeVersion: ((value: unknown) => void) | undefined
+  constructor(observeVersion?: (value: unknown) => void) {
+    this.observeVersion = observeVersion
+  }
   private async unsupported(
     response: Response,
     roundId: string,
@@ -28,7 +32,17 @@ export class HttpRoundApi implements RoundApi {
   }
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
     try {
-      return await fetch(path, { ...init, cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+      const response = await fetch(path, {
+        ...init,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      })
+      try {
+        this.observeVersion?.(response.headers.get('X-App-Version'))
+      } catch {
+        /* Passive version observation never gates an API response. */
+      }
+      return response
     } catch {
       throw new ClientError('network')
     }

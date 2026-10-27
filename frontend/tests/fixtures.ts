@@ -1,4 +1,6 @@
 import type { Snapshot } from '@/domain/snapshot'
+import { VersionSession } from '@/application/version-session'
+import { BrowserErrorBus } from '@/infrastructure/error-sanitizer'
 import type {
   Credentials,
   ChatApi,
@@ -16,6 +18,9 @@ import type {
   TimerAudio,
   TimerAudioEvents,
   TimerCue,
+  DeviceKind,
+  DeviceSelection,
+  MediaDeviceState,
 } from '@/application/ports'
 import type { MessagePage, PostedMessage } from '@/domain/chat'
 
@@ -65,6 +70,20 @@ export class MemoryPreferences implements Preferences {
   savedName = ''
   volumes = new Map<string, number>()
   hidden = false
+  layout: 'speaker' | 'grid' = 'speaker'
+  showSelf = true
+  sceneLayout() {
+    return this.layout
+  }
+  setSceneLayout(value: 'speaker' | 'grid') {
+    this.layout = value
+  }
+  selfVisible() {
+    return this.showSelf
+  }
+  setSelfVisible(value: boolean) {
+    this.showSelf = value
+  }
   volume(round: string, participant: string) {
     return this.volumes.get(`${round}.${participant}`) ?? 1
   }
@@ -166,6 +185,20 @@ export class FakeMedia implements MediaSession {
   cameraChanges: boolean[] = []
   videos = new Map<string, HTMLVideoElement>()
   volumes = new Map<string, number>()
+  selected: DeviceSelection = {}
+  readDevices(): Promise<MediaDeviceState> {
+    return Promise.resolve({ available: [], selected: this.selected, outputSupported: false })
+  }
+  selectDevice(kind: DeviceKind, id: string): Promise<MediaDeviceState> {
+    if (kind === 'audioinput') this.selected.microphoneId = id
+    else if (kind === 'videoinput') this.selected.cameraId = id
+    else this.selected.outputId = id
+    return this.readDevices()
+  }
+  subscribedVideoIds(): readonly string[] {
+    return [...this.videos.keys()]
+  }
+  measureAudio(): void {}
   volume(identity: string, value: number) {
     this.volumes.set(identity, value)
   }
@@ -204,6 +237,9 @@ export class FakeMedia implements MediaSession {
 }
 
 export class FakeDevices implements Devices {
+  output(id: string) {
+    return Promise.resolve(id)
+  }
   preview(): Promise<Preview> {
     return Promise.reject(new Error('No devices in this test'))
   }
@@ -240,6 +276,9 @@ export class FakeOwnership implements SessionOwnership {
 }
 
 export class FakeTimerAudio implements TimerAudio {
+  output(id: string) {
+    return Promise.resolve(id)
+  }
   readonly events: TimerAudioEvents
   plans: readonly TimerCue[][] = []
   resumes = 0
@@ -274,6 +313,10 @@ export function fixture() {
   const ownership = new FakeOwnership()
   const timerAudio: FakeTimerAudio[] = []
   const services: Services = {
+    appVersion: 'test',
+    versions: new VersionSession('test'),
+    diagnostics: { telemetry: () => Promise.resolve(), errors: () => Promise.resolve() },
+    errors: new BrowserErrorBus('http://localhost'),
     api,
     chat,
     clientClock: { now: () => Date.now(), wallNow: () => Date.now() },

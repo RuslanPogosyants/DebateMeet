@@ -18,6 +18,8 @@ import {
   strings,
 } from '@/ui/strings'
 import { Sheet } from './sheet'
+import { RuntimeDevices } from './round-resilience'
+import { resilienceStrings } from '@/ui/strings'
 
 const reactions: readonly [ReactionCode, string][] = [
   ['clap', '👏'],
@@ -61,7 +63,7 @@ export function HandButton({ controller }: { controller: RoundController }) {
         {raised ? socialStrings.lower : socialStrings.raise}
       </span>
       <span className="control-label-short" aria-hidden="true">
-        {socialStrings.hand}
+        {raised ? socialStrings.lowerShort : socialStrings.raiseShort}
       </span>
     </button>
   )
@@ -107,6 +109,7 @@ export function ParticipantActions({
 }) {
   const state = useStore(controller.store)
   const volumes = useStore(controller.social.store, (social) => social.volumes)
+  const pinned = useStore(controller.scene.store, (scene) => scene.pinnedId)
   const [open, setOpen] = useState(false)
   const volumeId = useId()
   const own = state.snapshot?.participants.find((person) => person.id === state.self)
@@ -118,7 +121,6 @@ export function ParticipantActions({
   const volume = Math.round(
     (volumes[participant.id] ?? controller.social.volume(participant.id)) * 100,
   )
-  if (self && (!judge || participant.handRaisedAt === null)) return null
   return (
     <>
       <button
@@ -133,6 +135,18 @@ export function ParticipantActions({
       {open && (
         <Sheet title={participantActions(participant.name)} onClose={() => setOpen(false)}>
           <div className="participant-actions-content">
+            {own?.room === participant.room && (
+              <button
+                className="action"
+                type="button"
+                onClick={() => {
+                  controller.scene.pin(pinned === participant.id ? null : participant.id)
+                  setOpen(false)
+                }}
+              >
+                {pinned === participant.id ? resilienceStrings.unpin : resilienceStrings.pin}
+              </button>
+            )}
             {!self && (
               <div className="participant-volume">
                 <label htmlFor={volumeId}>{participantVolume(participant.name)}</label>
@@ -234,6 +248,7 @@ function LowerAllHands({ controller }: { controller: RoundController }) {
 
 export function SocialNotices({ controller }: { controller: RoundController }) {
   const social = useStore(controller.social.store)
+  const pending = useStore(controller.store, (state) => state.microphoneIntent === true)
   return (
     <>
       {social.notice && (
@@ -247,6 +262,8 @@ export function SocialNotices({ controller }: { controller: RoundController }) {
             <button
               className="action"
               type="button"
+              disabled={pending}
+              aria-busy={pending}
               onClick={() => {
                 void controller.microphone(true)
               }}
@@ -358,12 +375,20 @@ export function SoundControls({ controller }: { controller: RoundController }) {
   const [error, setError] = useState<unknown>(null)
   return (
     <>
-      <button className="action" type="button" onClick={() => setOpen(true)}>
+      <button
+        className="action"
+        type="button"
+        onClick={() => {
+          setOpen(true)
+          void controller.devices.refresh()
+        }}
+      >
         {strings.round.devices}
       </button>
       {open && (
         <Sheet title={strings.round.devices} onClose={() => setOpen(false)}>
           <div className="sound-controls">
+            <RuntimeDevices controller={controller} />
             <button
               className="action"
               type="button"

@@ -24,7 +24,17 @@ import { RoundTimers, TimerHealth } from '@/ui/components/round-timers'
 import { MotionDisplay } from '@/ui/components/round-motion'
 import { RoundSidebar } from '@/ui/components/round-sidebar'
 import { Sheet } from '@/ui/components/sheet'
-import { contentStrings, socialStrings } from '@/ui/strings'
+import {
+  ConnectionNotice,
+  DiagnosticsPanel,
+  ProblemReport,
+  QualityMark,
+  RoundViewBoundary,
+  RoundFailureActions,
+  SceneControls,
+  VersionNotice,
+} from '@/ui/components/round-resilience'
+import { contentStrings, socialStrings, resilienceStrings } from '@/ui/strings'
 import { useServices } from '@/ui/services'
 import {
   deviceErrorText,
@@ -171,19 +181,27 @@ function ParticipantTile({
   self,
   controller,
   hand,
+  primary,
+  pinned,
 }: {
   participant: Participant
   media: MediaPerson | undefined
   self: boolean
   controller: RoundController
   hand: number
+  primary: boolean
+  pinned: boolean
 }) {
   const video = useRef<HTMLVideoElement>(null)
   useEffect(() => {
     return video.current === null ? () => {} : controller.attachVideo(participant.id, video.current)
   }, [controller, participant.id])
   return (
-    <article className={`participant-tile${self ? ' own-tile' : ''}`} aria-label={participant.name}>
+    <article
+      className={`participant-tile${self ? ' own-tile' : ''}${primary ? ' primary-tile' : ''}`}
+      data-primary={primary || undefined}
+      aria-label={participant.name}
+    >
       <div className="tile-actions">
         <HandBadge position={hand} />
         <ParticipantActions controller={controller} participant={participant} />
@@ -209,6 +227,8 @@ function ParticipantTile({
         <p className="text-caption tile-secondary">
           {media?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
         </p>
+        <QualityMark quality={media?.quality ?? 'unknown'} />
+        {pinned && <span className="text-caption">{resilienceStrings.pinned}</span>}
       </div>
     </article>
   )
@@ -217,14 +237,45 @@ function ParticipantTile({
 function Meeting({ controller }: { controller: RoundController }) {
   const layout = useMeetingLayout()
   const state = useStore(controller.store)
+  const scene = useStore(controller.scene.store)
   const [judgeLeave, setJudgeLeave] = useState(false)
   const [transferAndLeave, setTransferAndLeave] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        setDiagnosticsOpen(true)
+      }
+    }
+    window.addEventListener('keydown', shortcut)
+    return () => window.removeEventListener('keydown', shortcut)
+  }, [])
   const unread = useStore(controller.chat.store, (chat) => chat.unread)
   const chatLabel =
     unread > 0 ? `${contentStrings.chatButton} — ${unread} новых` : contentStrings.chatButton
   const self = state.people.find((person) => person.id === state.self)
+  const microphoneEnabled = state.microphoneIntent ?? self?.microphone ?? false
+  const cameraEnabled = state.cameraIntent ?? self?.camera ?? false
+  const microphoneLabel =
+    state.microphoneIntent === true && !self?.microphone
+      ? resilienceStrings.cancelMicrophoneEnable
+      : state.microphoneIntent === false && self?.microphone
+        ? resilienceStrings.cancelMicrophoneDisable
+        : microphoneEnabled
+          ? strings.round.microphoneOn
+          : strings.round.microphoneOff
+  const cameraLabel =
+    state.cameraIntent === true && !self?.camera
+      ? resilienceStrings.cancelCameraEnable
+      : state.cameraIntent === false && self?.camera
+        ? resilienceStrings.cancelCameraDisable
+        : cameraEnabled
+          ? strings.round.cameraOn
+          : strings.round.cameraOff
   const room =
     state.snapshot?.participants.find((person) => person.id === state.self)?.room ?? 'base'
   const visible =
@@ -234,6 +285,10 @@ function Meeting({ controller }: { controller: RoundController }) {
         (person.id === state.self || state.people.some((media) => media.id === person.id)),
     ) ?? []
   const queue = state.snapshot ? handQueue(state.snapshot, room) : []
+  const videoIds = new Set(scene.videoIds)
+  const omitted = visible.filter(
+    (person) => !videoIds.has(person.id) && (scene.showSelf || person.id !== state.self),
+  )
   function leave() {
     setMoreOpen(false)
     if (state.snapshot?.judgeFlag.holder === state.self) setJudgeLeave(true)
@@ -247,10 +302,27 @@ function Meeting({ controller }: { controller: RoundController }) {
           <MotionDisplay controller={controller} editable={layout !== 'narrow'} />
         </div>
         <JudgeControl controller={controller} panel={layout === 'narrow'} />
-        <CopyLink />
+        <div className="meeting-header-actions">
+          <div className="desktop-diagnostics-actions">
+            <button
+              className="text-link"
+              type="button"
+              aria-keyshortcuts="Control+Shift+D"
+              onClick={() => setDiagnosticsOpen(true)}
+            >
+              {resilienceStrings.diagnostics}
+            </button>
+            <button className="text-link" type="button" onClick={() => setReportOpen(true)}>
+              {resilienceStrings.report}
+            </button>
+          </div>
+          <CopyLink />
+        </div>
       </header>
       <TimerHealth controller={controller} />
       <div className="meeting-notices">
+        <VersionNotice controller={controller} />
+        <ConnectionNotice controller={controller} />
         <SocialNotices controller={controller} />
         {state.motionChanged && (
           <div className="meeting-banner" role="status">
@@ -356,28 +428,32 @@ function Meeting({ controller }: { controller: RoundController }) {
             </button>
           )}
           <HandQueue controller={controller} />
+          <SceneControls controller={controller} />
           <section className="meeting-stage" aria-label={strings.round.people}>
             <ReactionDisplay controller={controller} />
-            <div className="participant-grid">
-              {visible.slice(0, 12).map((participant) => (
-                <ParticipantTile
-                  key={participant.id}
-                  participant={participant}
-                  media={state.people.find((person) => person.id === participant.id)}
-                  self={participant.id === state.self}
-                  controller={controller}
-                  hand={queue.findIndex((person) => person.id === participant.id) + 1}
-                />
-              ))}
+            <div
+              className={`participant-grid${scene.layout === 'speaker' ? ' speaker-layout' : ''}`}
+              data-layout={scene.layout}
+            >
+              {visible
+                .filter((person) => videoIds.has(person.id))
+                .map((participant) => (
+                  <ParticipantTile
+                    key={participant.id}
+                    participant={participant}
+                    media={state.people.find((person) => person.id === participant.id)}
+                    self={participant.id === state.self}
+                    controller={controller}
+                    hand={queue.findIndex((person) => person.id === participant.id) + 1}
+                    primary={scene.layout === 'speaker' && scene.primaryId === participant.id}
+                    pinned={scene.pinnedId === participant.id}
+                  />
+                ))}
             </div>
             {visible.length === 1 && <p className="alone-message">{strings.round.alone}</p>}
-            {visible.length > 12 && (
+            {omitted.length > 0 && (
               <p className="more-people">
-                {strings.round.morePeople}:{' '}
-                {visible
-                  .slice(12)
-                  .map((person) => person.name)
-                  .join(', ')}
+                {strings.round.morePeople}: {omitted.map((person) => person.name).join(', ')}
               </p>
             )}
           </section>
@@ -390,15 +466,14 @@ function Meeting({ controller }: { controller: RoundController }) {
         <button
           className="action"
           type="button"
-          aria-pressed={self?.microphone ?? false}
-          aria-label={self?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+          aria-pressed={microphoneEnabled}
+          aria-label={microphoneLabel}
+          aria-busy={state.microphoneIntent !== null}
           onClick={() => {
-            void controller.microphone(!self?.microphone)
+            void controller.microphone(!microphoneEnabled)
           }}
         >
-          <span className="control-label-full">
-            {self?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
-          </span>
+          <span className="control-label-full">{microphoneLabel}</span>
           <span className="control-label-short" aria-hidden="true">
             {strings.round.microphone}
           </span>
@@ -406,15 +481,14 @@ function Meeting({ controller }: { controller: RoundController }) {
         <button
           className="action"
           type="button"
-          aria-pressed={self?.camera ?? false}
-          aria-label={self?.camera ? strings.round.cameraOn : strings.round.cameraOff}
+          aria-pressed={cameraEnabled}
+          aria-label={cameraLabel}
+          aria-busy={state.cameraIntent !== null}
           onClick={() => {
-            void controller.cameraEnabled(!self?.camera)
+            void controller.cameraEnabled(!cameraEnabled)
           }}
         >
-          <span className="control-label-full">
-            {self?.camera ? strings.round.cameraOn : strings.round.cameraOff}
-          </span>
+          <span className="control-label-full">{cameraLabel}</span>
           <span className="control-label-short" aria-hidden="true">
             {strings.round.camera}
           </span>
@@ -450,6 +524,12 @@ function Meeting({ controller }: { controller: RoundController }) {
           <div className="more-controls">
             <ReactionControls controller={controller} expanded />
             <SoundControls controller={controller} />
+            <button className="action" type="button" onClick={() => setDiagnosticsOpen(true)}>
+              {resilienceStrings.diagnostics}
+            </button>
+            <button className="action" type="button" onClick={() => setReportOpen(true)}>
+              {resilienceStrings.report}
+            </button>
             <button className="action" type="button" onClick={leave}>
               {strings.round.leave}
             </button>
@@ -465,6 +545,10 @@ function Meeting({ controller }: { controller: RoundController }) {
           <RoundSidebar controller={controller} tabs controls={false} />
         </Sheet>
       )}
+      {diagnosticsOpen && (
+        <DiagnosticsPanel controller={controller} onClose={() => setDiagnosticsOpen(false)} />
+      )}
+      {reportOpen && <ProblemReport controller={controller} onClose={() => setReportOpen(false)} />}
       {judgeLeave && (
         <ConfirmDialog
           title={strings.round.judgeLeave}
@@ -519,6 +603,7 @@ export function RoundPage() {
   const state = useStore(controller.store)
   const [anyway, setAnyway] = useState(false)
   useEffect(() => {
+    controller.activate()
     const hide = () => {
       controller.pageHidden()
     }
@@ -536,10 +621,18 @@ export function RoundPage() {
     }
   }, [controller])
   if (state.stage === 'connected' || state.stage === 'reconnecting')
-    return <Meeting controller={controller} />
+    return (
+      <RoundViewBoundary
+        onError={(error) => controller.captureError(error)}
+        fallback={<RoundFailureActions controller={controller} />}
+      >
+        <Meeting controller={controller} />
+      </RoundViewBoundary>
+    )
   if (state.stage === 'left')
     return (
       <main className="entry-shell">
+        <VersionNotice controller={controller} canReload />
         <h1 className="font-display text-display font-bold">{endedText[state.ended ?? 'left']}</h1>
         {state.ended !== 'removed' && state.ended !== 'deleted' && (
           <button
@@ -560,6 +653,7 @@ export function RoundPage() {
   if (state.stage === 'joining')
     return (
       <main className="entry-shell">
+        <VersionNotice controller={controller} />
         <h1 className="font-display text-display font-bold" role="status">
           {strings.round.joining}
         </h1>
@@ -582,6 +676,7 @@ export function RoundPage() {
         </Link>
         <CopyLink />
       </header>
+      <VersionNotice controller={controller} canReload={state.stage === 'prejoin'} />
       {!supportedBrowser() && !anyway ? (
         <section className="entry-form">
           <h1 className="font-display text-display font-bold">{strings.round.unsupported}</h1>

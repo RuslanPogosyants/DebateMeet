@@ -1,0 +1,21 @@
+groups:
+  - name: debatemeet-client-window
+    rules:
+      # These inputs are rolling-window gauges, never counters.
+      - record: debatemeet:client_quality_good_ratio_28d
+        expr: sum(debatemeet_client_window_28d_quality_duration_ms{quality=~"excellent|good"}) / sum(debatemeet_client_window_28d_quality_duration_ms{quality!="unknown"})
+      - record: debatemeet:client_quality_coverage_28d
+        expr: sum(debatemeet_client_window_28d_quality_duration_ms{quality!="unknown"}) / sum(debatemeet_client_window_28d_quality_duration_ms)
+      - record: debatemeet:client_sli_observed_ratio_28d
+        expr: sum by (metric) (debatemeet_client_window_28d_outcomes{outcome="observed"}) / sum by (metric) (debatemeet_client_window_28d_outcomes)
+      # Exact threshold buckets avoid a misleading p95 capped at the last finite bucket.
+      - record: debatemeet:client_join_within_target_ratio_28d
+        expr: sum(debatemeet_client_window_28d_sli_bucket{metric="join_decoded_playback_ms",outcome="observed",le="5000"}) / sum(debatemeet_client_window_28d_sli_count{metric="join_decoded_playback_ms",outcome="observed"})
+      - record: debatemeet:client_switch_within_target_ratio_28d
+        expr: sum(debatemeet_client_window_28d_sli_bucket{metric="room_switch_decoded_playback_ms",outcome="observed",le="1000"}) / sum(debatemeet_client_window_28d_sli_count{metric="room_switch_decoded_playback_ms",outcome="observed"})
+      - record: debatemeet:client_snapshot_within_target_ratio_28d
+        expr: sum(debatemeet_client_window_28d_sli_bucket{metric="snapshot_delivery_ms",outcome="observed",le="500"}) / sum(debatemeet_client_window_28d_sli_count{metric="snapshot_delivery_ms",outcome="observed"})
+      - record: debatemeet:client_reconnect_within_target_ratio_28d
+        expr: sum(debatemeet_client_window_28d_sli_bucket{metric="reconnect_media_ms",outcome="observed",le="10000"}) / sum(debatemeet_client_window_28d_sli_count{metric="reconnect_media_ms",outcome="observed"})
+      - record: debatemeet:client_clock_within_target_ratio_28d
+        expr: sum(debatemeet_client_window_28d_sli_bucket{metric="clock_offset_uncertainty_ms",outcome="observed",le="250"}) / sum(debatemeet_client_window_28d_sli_count{metric="clock_offset_uncertainty_ms",outcome="observed"})

@@ -63,6 +63,37 @@ describe('timer lifecycle', () => {
     expect(first.closed).toBe(1)
   })
 
+  it('keeps future cues on a successful lifecycle anchor after a stale estimate and transient time failure', async () => {
+    const { session, api, audio, value, advance } = setup()
+    session.start()
+    session.resume()
+    session.accept(value)
+    await session.resync()
+    advance(70000)
+    api.time.mockRejectedValue(new Error('503'))
+    await session.resync()
+    expect(session.usableClock()).toBe(false)
+    expect(session.store.getState()).toMatchObject({ synchronized: true, degraded: true })
+    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([290000, 350000, 365000])
+  })
+
+  it('silences an invalidated lifecycle anchor until a successful post-gap estimate', async () => {
+    const { session, api, audio, value, advance } = setup()
+    session.start()
+    session.resume()
+    session.accept(value)
+    await session.resync()
+    advance(370000)
+    api.time.mockRejectedValue(new Error('503'))
+    session.foreground(true)
+    await session.resync()
+    expect(audio[0]?.plans.at(-1)).toEqual([])
+    expect(session.store.getState()).toMatchObject({ synchronized: false, degraded: true })
+    api.time.mockImplementation(() => Promise.resolve(session.serverNow()))
+    await session.resync()
+    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([50000, 65000])
+  })
+
   it('cancels on pause and skips past milestones after foreground recovery', async () => {
     const { session, audio, value, advance } = setup()
     session.start()
@@ -73,6 +104,8 @@ describe('timer lifecycle', () => {
     if (!first) throw new Error('No audio')
     advance(370000)
     session.foreground()
+    expect(first.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([50000, 65000])
+    await session.resync()
     expect(first.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([50000, 65000])
     const paused = {
       ...value,

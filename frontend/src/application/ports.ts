@@ -2,6 +2,14 @@ import type { components } from '@/contract/api'
 import type { Snapshot } from '@/domain/snapshot'
 import type { ChatEvent, MessagePage, PostedMessage } from '@/domain/chat'
 import type { MicrophonePacket, ReactionCode, ReactionPacket } from '@/domain/social'
+import type {
+  ErrorBatch,
+  ErrorCode,
+  MediaObservation,
+  SafeError,
+  TelemetryBatch,
+} from '@/domain/diagnostics'
+import type { VersionSession } from './version-session'
 
 export type Joined = components['schemas']['JoinResponse']
 export type Credentials = { participantId: string; secret: string }
@@ -73,6 +81,10 @@ export interface Preferences {
   setVolume(roundId: string, participantId: string, value: number): void
   reactionsHidden(): boolean
   setReactionsHidden(hidden: boolean): void
+  sceneLayout(): 'speaker' | 'grid'
+  setSceneLayout(value: 'speaker' | 'grid'): void
+  selfVisible(): boolean
+  setSelfVisible(value: boolean): void
 }
 
 export type MediaPerson = {
@@ -80,8 +92,15 @@ export type MediaPerson = {
   microphone: boolean
   camera: boolean
   speaking: boolean
+  quality?: import('@/domain/diagnostics').MediaRecord['quality']
 }
-export type DeviceSelection = { cameraId?: string; microphoneId?: string }
+export type DeviceKind = 'audioinput' | 'videoinput' | 'audiooutput'
+export type DeviceSelection = { cameraId?: string; microphoneId?: string; outputId?: string }
+export type MediaDeviceState = {
+  available: readonly MediaDeviceInfo[]
+  selected: DeviceSelection
+  outputSupported: boolean
+}
 export type EndReason = 'replaced' | 'left' | 'removed' | 'deleted' | 'network'
 export type MediaEvents = {
   mayReconnect(): boolean
@@ -95,6 +114,8 @@ export type MediaEvents = {
   ended(reason: EndReason): void
   playback(blocked: boolean): void
   deviceError(error: unknown): void
+  devices(value: MediaDeviceState): void
+  diagnostics(value: MediaObservation): void
 }
 
 export interface MediaSession {
@@ -113,6 +134,10 @@ export interface MediaSession {
   startAudio(): Promise<void>
   volume(identity: string, value: number): void
   attachVideo(identity: string, element: HTMLVideoElement): () => void
+  readDevices(): Promise<MediaDeviceState>
+  selectDevice(kind: DeviceKind, id: string): Promise<MediaDeviceState>
+  subscribedVideoIds(): readonly string[]
+  measureAudio(): void
 }
 
 export type Preview = {
@@ -126,6 +151,7 @@ export interface Devices {
   preview(cameraId?: string, microphoneId?: string): Promise<Preview>
   list(): Promise<MediaDeviceInfo[]>
   sound(): Promise<void>
+  output(id: string): Promise<string | null>
 }
 
 export interface SessionOwnership {
@@ -149,6 +175,16 @@ export interface TimerAudio {
   replace(cues: readonly TimerCue[]): void
   silence(): void
   close(): void
+  output(id: string): Promise<string>
+}
+
+export interface DiagnosticApi {
+  telemetry(roundId: string, credentials: Credentials, body: TelemetryBatch): Promise<void>
+  errors(roundId: string, credentials: Credentials, body: ErrorBatch): Promise<void>
+}
+export interface ClientErrorBus {
+  capture(error: unknown, code: ErrorCode): void
+  subscribe(callback: (error: SafeError) => void): () => void
 }
 
 export interface Services {
@@ -160,4 +196,8 @@ export interface Services {
   devices: Devices
   media(): Promise<MediaSession>
   ownership(roundId: string): SessionOwnership
+  appVersion: string
+  versions: VersionSession
+  diagnostics: DiagnosticApi
+  errors: ClientErrorBus
 }

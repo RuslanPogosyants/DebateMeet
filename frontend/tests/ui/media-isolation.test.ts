@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MediaEvents } from '@/application/ports'
 import { BOB, SELF, snapshot } from '../fixtures'
 
@@ -43,12 +43,23 @@ const sdk = vi.hoisted(() => {
       return undefined
     }
   }
+  class LocalPerson extends Person {
+    readonly sid = 'PA_self'
+    async setMicrophoneEnabled(enabled: boolean): Promise<void> {
+      await Promise.resolve()
+      this.isMicrophoneEnabled = enabled
+    }
+    async setCameraEnabled(enabled: boolean): Promise<void> {
+      await Promise.resolve()
+      this.isCameraEnabled = enabled
+    }
+  }
   const rooms: Room[] = []
   class Room {
     state = 'connected'
     metadata = ''
     canPlaybackAudio = true
-    localParticipant = Object.assign(new Person('a'.repeat(12)), { sid: 'PA_self' })
+    localParticipant = new LocalPerson('a'.repeat(12))
     remoteParticipants = new Map<string, Person>()
     handlers = new Map<string, (...args: unknown[]) => void>()
     constructor() {
@@ -56,6 +67,9 @@ const sdk = vi.hoisted(() => {
     }
     on(name: string, handler: (...args: unknown[]) => void) {
       this.handlers.set(name, handler)
+    }
+    off(name: string) {
+      this.handlers.delete(name)
     }
     emit(name: string, ...args: unknown[]) {
       this.handlers.get(name)?.(...args)
@@ -78,6 +92,13 @@ vi.mock('livekit-client', () => ({
   Room: sdk.Room,
   RemoteAudioTrack: sdk.Audio,
   ConnectionState: { Connected: 'connected' },
+  ConnectionQuality: {
+    Excellent: 'excellent',
+    Good: 'good',
+    Poor: 'poor',
+    Lost: 'lost',
+    Unknown: 'unknown',
+  },
   DisconnectReason: {},
   DefaultReconnectPolicy: class {
     nextRetryDelayInMs() {
@@ -124,10 +145,26 @@ const events: MediaEvents = {
   ended: () => {},
   playback: () => {},
   deviceError: () => {},
+  devices: () => {},
+  diagnostics: () => {},
 }
+
+beforeEach(() => {
+  vi.stubGlobal(
+    'AudioContext',
+    class {
+      state = 'running'
+      close() {
+        this.state = 'closed'
+        return Promise.resolve()
+      }
+    },
+  )
+})
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
   sdk.rooms.length = 0
   document.querySelectorAll('audio').forEach((element) => element.remove())
 })

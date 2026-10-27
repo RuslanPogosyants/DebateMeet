@@ -13,6 +13,8 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --store-dir /pnpm/store
 COPY . .
 # Only the bundle: CI type-checks, lints and tests the same sources.
+ARG APP_VERSION=dev
+ENV VITE_APP_VERSION=${APP_VERSION}
 RUN pnpm exec vite build
 
 FROM scratch

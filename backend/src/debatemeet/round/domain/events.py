@@ -26,6 +26,11 @@ class RoundCreated(DomainEvent):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RoundDeleted(DomainEvent):
+    round_id: RoundId
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ParticipantJoined(DomainEvent):
     """Joined over REST: pending until the media connects. Not LiveKit's `participant_joined`,
     which is the command `connect`."""

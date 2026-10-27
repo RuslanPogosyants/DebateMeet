@@ -246,7 +246,12 @@ describe('microphone controls and per-person volume', () => {
         <ParticipantActions controller={controller} participant={own} />
       </>,
     )
-    expect(screen.queryByRole('button', { name: 'Действия — Вика' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Действия — Вика' }))
+    const ownActions = screen.getByRole('dialog', { name: 'Действия — Вика' })
+    expect(within(ownActions).getByRole('button', { name: 'Закрепить' })).toBeVisible()
+    expect(within(ownActions).queryByRole('slider')).not.toBeInTheDocument()
+    expect(within(ownActions).queryByRole('button', { name: /микрофон/u })).not.toBeInTheDocument()
+    fireEvent(ownActions, new Event('cancel', { cancelable: true }))
     const trigger = screen.getByRole('button', { name: 'Действия — Борис' })
     await userEvent.click(trigger)
     const slider = screen.getByRole('slider', { name: 'Громкость — Борис' })
