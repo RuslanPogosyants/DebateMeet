@@ -1,8 +1,9 @@
-import { expect, test, type CDPSession, type Page } from '@playwright/test'
+import { expect, type CDPSession, type Page } from '@playwright/test'
+import { test } from './test'
 import { measureRenderedAudio, startOutputRecording, stopOutputRecording } from './media'
 import { passiveBands } from './passive-audio'
 import { launchNativeBrowser } from './native-browser'
-import { claimJudge, enter, join, snapshot } from './round'
+import { claimJudge, createRound, enter, join, snapshot } from './round'
 
 type Tick = { text: string; at: number }
 declare global {
@@ -10,13 +11,6 @@ declare global {
     debatemeetTimerTicks: Tick[]
     debatemeetClockRtts: number[]
   }
-}
-
-async function createRound(page: Page, name: string, address = '/') {
-  await page.goto(address)
-  await page.getByRole('button', { name: 'Создать раунд', exact: true }).click()
-  await expect(page).toHaveURL(/\/r\/[A-Za-z0-9_-]{22}$/u)
-  await join(page, name)
 }
 
 async function clockProbe(page: Page, skewMs: number) {

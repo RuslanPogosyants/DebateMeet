@@ -1,6 +1,7 @@
 import { createStore } from 'zustand/vanilla'
 import { SubscriptionManager } from './subscription-manager'
 import { TimerSession } from './timer-session'
+import { ChatSession } from './chat-session'
 import { AloneWatchdog } from './alone-watchdog'
 import { readSnapshot, type Snapshot } from '@/domain/snapshot'
 import {
@@ -31,10 +32,12 @@ export type RoundState = {
   alonePrompt: boolean
   returnedToBase: boolean
   roomChanges: { from: LogicalRoom; to: LogicalRoom; names: string[] }[]
+  motionChanged: boolean
 }
 
 export class RoundController {
   readonly timers: TimerSession
+  readonly chat: ChatSession
   readonly store = createStore<RoundState>(() => ({
     stage: 'prejoin',
     snapshot: null,
@@ -50,6 +53,7 @@ export class RoundController {
     alonePrompt: false,
     returnedToBase: false,
     roomChanges: [],
+    motionChanged: false,
   }))
   private session: MediaSession | null = null
   private readonly ownership: SessionOwnership
@@ -61,6 +65,7 @@ export class RoundController {
   private timer: ReturnType<typeof setInterval> | null = null
   private polling = false
   private readonly subscriptions = new SubscriptionManager()
+  private motionBaseline: Snapshot['motion'] | null = null
   private readonly alone = new AloneWatchdog(
     () => Date.now(),
     (alonePrompt) => this.store.setState({ alonePrompt }),
@@ -85,12 +90,16 @@ export class RoundController {
     this.timers = new TimerSession(services.api, services.clientClock, (events) =>
       services.timerAudio(events),
     )
+    this.chat = new ChatSession(roundId, services.chat, (code) => {
+      void this.leave(code === 'not_found' ? 'deleted' : 'removed')
+    })
   }
 
   private async accept(value: unknown, ownCommand = false): Promise<void> {
     const next = readSnapshot(value, this.roundId)
     if (next === null) return
     this.timers.accept(next)
+    this.chat.observeEpoch(next.epoch)
     const generation = this.generation
     if (
       !(await this.subscriptions.apply(next, this.credentials?.participantId ?? null, this.session))
@@ -122,8 +131,17 @@ export class RoundController {
     this.store.setState({
       roomChanges,
       snapshot: next,
+      motionChanged:
+        this.store.getState().motionChanged ||
+        (!ownCommand &&
+          this.store.getState().stage === 'connected' &&
+          this.motionBaseline !== null &&
+          previous?.epoch === next.epoch &&
+          (this.motionBaseline.text !== next.motion.text ||
+            this.motionBaseline.infoslide !== next.motion.infoslide)),
       returnedToBase: !ownCommand && was !== undefined && was !== 'base' && room === 'base',
     })
+    this.motionBaseline = next.motion
   }
 
   async join(name: string, camera: boolean, devices: DeviceSelection = {}): Promise<void> {
@@ -159,6 +177,7 @@ export class RoundController {
       await this.session?.disconnect()
       this.session = null
       this.timers.close()
+      this.chat.close()
       this.ownership.release()
       this.store.setState({
         stage: 'prejoin',
@@ -180,6 +199,7 @@ export class RoundController {
       await this.session?.disconnect()
       this.session = null
       this.timers.close()
+      this.chat.close()
       this.ownership.release()
       this.store.setState({
         stage: 'prejoin',
@@ -190,11 +210,13 @@ export class RoundController {
 
   cancelTransfer(): void {
     this.timers.close()
+    this.chat.close()
     this.store.setState({ stage: 'prejoin' })
   }
 
   private ownershipLost(): void {
     this.timers.close()
+    this.chat.close()
     ++this.generation
     this.stopPolling()
     this.stopAlone()
@@ -212,6 +234,8 @@ export class RoundController {
   }
 
   private async connect(generation: number, takeover = false): Promise<void> {
+    this.motionBaseline = null
+    this.store.setState({ motionChanged: false })
     const expectedIdentity = takeover ? this.credentials?.participantId : null
     if (takeover && expectedIdentity === undefined) throw new ClientError('credentials_unavailable')
     if (!takeover && !(await this.ownership.current())) throw new ClientError('session_replaced')
@@ -250,6 +274,9 @@ export class RoundController {
             snapshot: (value) => {
               if (generation === this.generation) void this.accept(value)
             },
+            chat: (value) => {
+              if (generation === this.generation) this.chat.receive(value)
+            },
             people: (people) => {
               if (generation === this.generation) {
                 this.store.setState({ people })
@@ -260,6 +287,7 @@ export class RoundController {
             reconnecting: () => {
               if (connected && generation === this.generation) {
                 this.store.setState({ stage: 'reconnecting' })
+                this.chat.suspend()
                 void this.ownership.current().then((current) => {
                   if (!current && generation === this.generation) this.ownershipLost()
                 })
@@ -269,7 +297,16 @@ export class RoundController {
               if (!connected || generation !== this.generation) return
               this.store.setState({ stage: 'connected' })
               this.timers.foreground()
-              void this.refresh()
+              this.motionBaseline = null
+              if (this.credentials !== null)
+                this.chat.start(
+                  this.credentials,
+                  this.subscriptions.latest?.epoch ?? joined.snapshot.epoch,
+                )
+              void this.refresh().finally(() => {
+                if (generation === this.generation)
+                  this.motionBaseline = this.store.getState().snapshot?.motion ?? null
+              })
             },
             ended: (reason) => {
               // Initial connect failures belong to this attempt's rejected promise. Retrying
@@ -297,6 +334,7 @@ export class RoundController {
       }
     })
     if (generation !== this.generation) return
+    this.chat.start(this.credentials, this.subscriptions.latest?.epoch ?? joined.snapshot.epoch)
     this.store.setState({ stage: 'connected', controlUnavailable: false })
     this.alone.update(this.store.getState().people.length === 1)
     if (this.idleTimer !== null) clearInterval(this.idleTimer)
@@ -306,9 +344,13 @@ export class RoundController {
       void this.refresh()
     }, 15_000)
     await this.refresh()
+    if (generation === this.generation)
+      this.motionBaseline = this.store.getState().snapshot?.motion ?? null
   }
 
   private async disconnected(reason: EndReason): Promise<void> {
+    if (reason === 'network') this.chat.suspend()
+    else this.chat.close()
     if (reason === 'network') this.timers.suspend()
     else this.timers.close()
     const generation = ++this.generation
@@ -343,6 +385,7 @@ export class RoundController {
       if (generation !== this.generation) return
       const code = error instanceof ClientError ? error.code : 'media_unavailable'
       this.timers.close()
+      this.chat.close()
       this.store.setState({
         stage: 'left',
         ended: code === 'participant_removed' ? 'removed' : 'network',
@@ -418,7 +461,12 @@ export class RoundController {
     } catch (error) {
       if (generation !== this.generation) return
       const code = error instanceof ClientError ? error.code : 'network'
-      const uncertain = ['network', 'invalid_response', 'internal_error'].includes(code)
+      const uncertain = [
+        'network',
+        'invalid_response',
+        'internal_error',
+        'command_unavailable',
+      ].includes(code)
       if (!uncertain) this.pendingIntent = null
       this.store.setState({ error: code, commandUncertain: uncertain })
       if (code === 'participant_removed' || code === 'unauthorized' || code === 'not_found')
@@ -433,6 +481,9 @@ export class RoundController {
   }
   dismissReturned(): void {
     this.store.setState({ returnedToBase: false })
+  }
+  dismissMotion(): void {
+    this.store.setState({ motionChanged: false })
   }
 
   async microphone(enabled: boolean): Promise<void> {
@@ -492,6 +543,7 @@ export class RoundController {
 
   async leave(reason: EndReason = 'left'): Promise<void> {
     this.timers.close()
+    this.chat.close()
     this.pageHidden()
     this.ownership.release()
     ++this.generation
@@ -514,6 +566,7 @@ export class RoundController {
 
   dispose(): void {
     this.timers.close()
+    this.chat.close()
     this.pageHidden()
     this.ownership.release()
     ++this.generation

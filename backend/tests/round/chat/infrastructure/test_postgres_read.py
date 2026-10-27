@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import pytest
@@ -24,6 +25,7 @@ from debatemeet.round.chat.contract.messages import (
 )
 from debatemeet.round.chat.domain.message import PG_BIGINT_MAX, Message, MessageKind
 from debatemeet.round.chat.infrastructure.postgres import PostgresMessages
+from debatemeet.round.chat.infrastructure.transactions import PostgresSystemMessages
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.postgres import PostgresRounds
 from debatemeet.shared.api.errors import install_error_handlers
@@ -73,7 +75,13 @@ async def world(database_url: str) -> AsyncIterator[World]:
     async with isolated_database(database_url) as url:
         await migrate(url)
         engine = create_async_engine(url, pool_size=1, max_overflow=0, pool_timeout=2)
-        rounds = PostgresRounds(engine, PostgresMediaOutbox)
+        rounds = PostgresRounds(
+            engine,
+            PostgresMediaOutbox,
+            system_messages_factory=partial(
+                PostgresSystemMessages, outbox_factory=PostgresMediaOutbox
+            ),
+        )
         async with rounds.begin() as tx:
             await tx.rounds.add(Round(RID), T0)
             await tx.rounds.add(Round(OTHER), T0)
@@ -205,8 +213,12 @@ async def test_http_authentication_revocation_and_query_validation(world: World)
             assert response.status_code == 422
             assert response.headers["cache-control"] == "no-store"
         assert (
-            await client.post(route, headers=headers, json={"text": "not implemented in A4"})
-        ).status_code == 405
+            await client.post(
+                route,
+                headers={**headers, "Idempotency-Key": "00000000-0000-0000-0000-000000000001"},
+                json={"text": "writer not configured"},
+            )
+        ).status_code == 503
         async with world.engine.begin() as connection:
             await connection.execute(
                 text("UPDATE participants SET revoked=true WHERE round_id=:round_id"),

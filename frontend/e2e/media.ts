@@ -129,7 +129,7 @@ export async function startOutputRecording(page: Page, frequencies: number[]): P
     window.debatemeetAudioRecording = window.setInterval(() => {
       window.debatemeetAudioFrames.push({
         at: performance.now(),
-        room: document.querySelector('h1')?.textContent ?? '',
+        room: document.querySelector('[data-testid="current-room-heading"]')?.textContent ?? '',
         bands: window.debatemeetReadBands(bands),
       })
     }, 20)

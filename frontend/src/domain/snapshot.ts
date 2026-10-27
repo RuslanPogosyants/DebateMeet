@@ -105,7 +105,7 @@ function timerExtension(value: Record<string, unknown>): boolean {
   )
 }
 
-function plainText(value: unknown, maxPoints: number, maxBytes: number): boolean {
+export function plainText(value: unknown, maxPoints: number, maxBytes: number): boolean {
   if (typeof value !== 'string' || untrimmedText.test(value)) return false
   const points = Array.from(value)
   return (

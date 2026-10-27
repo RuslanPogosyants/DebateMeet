@@ -10,6 +10,7 @@ from debatemeet.round.chat.contract.messages import (
     DeletedMessageView,
     MessageView,
     PostedMessage,
+    PostMessageBody,
     epoch_ms,
     message_view,
     packet_bytes,
@@ -112,3 +113,16 @@ def test_maximum_live_and_delete_packets_fit_the_media_limit() -> None:
     for invalid in ([], [*deleted, deleted[0]], [deleted[0], deleted[0]]):
         with pytest.raises(ValidationError):
             ChatDeletedPacket(round_id="R" * 22, epoch=1, deleted=invalid)
+
+
+@pytest.mark.parametrize("value", [None, 1, True, "", " \n\t ", "x" * 1001, "bad\x85", "\ud800"])
+def test_post_body_rejects_invalid_text(value: object) -> None:
+    with pytest.raises(ValidationError):
+        PostMessageBody.model_validate({"text": value})
+
+
+def test_post_body_normalizes_before_counting_and_rejects_client_author_fields() -> None:
+    assert PostMessageBody(text=" " * 1000 + " text\r\nnext\t " + " " * 1000).text == "text\nnext"
+    assert PostMessageBody(text="😀" * 1000).text == "😀" * 1000
+    with pytest.raises(ValidationError):
+        PostMessageBody.model_validate({"text": "text", "authorName": "spoofed"})

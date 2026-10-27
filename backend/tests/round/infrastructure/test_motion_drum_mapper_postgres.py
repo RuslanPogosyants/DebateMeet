@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from functools import partial
 
 import pytest
 from sqlalchemy import text
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from debatemeet.media.infrastructure.postgres import PostgresMediaOutbox
 from debatemeet.migrate import migrate
+from debatemeet.round.chat.infrastructure.transactions import PostgresSystemMessages
 from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
 from debatemeet.round.domain.ids import ParticipantId
 from debatemeet.round.domain.motion import Motion
@@ -27,7 +29,16 @@ async def persistence(database_url: str) -> AsyncIterator[tuple[AsyncEngine, Pos
         await migrate(url)
         engine = create_async_engine(url)
         try:
-            yield engine, PostgresRounds(engine, PostgresMediaOutbox)
+            yield (
+                engine,
+                PostgresRounds(
+                    engine,
+                    PostgresMediaOutbox,
+                    system_messages_factory=partial(
+                        PostgresSystemMessages, outbox_factory=PostgresMediaOutbox
+                    ),
+                ),
+            )
         finally:
             await engine.dispose()
 

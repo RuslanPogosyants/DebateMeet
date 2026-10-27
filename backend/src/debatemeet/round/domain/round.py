@@ -1,21 +1,24 @@
 """The Round aggregate: everything behind a link but the chat (docs/architecture.md, section 3).
 
-Entry, presence, rooms, timers and the judge flag share this aggregate. Motion, hands and the drum
-arrive with their slices. Every command starts by evicting whoever has been absent too long:
+Entry, presence, rooms, timers, motion, the drum and the judge flag share this aggregate.
+Every command starts by evicting whoever has been absent too long:
 eviction is lazy, it happens on any command of the round.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
-from debatemeet.round.domain.drum import Drum
+from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
 from debatemeet.round.domain.events import (
     DisconnectCause,
+    DrumConfigured,
+    DrumReset,
     EntryChanged,
     JudgeFlagClaimed,
     JudgeFlagHandedOver,
     JudgeFlagReleased,
+    MotionSet,
     ParticipantConnected,
     ParticipantDisconnected,
     ParticipantEntered,
@@ -23,6 +26,7 @@ from debatemeet.round.domain.events import (
     ParticipantJoined,
     ParticipantRemoved,
     ParticipantsRecalled,
+    PositionDrawn,
     RoundCreated,
     SpeechAdvanced,
     SpeechAdvanceUndone,
@@ -36,6 +40,7 @@ from debatemeet.round.domain.events import (
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
 from debatemeet.round.domain.motion import Motion
+from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.presence import (
     EVICT_AFTER,
     Connected,
@@ -275,6 +280,74 @@ class Round:
         self._evict_absent(now)
         if self.judge_flag.holder is not None:
             self._release_flag(self.participants[self.judge_flag.holder], ReleaseReason.ADMIN, now)
+
+    def set_motion(self, actor: ParticipantId, text: str, infoslide: str, now: datetime) -> None:
+        self._evict_absent(now)
+        self._judge(actor)
+        motion = Motion(text, infoslide)
+        if motion == self.motion:
+            return
+        self.motion = motion
+        self._record(MotionSet(at=now))
+
+    def draw_candidates(self, actor: ParticipantId, now: datetime) -> tuple[Position, ...]:
+        """Validate the intent before the application consumes its supplied randomness."""
+        self._evict_absent(now)
+        self._judge(actor)
+        drawn = {entry.position for entry in self.drum.drawn}
+        candidates = tuple(
+            position
+            for position in Position
+            if position in self.drum.enabled
+            and (not self.drum.remove_drawn or position not in drawn)
+        )
+        if not candidates:
+            raise DomainError("drum_empty")
+        if self.drum.draw_count >= JS_MAX_SAFE_INTEGER:
+            raise DomainError("invalid_drum")
+        return candidates
+
+    def draw(self, actor: ParticipantId, position: Position, now: datetime) -> None:
+        candidates = self.draw_candidates(actor, now)
+        if not isinstance(position, Position) or position not in candidates:
+            raise DomainError("invalid_drum")
+        number = self.drum.draw_count + 1
+        drum = replace(
+            self.drum,
+            drawn=(*self.drum.drawn, DrawnPosition(position, number))
+            if self.drum.remove_drawn
+            else self.drum.drawn,
+            last=DrawResult(position, number, now),
+            draw_count=number,
+        )
+        self.drum = drum
+        self._record(PositionDrawn(at=now, position=position, draw_no=number))
+
+    def reset_drum(self, actor: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        self._judge(actor)
+        if not self.drum.drawn and self.drum.last is None:
+            return
+        self.drum = replace(self.drum, drawn=(), last=None)
+        self._record(DrumReset(at=now))
+
+    def configure_drum(
+        self,
+        actor: ParticipantId,
+        enabled: tuple[Position, ...],
+        remove_drawn: bool,
+        now: datetime,
+    ) -> None:
+        self._evict_absent(now)
+        self._judge(actor)
+        configured = replace(self.drum, enabled=enabled, remove_drawn=remove_drawn)
+        if set(configured.enabled) == set(self.drum.enabled) and (
+            configured.remove_drawn == self.drum.remove_drawn
+        ):
+            return
+        canonical = tuple(position for position in Position if position in configured.enabled)
+        self.drum = replace(configured, enabled=canonical)
+        self._record(DrumConfigured(at=now, enabled=canonical, remove_drawn=remove_drawn))
 
     def start_timer(self, actor: ParticipantId, kind: TimerKind, now: datetime) -> None:
         previous = self._timer_for_judge(actor, kind, now)

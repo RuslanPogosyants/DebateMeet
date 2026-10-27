@@ -5,6 +5,7 @@ from typing import TypedDict
 
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import ReleaseReason
+from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.timer import Timer, TimerKind
 from debatemeet.shared.domain.events import DomainEvent
@@ -157,3 +158,25 @@ class SpeechAdvanced(DomainEvent):
 class SpeechAdvanceUndone(DomainEvent):
     speech_no: int
     timer: TimerState
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MotionSet(DomainEvent):
+    """The content stays in the round, never in the audit log."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PositionDrawn(DomainEvent):
+    position: Position
+    draw_no: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DrumReset(DomainEvent):
+    pass
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DrumConfigured(DomainEvent):
+    enabled: tuple[Position, ...]
+    remove_drawn: bool

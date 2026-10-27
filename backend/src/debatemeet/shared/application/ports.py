@@ -18,6 +18,10 @@ class RandomSource(Protocol):
         """`size` random bytes from a cryptographic source, in base64url without padding."""
         ...
 
+    def below(self, upper: int) -> int:
+        """Uniformly choose an index in range(upper), with upper strictly positive."""
+        ...
+
 
 class EventLog(Protocol):
     async def append(

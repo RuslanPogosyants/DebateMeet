@@ -38,6 +38,8 @@ class Store:
     commits: int = 0
     media_removals: list[tuple[RoundId, ParticipantId, datetime]] = field(default_factory=list)
     media_packets: list[tuple[RoundId, str, bytes, datetime]] = field(default_factory=list)
+    chat_prepared: list[RoundId] = field(default_factory=list)
+    system_draws: list[tuple[RoundId, str, int, datetime, int]] = field(default_factory=list)
 
 
 def _stored(round_: Round) -> Round:
@@ -132,6 +134,19 @@ class _EventLog:
         self._store.log.extend(LoggedEvent(round_id, version, event, actor) for event in events)
 
 
+class _SystemMessages:
+    def __init__(self, store: Store) -> None:
+        self._store = store
+
+    async def prepare(self, round_id: RoundId) -> None:
+        self._store.chat_prepared.append(round_id)
+
+    async def position_drawn(
+        self, round_id: RoundId, position: str, draw_no: int, now: datetime, round_version: int
+    ) -> None:
+        self._store.system_draws.append((round_id, position, draw_no, now, round_version))
+
+
 class _CommandKeys:
     def __init__(self, store: Store) -> None:
         self._store = store
@@ -168,6 +183,7 @@ class Transaction:
         self.command_keys = _CommandKeys(store)
         self.notifier = _Notifier(store)
         self.media_outbox = _MediaOutbox(store)
+        self.system_messages = _SystemMessages(store)
 
 
 class InMemoryRounds:
@@ -209,11 +225,18 @@ class SequentialRandom:
 
     def __init__(self) -> None:
         self.issued = 0
+        self.bounds: list[int] = []
 
     def token(self, size: int) -> str:
         self.issued += 1
         length = -(-size * 4 // 3)
         return f"t{self.issued}".ljust(length, "x")
+
+    def below(self, upper: int) -> int:
+        if upper <= 0:
+            raise ValueError("upper must be positive")
+        self.bounds.append(upper)
+        return 0
 
 
 class CountingRateLimiter:

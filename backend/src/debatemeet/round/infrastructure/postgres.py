@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from sqlalchemy import RowMapping, text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from debatemeet.round.application.ports import (
@@ -14,11 +13,12 @@ from debatemeet.round.application.ports import (
     CommittedRound,
     MediaOutbox,
     RoundTransaction,
+    SystemMessages,
 )
 from debatemeet.round.domain.ids import ParticipantId, RoundId
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.mapper import decode_round, encode_round
-from debatemeet.shared.application.errors import RoundBusyError
+from debatemeet.shared.infrastructure.database import command_transaction
 from debatemeet.shared.infrastructure.persistence import PostgresCommandKeys, PostgresEventLog
 
 
@@ -138,7 +138,10 @@ class _ChangeNotifier:
 
 class _Transaction:
     def __init__(
-        self, connection: AsyncConnection, outbox_factory: Callable[[AsyncConnection], MediaOutbox]
+        self,
+        connection: AsyncConnection,
+        outbox_factory: Callable[[AsyncConnection], MediaOutbox],
+        system_messages_factory: Callable[[AsyncConnection], SystemMessages],
     ) -> None:
         self.rounds = _RoundRepository(connection)
         self.archive = PostgresParticipantArchive(connection)
@@ -146,31 +149,26 @@ class _Transaction:
         self.command_keys = PostgresCommandKeys(connection)
         self.notifier = _ChangeNotifier(connection)
         self.media_outbox = outbox_factory(connection)
+        self.system_messages = system_messages_factory(connection)
 
 
 class PostgresRounds:
     """RoundTransactions, RoundReader and SystemState over the same engine."""
 
     def __init__(
-        self, engine: AsyncEngine, outbox_factory: Callable[[AsyncConnection], MediaOutbox]
+        self,
+        engine: AsyncEngine,
+        outbox_factory: Callable[[AsyncConnection], MediaOutbox],
+        system_messages_factory: Callable[[AsyncConnection], SystemMessages],
     ) -> None:
         self._engine = engine
         self._outbox_factory = outbox_factory
+        self._system_messages_factory = system_messages_factory
 
     @asynccontextmanager
     async def begin(self) -> AsyncIterator[RoundTransaction]:
-        try:
-            async with self._engine.begin() as connection:
-                await connection.execute(text("SET LOCAL lock_timeout = '2s'"))
-                await connection.execute(
-                    text("SET LOCAL idle_in_transaction_session_timeout = '5s'")
-                )
-                yield _Transaction(connection, self._outbox_factory)
-        except DBAPIError as error:
-            # asyncpg's adapter exposes PostgreSQL SQLSTATE on its original exception.
-            if getattr(error.orig, "sqlstate", None) == "55P03":
-                raise RoundBusyError from error
-            raise
+        async with command_transaction(self._engine) as connection:
+            yield _Transaction(connection, self._outbox_factory, self._system_messages_factory)
 
     async def committed(self, round_id: RoundId) -> CommittedRound | None:
         async with self._engine.connect() as connection:

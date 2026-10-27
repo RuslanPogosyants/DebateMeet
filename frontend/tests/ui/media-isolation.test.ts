@@ -115,6 +115,7 @@ import { LiveKitMediaSession } from '@/infrastructure/media-session'
 const events: MediaEvents = {
   mayReconnect: () => true,
   snapshot: () => {},
+  chat: () => {},
   people: () => {},
   reconnecting: () => {},
   reconnected: () => {},
@@ -144,6 +145,60 @@ function state(version: number, ownRoom: 'base' | 'og' | 'oo', bobRoom: 'base' |
 }
 
 describe('media subscription safety', () => {
+  it('delivers only validated server chat topics through the existing media owner', async () => {
+    const session = new LiveKitMediaSession()
+    const room = sdk.rooms[0]
+    if (!room) throw new Error('No SDK room')
+    const chat = vi.fn<MediaEvents['chat']>()
+    await session.connect('ws://localhost', 'token', false, { ...events, chat })
+    const value = snapshot()
+    await session.apply(value, SELF)
+    const packet = {
+      topic: 'chat',
+      roundId: value.roundId,
+      epoch: 1,
+      message: {
+        id: '1',
+        changeId: '1',
+        authorId: BOB,
+        authorName: 'Борис',
+        kind: 'user',
+        text: 'Common',
+        createdAt: 1000,
+        deletedAt: null,
+      },
+    }
+    const payload = new TextEncoder().encode(JSON.stringify(packet))
+    room.emit('DataReceived', payload, new sdk.Person(BOB), 0, 'chat')
+    room.emit('DataReceived', payload, undefined, 0, 'chat_deleted')
+    room.emit(
+      'DataReceived',
+      new TextEncoder().encode(JSON.stringify({ ...packet, roundId: 'x'.repeat(22) })),
+      undefined,
+      0,
+      'chat',
+    )
+    room.emit('DataReceived', new Uint8Array(16000), undefined, 0, 'chat')
+    room.emit('DataReceived', new Uint8Array([0xff]), undefined, 0, 'chat')
+    expect(chat).not.toHaveBeenCalled()
+    room.emit('DataReceived', payload, undefined, 0, 'chat')
+    expect(chat).toHaveBeenCalledExactlyOnceWith(packet)
+    const deleted = {
+      topic: 'chat_deleted',
+      roundId: value.roundId,
+      epoch: 1,
+      deleted: [{ id: '1', changeId: '2', deletedAt: 2000 }],
+    }
+    room.emit(
+      'DataReceived',
+      new TextEncoder().encode(JSON.stringify(deleted)),
+      undefined,
+      0,
+      'chat_deleted',
+    )
+    expect(chat).toHaveBeenLastCalledWith(deleted)
+    await session.disconnect()
+  })
   it('silences old audio synchronously before a new room is published', async () => {
     const session = new LiveKitMediaSession()
     const room = sdk.rooms[0]

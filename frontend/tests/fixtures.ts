@@ -1,6 +1,8 @@
 import type { Snapshot } from '@/domain/snapshot'
 import type {
   Credentials,
+  ChatApi,
+  HistoryQuery,
   Devices,
   Joined,
   MediaEvents,
@@ -15,6 +17,7 @@ import type {
   TimerAudioEvents,
   TimerCue,
 } from '@/application/ports'
+import type { MessagePage, PostedMessage } from '@/domain/chat'
 
 export const ROUND_ID = 'r'.repeat(22)
 export const SELF = 'a'.repeat(12)
@@ -93,7 +96,7 @@ export class FakeApi implements RoundApi {
     this.joins.push(value)
     return this.failure === null ? Promise.resolve(this.response) : Promise.reject(this.failure)
   }
-  snapshot() {
+  snapshot(): Promise<Snapshot | null> {
     return Promise.resolve(null)
   }
   command(_: string, __: Credentials, intent: RoundCommand, key: string) {
@@ -103,6 +106,28 @@ export class FakeApi implements RoundApi {
   leave(_: string, __: Credentials, sid: string) {
     this.leaves.push(sid)
     return Promise.resolve()
+  }
+}
+
+export class FakeChatApi implements ChatApi {
+  page: MessagePage = {
+    epoch: 1,
+    messages: [],
+    asOfCursor: '0',
+    nextBefore: null,
+    nextAfter: '0',
+    hasMore: false,
+  }
+  history(_round: string, _credentials: Credentials, query: HistoryQuery) {
+    return Promise.resolve({ ...this.page, nextAfter: query.after ?? this.page.nextAfter })
+  }
+  post(
+    _round: string,
+    _credentials: Credentials,
+    _text: string,
+    _key: string,
+  ): Promise<PostedMessage> {
+    return Promise.reject(new Error('No fake posted message'))
   }
 }
 
@@ -214,12 +239,14 @@ export class FakeTimerAudio implements TimerAudio {
 
 export function fixture() {
   const api = new FakeApi()
+  const chat = new FakeChatApi()
   const preferences = new MemoryPreferences()
   const media: FakeMedia[] = []
   const ownership = new FakeOwnership()
   const timerAudio: FakeTimerAudio[] = []
   const services: Services = {
     api,
+    chat,
     clientClock: { now: () => Date.now(), wallNow: () => Date.now() },
     timerAudio: (events) => {
       const audio = new FakeTimerAudio(events)
@@ -235,5 +262,5 @@ export function fixture() {
       return Promise.resolve(session)
     },
   }
-  return { api, preferences, media, services, ownership, timerAudio }
+  return { api, chat, preferences, media, services, ownership, timerAudio }
 }

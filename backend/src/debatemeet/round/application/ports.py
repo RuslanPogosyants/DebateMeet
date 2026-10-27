@@ -109,6 +109,18 @@ class ChangeNotifier(Protocol):
         ...
 
 
+class SystemMessages(Protocol):
+    async def prepare(self, round_id: RoundId) -> None:
+        """Acquire the chat writer guard before taking the round row lock for a draw."""
+        ...
+
+    async def position_drawn(
+        self, round_id: RoundId, position: str, draw_no: int, now: datetime, round_version: int
+    ) -> None:
+        """Persist the system message, event and packet on this caller-owned transaction."""
+        ...
+
+
 class RoundTransaction(Protocol):
     """One transaction of one command: the round, its archive, the log, the keys and the
     notification all commit together or not at all."""
@@ -130,6 +142,9 @@ class RoundTransaction(Protocol):
 
     @property
     def media_outbox(self) -> MediaOutbox: ...
+
+    @property
+    def system_messages(self) -> SystemMessages: ...
 
 
 class RoundTransactions(Protocol):

@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime
+from functools import partial
 
 import pytest
 from alembic import command
@@ -21,6 +22,7 @@ from debatemeet.media.infrastructure.postgres import (
 )
 from debatemeet.migrate import alembic_config, migrate
 from debatemeet.round.application.ports import PacketTopic
+from debatemeet.round.chat.infrastructure.transactions import PostgresSystemMessages
 from debatemeet.round.domain.ids import ParticipantId, RoundId
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.postgres import PostgresRounds
@@ -55,7 +57,11 @@ async def packet_engine(database_url: str) -> AsyncIterator[AsyncEngine]:
 
 async def seed_round(engine: AsyncEngine) -> tuple[RoundId, PostgresRounds]:
     round_id = RoundId(SecureRandom().token(16))
-    rounds = PostgresRounds(engine, PostgresMediaOutbox)
+    rounds = PostgresRounds(
+        engine,
+        PostgresMediaOutbox,
+        system_messages_factory=partial(PostgresSystemMessages, outbox_factory=PostgresMediaOutbox),
+    )
     async with rounds.begin() as tx:
         await tx.rounds.add(Round.create(round_id, T0), T0)
     return round_id, rounds

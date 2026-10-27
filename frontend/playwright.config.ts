@@ -1,10 +1,15 @@
 import { writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
 
 // The fake microphone repeats a known tone. No physical microphone or speakers are used.
 const tone = join(tmpdir(), 'debatemeet-e2e-tone.wav')
+// Shared by the parent config, worker and owned backend; never a production database.
+const stateFile =
+  process.env['DM_E2E_STATE_FILE'] ?? join(tmpdir(), `debatemeet-e2e-${randomUUID()}.json`)
+process.env['DM_E2E_STATE_FILE'] = stateFile
 const rate = 48000
 const samples = rate
 const wav = Buffer.alloc(44 + samples * 2)
@@ -58,6 +63,7 @@ export default defineConfig({
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
       env: {
         DM_ENVIRONMENT: 'test',
+        DM_E2E_STATE_FILE: stateFile,
         DM_DATABASE_URL:
           process.env['DM_E2E_DATABASE_URL'] ??
           'postgresql+asyncpg://debatemeet:debatemeet@127.0.0.1:5450/debatemeet_test',

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test'
+import { expect } from '@playwright/test'
+import { test } from './test'
 import { measureRenderedAudio } from './media'
 
 test('output meter observes fresh playback and silence after destination-specific disconnect', async ({

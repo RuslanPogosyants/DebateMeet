@@ -5,7 +5,7 @@ from sqlalchemy import RowMapping, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from debatemeet.round.application.ports import PacketTopic, RoundId
-from debatemeet.round.chat.application.ports import MessagePage
+from debatemeet.round.chat.application.ports import CommittedMessage, MessagePage
 from debatemeet.round.chat.contract.messages import (
     MAX_PACKET_BYTES,
     ChatDeletedPacket,
@@ -77,6 +77,25 @@ def _message(row: RowMapping) -> Message:
 class PostgresMessages:
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
+
+    async def posted(self, round_id: RoundId, message_id: int) -> CommittedMessage:
+        async with self._engine.connect() as connection:
+            row = (
+                (
+                    await connection.execute(
+                        text("""SELECT system.epoch,
+                (SELECT max(change_id) FROM messages WHERE round_id=:round_id) AS as_of_cursor,
+                messages.* FROM system JOIN messages ON messages.round_id=:round_id
+                AND messages.id=:message_id WHERE singleton"""),
+                        {"round_id": round_id, "message_id": message_id},
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+        if row is None:
+            raise NotFoundError
+        return CommittedMessage(_epoch(row["epoch"]), int(row["as_of_cursor"]), _message(row))
 
     async def page(
         self,

@@ -3,6 +3,7 @@ import json
 from collections.abc import AsyncIterator, Mapping
 from contextlib import suppress
 from datetime import datetime
+from functools import partial
 
 import pytest
 from livekit import api, rtc
@@ -33,6 +34,7 @@ from debatemeet.round.application.presence import (
     DisconnectParticipant,
     SyncPresence,
 )
+from debatemeet.round.chat.infrastructure.transactions import PostgresSystemMessages
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.postgres import PostgresRounds
@@ -66,7 +68,11 @@ async def media_engine(database_url: str) -> AsyncIterator[AsyncEngine]:
 
 
 async def seed(engine: AsyncEngine) -> tuple[RoundId, PostgresRounds]:
-    rounds = PostgresRounds(engine, PostgresMediaOutbox)
+    rounds = PostgresRounds(
+        engine,
+        PostgresMediaOutbox,
+        system_messages_factory=partial(PostgresSystemMessages, outbox_factory=PostgresMediaOutbox),
+    )
     round_id = RoundId(SecureRandom().token(16))
     async with rounds.begin() as tx:
         await tx.rounds.add(Round.create(round_id, SystemClock().now()), SystemClock().now())
@@ -481,7 +487,11 @@ async def test_real_remove_and_restart_reconciliation_kick_a_revoked_old_jwt(
     media_engine: AsyncEngine,
 ) -> None:
     clock, random, limits = SystemClock(), SecureRandom(), CountingRateLimiter()
-    rounds = PostgresRounds(media_engine, PostgresMediaOutbox)
+    rounds = PostgresRounds(
+        media_engine,
+        PostgresMediaOutbox,
+        system_messages_factory=partial(PostgresSystemMessages, outbox_factory=PostgresMediaOutbox),
+    )
     adapter = LiveKitApiAdapter(dev.URL, dev.API_KEY, dev.API_SECRET)
     store = PostgresMediaStore(media_engine)
     gateway = RoundMediaGateway(rounds, adapter, store, clock, dev.URL, "integration")

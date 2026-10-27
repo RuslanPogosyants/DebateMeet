@@ -105,6 +105,13 @@ export function command(
   return requestSnapshot(page, operation, body)
 }
 
+export async function createRound(page: Page, name: string, address = '/') {
+  await page.goto(address)
+  await page.getByRole('button', { name: 'Создать раунд', exact: true }).click()
+  await expect(page).toHaveURL(/\/r\/[A-Za-z0-9_-]{22}$/u)
+  await join(page, name)
+}
+
 export async function join(page: Page, name: string) {
   await page.getByLabel('Ваше имя').fill(name)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()

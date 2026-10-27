@@ -17,6 +17,91 @@ function setup() {
 }
 
 describe('entry and state', () => {
+  it('retains a draw UUID through a lost response, compatible rollback and restored command support', async () => {
+    const { controller, api, media } = setup()
+    await controller.join('Вика', false)
+    let appliedKey: string | null = null
+    let effects = 0
+    let calls = 0
+    const result = snapshot(2)
+    result.drum = {
+      ...result.drum,
+      drawn: [{ position: 'og', drawNo: 1 }],
+      last: { position: 'og', drawNo: 1, at: 1000 },
+      drawCount: 1,
+    }
+    const command = vi
+      .spyOn(api, 'command')
+      .mockImplementation((_round, _credentials, _intent, key) => {
+        calls += 1
+        if (calls === 2) return Promise.reject(new ClientError('command_unavailable'))
+        if (appliedKey !== key) {
+          effects += 1
+          appliedKey = key
+        }
+        return calls === 1 ? Promise.reject(new ClientError('network')) : Promise.resolve(result)
+      })
+    await controller.command({ type: 'drum/draw' })
+    expect(controller.store.getState().commandUncertain).toBe(true)
+    await controller.retryCommand()
+    expect(controller.store.getState()).toMatchObject({
+      stage: 'connected',
+      commandPending: false,
+      commandUncertain: true,
+      error: 'command_unavailable',
+    })
+    await controller.retryCommand()
+    expect(command).toHaveBeenCalledTimes(3)
+    expect(new Set(command.mock.calls.map((call) => call[3])).size).toBe(1)
+    expect(effects).toBe(1)
+    expect(controller.store.getState()).toMatchObject({
+      commandPending: false,
+      commandUncertain: false,
+      snapshot: result,
+    })
+    expect(media[0]?.stopped).toBe(0)
+  })
+  it('keeps chat history loading independent of media entry and round commands', async () => {
+    const { controller, chat, api } = setup()
+    vi.spyOn(chat, 'history').mockImplementation(() => new Promise(() => {}))
+    await controller.join('Вика', false)
+    expect(controller.store.getState().stage).toBe('connected')
+    expect(controller.chat.store.getState().loading).toBe(true)
+    await controller.command({ type: 'enter', room: 'og' })
+    expect(api.commands.at(-1)?.intent).toEqual({ type: 'enter', room: 'og' })
+  })
+  it('announces a remote motion change after the baseline, without false initial/reconnect notifications', async () => {
+    const { controller, api, media } = setup()
+    api.response.snapshot.motion = { text: 'Initial', infoslide: 'Slide' }
+    await controller.join('Вика', false)
+    expect(controller.store.getState().motionChanged).toBe(false)
+    const changed = {
+      ...api.response.snapshot,
+      version: 2,
+      motion: { text: 'Changed', infoslide: 'Slide' },
+    }
+    const read = vi.spyOn(api, 'snapshot').mockResolvedValueOnce(changed)
+    await controller.refresh()
+    expect(controller.store.getState().motionChanged).toBe(true)
+    controller.dismissMotion()
+    media[0]?.events?.reconnecting()
+    read.mockResolvedValueOnce({
+      ...changed,
+      version: 3,
+      motion: { text: 'While offline', infoslide: '' },
+    })
+    media[0]?.events?.reconnected()
+    await vi.waitFor(() => expect(controller.store.getState().snapshot?.version).toBe(3))
+    expect(controller.store.getState().motionChanged).toBe(false)
+    await Promise.resolve()
+    read.mockResolvedValueOnce({
+      ...changed,
+      version: 4,
+      motion: { text: 'After reconnect', infoslide: '' },
+    })
+    await controller.refresh()
+    expect(controller.store.getState().motionChanged).toBe(true)
+  })
   it('stores credentials before media and never publishes the microphone on entry', async () => {
     const { controller, preferences, media } = setup()
     await controller.join('Вика', false)
@@ -403,14 +488,16 @@ it('never blocks media entry on an unresolved timer autoplay resume', async () =
 it('keeps the call and round snapshot when a compatible backend has no timer command', async () => {
   const { controller, api, media } = setup()
   await controller.join('Вика', false)
-  vi.spyOn(api, 'command').mockRejectedValue(new ClientError('command_unavailable'))
+  const command = vi.spyOn(api, 'command').mockRejectedValue(new ClientError('command_unavailable'))
   await controller.command({ type: 'timers/speech/start' })
   expect(controller.store.getState()).toMatchObject({
     stage: 'connected',
     error: 'command_unavailable',
     commandPending: false,
-    commandUncertain: false,
+    commandUncertain: true,
   })
+  await controller.retryCommand()
+  expect(command.mock.calls[1]?.[3]).toBe(command.mock.calls[0]?.[3])
   expect(media[0]?.stopped).toBe(0)
   expect(controller.timers.store.getState().snapshot?.version).toBe(1)
 })

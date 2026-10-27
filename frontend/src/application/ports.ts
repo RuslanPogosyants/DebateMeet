@@ -1,10 +1,12 @@
 import type { components } from '@/contract/api'
 import type { Snapshot } from '@/domain/snapshot'
+import type { ChatEvent, MessagePage, PostedMessage } from '@/domain/chat'
 
 export type Joined = components['schemas']['JoinResponse']
 export type Credentials = { participantId: string; secret: string }
 export type LogicalRoom = components['schemas']['Room']
 export type TimerKind = components['schemas']['TimerKind']
+export type Position = components['schemas']['Position']
 export type SubRoom = Exclude<LogicalRoom, 'base'>
 export type RoundCommand =
   | { type: 'enter'; room: LogicalRoom }
@@ -19,6 +21,15 @@ export type RoundCommand =
   | { type: `timers/${TimerKind}/set`; remainingMs: number }
   | { type: `timers/${TimerKind}/configure`; durationMs: number }
   | { type: 'speech/next' | 'speech/undo' }
+  | { type: 'motion'; text: string; infoslide: string }
+  | { type: 'drum/draw' | 'drum/reset' }
+  | { type: 'drum/configure'; enabled: Position[]; removeDrawn: boolean }
+
+export type HistoryQuery = { before?: string; after?: string }
+export interface ChatApi {
+  history(roundId: string, credentials: Credentials, query: HistoryQuery): Promise<MessagePage>
+  post(roundId: string, credentials: Credentials, text: string, key: string): Promise<PostedMessage>
+}
 
 export type RecentRound = { id: string; visitedAt: number }
 
@@ -67,6 +78,7 @@ export type EndReason = 'replaced' | 'left' | 'removed' | 'deleted' | 'network'
 export type MediaEvents = {
   mayReconnect(): boolean
   snapshot(value: unknown): void
+  chat(value: ChatEvent): void
   people(value: MediaPerson[]): void
   reconnecting(): void
   reconnected(): void
@@ -130,6 +142,7 @@ export interface TimerAudio {
 
 export interface Services {
   api: RoundApi
+  chat: ChatApi
   clientClock: ClientClock
   timerAudio(events: TimerAudioEvents): TimerAudio
   preferences: Preferences

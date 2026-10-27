@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from debatemeet.round.chat.domain.message import PG_BIGINT_MAX, Message, MessageKind
@@ -87,6 +87,20 @@ class PostedMessage(ChatModel):
     epoch: Annotated[int, Field(ge=0, le=9007199254740991)]
     as_of_cursor: Cursor
     message: MessageView
+
+
+class PostMessageBody(ChatModel):
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def canonical_text(cls, value: str) -> str:
+        try:
+            return multiline_text(
+                value, minimum_characters=1, maximum_characters=1000, error_code="invalid_message"
+            )
+        except DomainError as error:
+            raise ValueError("invalid message text") from error
 
 
 class ChatPacket(ChatModel):

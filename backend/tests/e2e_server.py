@@ -5,11 +5,15 @@ must name the dedicated test database; neither the dev database nor its data is 
 """
 
 import asyncio
+import json
+import os
 import signal
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
+from pathlib import Path
 
 import uvicorn
+from sqlalchemy.engine import make_url
 
 from debatemeet.main import create_app
 from debatemeet.migrate import migrate
@@ -30,6 +34,9 @@ async def serve() -> None:
     loop = asyncio.get_running_loop()
     owner = asyncio.current_task()
     server: _TestServer | None = None
+    state_file = (
+        Path(os.environ["DM_E2E_STATE_FILE"]) if "DM_E2E_STATE_FILE" in os.environ else None
+    )
 
     def shutdown() -> None:
         if server is not None:
@@ -42,11 +49,18 @@ async def serve() -> None:
     try:
         async with isolated_database(settings.database_url) as database_url:
             await migrate(database_url)
+            if state_file is not None:
+                # Only the generated database name crosses the test-process boundary.
+                # Credentials stay in the existing test environment.
+                state_file.write_text(json.dumps({"database": make_url(database_url).database}))
+                state_file.chmod(0o600)
             app = create_app(settings.model_copy(update={"database_url": database_url}))
             server = _TestServer(uvicorn.Config(app, host="0.0.0.0", port=8000))  # noqa: S104
             configure_logging(environment=settings.environment, level=settings.log_level)
             await server.serve()
     finally:
+        if state_file is not None:
+            state_file.unlink(missing_ok=True)
         for handled in (signal.SIGTERM, signal.SIGINT):
             loop.remove_signal_handler(handled)
 

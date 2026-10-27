@@ -1,4 +1,5 @@
-import { expect, test, type CDPSession } from '@playwright/test'
+import { expect, type CDPSession } from '@playwright/test'
+import { test } from './test'
 import { measureRenderedAudio } from './media'
 import { launchNativeBrowser } from './native-browser'
 import { claimJudge, command, join, snapshot } from './round'

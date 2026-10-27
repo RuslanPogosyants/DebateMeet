@@ -7,12 +7,14 @@ export function Sheet({
   onClose,
   children,
   pinned,
+  className = '',
 }: {
   title: string
   closeLabel?: string
   onClose: () => void
   children: ReactNode
   pinned?: ReactNode
+  className?: string
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const close = useRef<HTMLButtonElement>(null)
@@ -30,7 +32,7 @@ export function Sheet({
   return (
     <dialog
       ref={dialog}
-      className="meeting-sheet"
+      className={`meeting-sheet ${className}`}
       aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault()
