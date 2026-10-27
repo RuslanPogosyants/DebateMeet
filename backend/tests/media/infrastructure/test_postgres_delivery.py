@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from bots import dev
 from bots.bot import delete_media_room, livekit_api
 from debatemeet.media.application.gateway import RoundMediaGateway
-from debatemeet.media.application.ports import MediaRoom, PacketEffect, RemovalEffect
+from debatemeet.media.application.ports import MediaEffect, MediaRoom
 from debatemeet.media.application.publisher import SnapshotPublisher
 from debatemeet.media.application.webhooks import HandleMediaEvent
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
@@ -448,9 +448,7 @@ async def test_crash_between_sdk_removal_and_ack_is_replayed_on_restart(
         await tx.media_outbox.remove_participant(round_id, participant, T0)
 
     class CrashBeforeAck(PostgresMediaStore):
-        async def effect_delivered(
-            self, effect: RemovalEffect | PacketEffect, at: datetime
-        ) -> None:
+        async def effect_delivered(self, effect: MediaEffect, at: datetime) -> None:
             raise RuntimeError("crash before ack")
 
     sdk, clock = FakeApi(), FixedClock(T0)

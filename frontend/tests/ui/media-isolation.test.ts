@@ -137,6 +137,7 @@ function state(version: number, ownRoom: 'base' | 'og' | 'oo', bobRoom: 'base' |
   self.room = ownRoom
   value.participants.push({
     id: BOB,
+    handRaisedAt: null,
     name: 'Борис',
     room: bobRoom,
     presence: { status: 'connected', since: 1 },

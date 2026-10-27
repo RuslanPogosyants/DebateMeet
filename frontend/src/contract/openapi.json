@@ -3428,6 +3428,19 @@
           },
           "presence": {
             "$ref": "#/components/schemas/PresenceView"
+          },
+          "handRaisedAt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handraisedat"
           }
         },
         "type": "object",
@@ -3435,7 +3448,8 @@
           "id",
           "name",
           "room",
-          "presence"
+          "presence",
+          "handRaisedAt"
         ],
         "title": "ParticipantView"
       },
@@ -3893,6 +3907,124 @@
           "deleted"
         ],
         "title": "ChatDeletedPacket",
+        "type": "object"
+      },
+      "ControlSession": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "ControlTimestamp": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "ControlTopic": {
+        "enum": [
+          "request_unmute",
+          "microphone_muted"
+        ],
+        "type": "string"
+      },
+      "EffectId": {
+        "pattern": "^[1-9][0-9]{0,18}$",
+        "type": "string"
+      },
+      "MicrophonePacket": {
+        "additionalProperties": false,
+        "properties": {
+          "roundId": {
+            "$ref": "#/components/schemas/RoundCode"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/ControlTimestamp"
+          },
+          "targetId": {
+            "$ref": "#/components/schemas/ParticipantCode"
+          },
+          "targetSid": {
+            "$ref": "#/components/schemas/ControlSession"
+          },
+          "topic": {
+            "$ref": "#/components/schemas/ControlTopic"
+          },
+          "effectId": {
+            "$ref": "#/components/schemas/EffectId"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/ControlTimestamp"
+          }
+        },
+        "required": [
+          "roundId",
+          "epoch",
+          "targetId",
+          "targetSid",
+          "topic",
+          "effectId",
+          "expiresAt"
+        ],
+        "title": "MicrophonePacket",
+        "type": "object"
+      },
+      "ReactionCode": {
+        "enum": [
+          "clap",
+          "thumbs_up",
+          "heart",
+          "laugh",
+          "wow"
+        ],
+        "type": "string"
+      },
+      "ReactionCounter": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "ReactionPacket": {
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "const": "reaction",
+            "default": "reaction",
+            "title": "Topic",
+            "type": "string"
+          },
+          "roundId": {
+            "$ref": "#/components/schemas/RoundCode"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/ReactionCounter"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ReactionCounter"
+          },
+          "room": {
+            "$ref": "#/components/schemas/Room"
+          },
+          "participantId": {
+            "$ref": "#/components/schemas/ParticipantCode"
+          },
+          "reaction": {
+            "$ref": "#/components/schemas/ReactionCode"
+          },
+          "nonce": {
+            "pattern": "^[A-Za-z0-9_-]{16}$",
+            "title": "Nonce",
+            "type": "string"
+          }
+        },
+        "required": [
+          "roundId",
+          "epoch",
+          "version",
+          "room",
+          "participantId",
+          "reaction",
+          "nonce"
+        ],
+        "title": "ReactionPacket",
         "type": "object"
       }
     },

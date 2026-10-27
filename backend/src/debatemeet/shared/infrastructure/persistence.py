@@ -34,6 +34,18 @@ class PostgresCommandKeys:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
+    async def retain(self, *, round_id: str, participant_id: str | None, key: str) -> None:
+        result = await self._connection.execute(
+            text("""UPDATE command_keys SET retained = true
+                WHERE round_id = :round_id
+                AND participant_id IS NOT DISTINCT FROM :participant_id AND key = :key
+                RETURNING id"""),
+            {"round_id": round_id, "participant_id": participant_id, "key": key},
+        )
+        # Failing closed also rolls back the command and its queued effect.
+        if result.scalar_one_or_none() is None:
+            raise RuntimeError("Only a claimed command key can be retained")
+
     async def claim(
         self,
         *,

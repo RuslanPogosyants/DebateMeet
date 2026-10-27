@@ -5,14 +5,18 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from debatemeet.media.application.ports import (
+    ControlEffect,
     DeliveryState,
+    MediaEffect,
     MediaRoom,
     MediaRoomMissingError,
+    MicrophoneTarget,
     PacketEffect,
     RemovalEffect,
 )
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
 from debatemeet.round.application.ports import ArchivedParticipant, CommittedRound, PacketTopic
+from debatemeet.round.contract.microphone import ControlTopic
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.shared.application.errors import MediaUnavailableError
 from tests.fakes import FixedClock
@@ -39,6 +43,7 @@ class MemoryMedia:
         self.states: dict[RoundId, DeliveryState] = {}
         self.effects: dict[int, RemovalEffect] = {}
         self.packets: dict[int, PacketEffect] = {}
+        self.controls: dict[int, ControlEffect] = {}
         self.retry_at: dict[int, datetime] = {}
         self.delivered: list[int] = []
 
@@ -54,6 +59,17 @@ class MemoryMedia:
             head = heads[0]
             self.packets[head.id] = replace(head, revision=head.revision + 1, attempts=0)
             self.retry_at.pop(head.id, None)
+        control_heads = sorted(
+            (effect for effect in self.controls.values() if effect.round_id == round_id),
+            key=lambda effect: effect.id,
+        )
+        if control_heads:
+            control = control_heads[0]
+            if control.operation == "request_unmute" or control.confirmed_at is not None:
+                self.controls[control.id] = replace(
+                    control, revision=control.revision + 1, attempts=0
+                )
+                self.retry_at.pop(control.id, None)
 
     async def finished(self, round_id: RoundId, room_sid: str) -> None:
         if (current := self.states.get(round_id)) is not None and current.room_sid == room_sid:
@@ -100,8 +116,54 @@ class MemoryMedia:
             if effect.id not in self.retry_at or self.retry_at[effect.id] <= now
         ]
 
-    async def effect_delivered(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None:
-        if isinstance(effect, PacketEffect):
+    async def control_heads(self, now: datetime) -> Sequence[ControlEffect]:
+        heads: dict[RoundId, ControlEffect] = {}
+        for effect in sorted(self.controls.values(), key=lambda item: item.id):
+            heads.setdefault(effect.round_id, effect)
+        return [
+            effect
+            for effect in heads.values()
+            if effect.expires_at <= now
+            or effect.id not in self.retry_at
+            or self.retry_at[effect.id] <= now
+        ]
+
+    async def control_dispatched(
+        self, effect: ControlEffect, track_sid: str, at: datetime
+    ) -> ControlEffect | None:
+        current = self.controls.get(effect.id)
+        if (
+            current is None
+            or current.revision != effect.revision
+            or current.dispatched_at is not None
+            or current.expires_at <= at
+        ):
+            return None
+        dispatched = replace(current, dispatched_at=at, track_sid=track_sid)
+        self.controls[effect.id] = dispatched
+        return dispatched
+
+    async def control_confirmed(self, effect: ControlEffect, at: datetime) -> ControlEffect | None:
+        current = self.controls.get(effect.id)
+        if (
+            current is None
+            or current.revision != effect.revision
+            or current.dispatched_at is None
+            or current.track_sid != effect.track_sid
+            or current.confirmed_at is not None
+        ):
+            return None
+        confirmed = replace(current, confirmed_at=at)
+        self.controls[effect.id] = confirmed
+        return confirmed
+
+    async def effect_delivered(self, effect: MediaEffect, at: datetime) -> None:
+        if isinstance(effect, ControlEffect):
+            current = self.controls.get(effect.id)
+            if current is None or current.revision != effect.revision:
+                return
+            del self.controls[effect.id]
+        elif isinstance(effect, PacketEffect):
             if self.packets.get(effect.id) != effect:
                 return
             del self.packets[effect.id]
@@ -111,8 +173,13 @@ class MemoryMedia:
             del self.effects[effect.id]
         self.delivered.append(effect.id)
 
-    async def effect_failed(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None:
-        if isinstance(effect, PacketEffect):
+    async def effect_failed(self, effect: MediaEffect, at: datetime) -> None:
+        if isinstance(effect, ControlEffect):
+            current = self.controls.get(effect.id)
+            if current is None or current.revision != effect.revision:
+                return
+            self.controls[effect.id] = replace(current, attempts=current.attempts + 1)
+        elif isinstance(effect, PacketEffect):
             if self.packets.get(effect.id) != effect:
                 return
             self.packets[effect.id] = replace(effect, attempts=effect.attempts + 1)
@@ -133,6 +200,12 @@ class FakeApi(LiveKitApiAdapter):
         self.metadata: list[str] = []
         self.created: list[tuple[RoundId, str]] = []
         self.removed: list[tuple[RoundId, ParticipantId]] = []
+        self.microphones: dict[tuple[RoundId, ParticipantId], MicrophoneTarget] = {}
+        self.muted: list[tuple[RoundId, ParticipantId, str]] = []
+        self.controls: list[tuple[RoundId, ControlTopic, bytes, ParticipantId]] = []
+        self.reactions: list[tuple[RoundId, bytes, tuple[ParticipantId, ...]]] = []
+        self.mute_confirmed = True
+        self.microphone_is_muted = False
         self.unavailable = False
         self.missing = False
         self.closed = False
@@ -175,6 +248,33 @@ class FakeApi(LiveKitApiAdapter):
         if self.unavailable:
             raise MediaUnavailableError
         self.removed.append((round_id, participant_id))
+
+    async def microphone_target(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> MicrophoneTarget | None:
+        self._check()
+        return self.microphones.get((round_id, participant_id))
+
+    async def mute_microphone(
+        self, round_id: RoundId, participant_id: ParticipantId, track_sid: str
+    ) -> bool:
+        self._check()
+        self.muted.append((round_id, participant_id, track_sid))
+        self.microphone_is_muted = self.mute_confirmed
+        return self.mute_confirmed
+
+    async def send_control(
+        self, round_id: RoundId, topic: ControlTopic, packet: bytes, target_id: ParticipantId
+    ) -> None:
+        self._check()
+        self.controls.append((round_id, topic, packet, target_id))
+
+    async def send_reaction(
+        self, round_id: RoundId, packet: bytes, destinations: Sequence[ParticipantId]
+    ) -> None:
+        if destinations:
+            self._check()
+            self.reactions.append((round_id, packet, tuple(destinations)))
 
     async def aclose(self) -> None:
         self.closed = True

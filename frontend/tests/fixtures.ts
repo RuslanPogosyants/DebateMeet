@@ -34,7 +34,13 @@ export function snapshot(version = 1, epoch = 1): Snapshot {
     appVersion: 'test',
     entryClosed: false,
     participants: [
-      { id: SELF, name: 'Вика', room: 'base', presence: { status: 'pending', since: 1000 } },
+      {
+        id: SELF,
+        name: 'Вика',
+        room: 'base',
+        presence: { status: 'pending', since: 1000 },
+        handRaisedAt: null,
+      },
     ],
     judgeFlag: { holder: null, lastHolder: null, releasedReason: null, releasedAt: null },
     timers: {

@@ -44,6 +44,8 @@ from debatemeet.round.chat.infrastructure.transactions import (
     PostgresSystemMessages,
 )
 from debatemeet.round.contract.entry import StatePacket
+from debatemeet.round.contract.microphone import MicrophonePacket
+from debatemeet.round.contract.reaction import ReactionPacket
 from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
 from debatemeet.shared.api.errors import install_error_handlers
 from debatemeet.shared.api.health import health_router
@@ -93,7 +95,14 @@ def build_app(
     # Data packets travel through LiveKit, but their schema belongs to the same public contract.
     schema = app.openapi()
     schemas = schema.setdefault("components", {}).setdefault("schemas", {})
-    for packet in (StatePacket, ChatPacket, ChatDeletedPacket, PostedMessage):
+    for packet in (
+        StatePacket,
+        ChatPacket,
+        ChatDeletedPacket,
+        PostedMessage,
+        MicrophonePacket,
+        ReactionPacket,
+    ):
         packet_schema = packet.model_json_schema(ref_template="#/components/schemas/{model}")
         for name, definition in packet_schema.pop("$defs", {}).items():
             schemas.setdefault(name, definition)

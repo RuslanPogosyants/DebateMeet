@@ -37,6 +37,7 @@ from debatemeet.round.domain.events import (
     TimerStarted,
     timer_state,
 )
+from debatemeet.round.domain.hand import Hand
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
 from debatemeet.round.domain.motion import Motion
@@ -77,6 +78,7 @@ class Participant:
     presence: Presence
     # The last closed session, so that a late webhook about it does not bring it back.
     last_ended_sid: SessionId | None = None
+    hand: Hand | None = None
 
 
 @dataclass(eq=False)

@@ -6,9 +6,9 @@ secrets and no session ids in it; the position of a raised hand is counted by th
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from debatemeet.round.domain.drum import Drum
@@ -17,7 +17,7 @@ from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.presence import Connected, Pending, Presence
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Participant, Round
-from debatemeet.round.domain.timer import SpeechUndo, Timer, TimerStatus
+from debatemeet.round.domain.timer import JS_MAX_SAFE_INTEGER, SpeechUndo, Timer, TimerStatus
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -40,6 +40,7 @@ class ParticipantView(ContractModel):
     name: str
     room: Room
     presence: PresenceView
+    hand_raised_at: Annotated[int, Field(strict=True, ge=0, le=JS_MAX_SAFE_INTEGER)] | None
 
 
 class FormerHolderView(ContractModel):
@@ -140,6 +141,7 @@ def _participant(participant: Participant) -> ParticipantView:
         name=participant.name,
         room=participant.room,
         presence=_presence(participant.presence),
+        hand_raised_at=_ms(participant.hand.raised_at) if participant.hand is not None else None,
     )
 
 

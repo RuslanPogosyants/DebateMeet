@@ -53,7 +53,8 @@ export function isSnapshot(value: unknown): value is Snapshot {
       !record(participant.presence) ||
       typeof participant.presence.status !== 'string' ||
       !statuses.has(participant.presence.status) ||
-      !integer(participant.presence.since)
+      !integer(participant.presence.since) ||
+      (participant.handRaisedAt !== null && !integer(participant.handRaisedAt))
     )
       return false
     identities.add(participant.id)
@@ -190,7 +191,7 @@ export function readSnapshot(value: unknown, roundId: string): Snapshot | null {
           speechUndo: null,
         }
       : value
-  const normalized =
+  const withMotionAndDrum =
     record(withTimers) && !('motion' in withTimers) && !('drum' in withTimers)
       ? {
           ...withTimers,
@@ -204,6 +205,17 @@ export function readSnapshot(value: unknown, roundId: string): Snapshot | null {
           },
         }
       : withTimers
+  const normalized =
+    record(withMotionAndDrum) && Array.isArray(withMotionAndDrum.participants)
+      ? {
+          ...withMotionAndDrum,
+          participants: withMotionAndDrum.participants.map((participant: unknown) =>
+            record(participant) && !('handRaisedAt' in participant)
+              ? { ...participant, handRaisedAt: null }
+              : participant,
+          ),
+        }
+      : withMotionAndDrum
   return isSnapshot(normalized) && normalized.roundId === roundId ? normalized : null
 }
 

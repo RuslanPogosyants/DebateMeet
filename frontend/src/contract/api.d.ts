@@ -576,6 +576,8 @@ export interface components {
             name: string;
             room: components["schemas"]["Room"];
             presence: components["schemas"]["PresenceView"];
+            /** Handraisedat */
+            handRaisedAt: number | null;
         };
         /**
          * Position
@@ -744,6 +746,41 @@ export interface components {
             epoch: number;
             /** Deleted */
             deleted: components["schemas"]["DeletedMessageView"][];
+        };
+        ControlSession: string;
+        ControlTimestamp: number;
+        /** @enum {string} */
+        ControlTopic: "request_unmute" | "microphone_muted";
+        EffectId: string;
+        /** MicrophonePacket */
+        MicrophonePacket: {
+            roundId: components["schemas"]["RoundCode"];
+            epoch: components["schemas"]["ControlTimestamp"];
+            targetId: components["schemas"]["ParticipantCode"];
+            targetSid: components["schemas"]["ControlSession"];
+            topic: components["schemas"]["ControlTopic"];
+            effectId: components["schemas"]["EffectId"];
+            expiresAt: components["schemas"]["ControlTimestamp"];
+        };
+        /** @enum {string} */
+        ReactionCode: "clap" | "thumbs_up" | "heart" | "laugh" | "wow";
+        ReactionCounter: number;
+        /** ReactionPacket */
+        ReactionPacket: {
+            /**
+             * Topic
+             * @default reaction
+             * @constant
+             */
+            topic: "reaction";
+            roundId: components["schemas"]["RoundCode"];
+            epoch: components["schemas"]["ReactionCounter"];
+            version: components["schemas"]["ReactionCounter"];
+            room: components["schemas"]["Room"];
+            participantId: components["schemas"]["ParticipantCode"];
+            reaction: components["schemas"]["ReactionCode"];
+            /** Nonce */
+            nonce: string;
         };
     };
     responses: never;

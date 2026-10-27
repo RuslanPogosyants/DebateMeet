@@ -8,7 +8,7 @@ import {
   visibleMessages,
   type ChatEntry,
 } from '@/domain/chat'
-import { readSnapshot, record } from '@/domain/snapshot'
+import { isSnapshot, readSnapshot, record } from '@/domain/snapshot'
 import snapshotJson from '../fixtures/expand-a4-snapshot.json?raw'
 import historyJson from '../fixtures/expand-a4-history.json?raw'
 import packetsJson from '../fixtures/expand-a4-packets.json?raw'
@@ -18,10 +18,16 @@ it('reads actual frozen A4 snapshot/history/packets without losing B4 state or r
   const rawSnapshot: unknown = JSON.parse(snapshotJson)
   const rawHistory: unknown = JSON.parse(historyJson)
   const rawPackets: unknown = JSON.parse(packetsJson)
-  if (!record(rawHistory) || !Array.isArray(rawPackets)) throw new Error('Invalid A4 golden shape')
+  if (!record(rawSnapshot) || !record(rawHistory) || !Array.isArray(rawPackets))
+    throw new Error('Invalid A4 golden shape')
   const roundId = 'R'.repeat(22)
   const snapshot = readSnapshot(rawSnapshot, roundId)
-  expect(snapshot).toEqual(rawSnapshot)
+  expect(isSnapshot(rawSnapshot)).toBe(false)
+  expect(snapshot).toMatchObject(rawSnapshot)
+  expect(snapshot?.participants.every((participant) => participant.handRaisedAt === null)).toBe(
+    true,
+  )
+  expect(isSnapshot(snapshot)).toBe(true)
   expect(snapshot?.drum).toMatchObject({
     enabled: ['og', 'oo'],
     drawn: [{ position: 'co', drawNo: 3 }],

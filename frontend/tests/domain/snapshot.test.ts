@@ -23,16 +23,145 @@ describe('snapshot boundary', () => {
   it('listens only to connected media identities in my logical room, regardless of cached presence', () => {
     const value = snapshot()
     value.participants.push(
-      { id: BOB, name: 'Борис', room: 'base', presence: { status: 'disconnected', since: 1000 } },
+      {
+        id: BOB,
+        name: 'Борис',
+        room: 'base',
+        presence: { status: 'disconnected', since: 1000 },
+        handRaisedAt: null,
+      },
       {
         id: 'c'.repeat(12),
         name: 'Ваня',
         room: 'og',
         presence: { status: 'connected', since: 1000 },
+        handRaisedAt: null,
       },
     )
     expect([...subscriptions(value, SELF, [BOB, 'c'.repeat(12), 'unknown'])]).toEqual([BOB])
     expect([...subscriptions(value, 'unknown', [BOB])]).toEqual([])
+  })
+})
+
+describe('hand extension compatibility boundary A5', () => {
+  it.each([null, 0, 1790704800123, Number.MAX_SAFE_INTEGER])(
+    'preserves a nullable nonnegative safe hand timestamp %s',
+    (handRaisedAt) => {
+      const value = snapshot()
+      const participant = value.participants[0]
+      if (participant === undefined) throw new Error('Missing fixture participant')
+      const transported = { ...value, participants: [{ ...participant, handRaisedAt }] }
+      expect(isSnapshot(transported)).toBe(true)
+      expect(readSnapshot(transported, ROUND_ID)).toEqual(transported)
+    },
+  )
+
+  it.each([undefined, true, false, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, '1', {}])(
+    'rejects an explicitly damaged hand timestamp %s instead of defaulting it',
+    (handRaisedAt) => {
+      const value = snapshot()
+      const transported = {
+        ...value,
+        participants: value.participants.map((participant) => ({ ...participant, handRaisedAt })),
+      }
+      expect(isSnapshot(transported)).toBe(false)
+      expect(readSnapshot(transported, ROUND_ID)).toBeNull()
+    },
+  )
+
+  it('normalizes only missing legacy hands without mutating or discarding existing round state', () => {
+    const value = extendedSnapshot()
+    const legacy = value.participants.map((participant) =>
+      Object.fromEntries(Object.entries(participant).filter(([key]) => key !== 'handRaisedAt')),
+    )
+    const historical = {
+      ...value,
+      participants: [
+        ...legacy,
+        {
+          id: BOB,
+          name: 'Борис',
+          room: 'og',
+          presence: { status: 'disconnected', since: 1000 },
+          handRaisedAt: 1790704800123,
+        },
+      ],
+    }
+    const parsed = readSnapshot(historical, ROUND_ID)
+    expect(isSnapshot(historical)).toBe(false)
+    expect(isSnapshot(parsed)).toBe(true)
+    expect(parsed).toMatchObject({
+      ...value,
+      participants: [
+        { id: SELF, handRaisedAt: null },
+        { id: BOB, handRaisedAt: 1790704800123 },
+      ],
+    })
+    expect(parsed?.participants[0]).not.toBe(legacy[0])
+    expect(historical.participants[0]).not.toHaveProperty('handRaisedAt')
+    expect(historical.participants[1]).toHaveProperty('handRaisedAt', 1790704800123)
+  })
+
+  it('does not repair a corrupt participant or partially missing timer/motion extension', () => {
+    const value = snapshot()
+    expect(readSnapshot({ ...value, participants: [null] }, ROUND_ID)).toBeNull()
+    expect(readSnapshot({ ...value, participants: [false] }, ROUND_ID)).toBeNull()
+    const historical = {
+      ...value,
+      participants: value.participants.map((participant) =>
+        Object.fromEntries(Object.entries(participant).filter(([key]) => key !== 'handRaisedAt')),
+      ),
+    }
+    for (const missing of ['timers', 'speechNo', 'speechUndo', 'motion', 'drum']) {
+      const partial = Object.fromEntries(
+        Object.entries(historical).filter(([key]) => key !== missing),
+      )
+      expect(readSnapshot(partial, ROUND_ID)).toBeNull()
+    }
+  })
+
+  it('preserves every valid hand timestamp across JSON transport', () => {
+    fc.assert(
+      fc.property(fc.option(fc.maxSafeNat(), { nil: null }), (handRaisedAt) => {
+        const value = snapshot()
+        const transported: unknown = JSON.parse(
+          JSON.stringify({
+            ...value,
+            participants: value.participants.map((participant) => ({
+              ...participant,
+              handRaisedAt,
+            })),
+          }),
+        )
+        expect(isSnapshot(transported)).toBe(true)
+        expect(readSnapshot(transported, ROUND_ID)).toEqual(transported)
+      }),
+    )
+  })
+
+  it('reads all forty raised hands together with nondefault B4 state and keeps the participant bound', () => {
+    const value = {
+      ...extendedSnapshot(),
+      participants: Array.from({ length: 40 }, (_, index) => ({
+        id: String(index).padStart(12, '0'),
+        name: `Участник ${index}`,
+        room: 'base',
+        presence: { status: 'connected', since: 0 },
+        handRaisedAt: Number.MAX_SAFE_INTEGER - index,
+      })),
+    }
+    const transported: unknown = JSON.parse(JSON.stringify(value))
+    expect(readSnapshot(transported, ROUND_ID)).toEqual(value)
+    expect(isSnapshot(transported)).toBe(true)
+    expect(
+      readSnapshot(
+        {
+          ...value,
+          participants: [...value.participants, { ...value.participants[0], id: 'x'.repeat(12) }],
+        },
+        ROUND_ID,
+      ),
+    ).toBeNull()
   })
 })
 

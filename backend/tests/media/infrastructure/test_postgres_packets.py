@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from bots import dev
 from bots.bot import delete_media_room
-from debatemeet.media.application.ports import PacketEffect, RemovalEffect
+from debatemeet.media.application.ports import MediaEffect, PacketEffect, RemovalEffect
 from debatemeet.media.application.publisher import SnapshotPublisher
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
 from debatemeet.media.infrastructure.postgres import (
@@ -236,9 +236,7 @@ async def test_crash_between_sdk_send_and_ack_replays_packet_after_restart(
     await enqueue(packet_engine, round_id, body(round_id))
 
     class CrashBeforeAck(PostgresMediaStore):
-        async def effect_delivered(
-            self, effect: RemovalEffect | PacketEffect, at: datetime
-        ) -> None:
+        async def effect_delivered(self, effect: MediaEffect, at: datetime) -> None:
             raise RuntimeError("crash before packet ack")
 
     api, clock = FakeApi(), FixedClock(T0)

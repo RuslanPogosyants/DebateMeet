@@ -79,6 +79,7 @@ class ParticipantArchive(Protocol):
 
 
 type PacketTopic = Literal["chat", "chat_deleted"]
+type MicrophoneOperation = Literal["mute", "request_unmute"]
 
 
 class ChatPacketReader(Protocol):
@@ -90,6 +91,17 @@ class ChatPacketReader(Protocol):
 
 
 class MediaOutbox(Protocol):
+    async def control_microphone(
+        self,
+        round_id: RoundId,
+        participant_id: ParticipantId,
+        target_sid: SessionId,
+        operation: MicrophoneOperation,
+        now: datetime,
+    ) -> None:
+        """Queue one manual intent for its captured target session in the caller transaction."""
+        ...
+
     async def remove_participant(
         self, round_id: RoundId, participant_id: ParticipantId, now: datetime
     ) -> None:

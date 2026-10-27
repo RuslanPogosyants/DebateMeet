@@ -115,6 +115,7 @@ describe('responsive meeting navigation', () => {
     value.judgeFlag.holder = SELF
     value.participants.push({
       id: BOB,
+      handRaisedAt: null,
       name: 'Борис',
       room: 'og',
       presence: { status: 'disconnected', since: 1 },
