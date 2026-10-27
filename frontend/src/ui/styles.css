@@ -1328,3 +1328,243 @@ dialog select {
   border: 1px solid var(--foreground);
   background: var(--background);
 }
+
+/* Participation controls share the existing scene, roster and modal boundaries. */
+.hand-queue {
+  flex-shrink: 0;
+  border-block: 1px solid var(--border);
+  padding-block: 8px;
+  max-height: 130px;
+  overflow: auto;
+}
+.hand-queue-heading,
+.judge-social-people li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hand-queue ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  list-style: none;
+  padding: 4px 0 0;
+  margin: 0;
+}
+.hand-queue li {
+  overflow-wrap: anywhere;
+}
+.hand-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.hand-badge > span {
+  font-size: 14px;
+}
+.tile-actions {
+  position: absolute;
+  z-index: 1;
+  inset: 6px 6px auto auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--tile);
+  color: var(--on-stage);
+}
+.participant-actions-trigger {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1;
+}
+.room-card .participant-actions-trigger {
+  margin-inline-start: 8px;
+  min-width: 32px;
+  min-height: 28px;
+  padding: 2px 6px;
+  font-size: 16px;
+}
+.participant-actions-content,
+.more-controls,
+.sound-controls,
+.judge-social {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+}
+.participant-volume {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.participant-volume label {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+.participant-volume input[type='range'] {
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  accent-color: var(--foreground);
+}
+.judge-social {
+  padding-block: 16px;
+  border-block: 1px solid var(--border);
+  margin-block: 16px;
+}
+.judge-social-people {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.meeting-stage {
+  position: relative;
+}
+.reaction-display {
+  position: absolute;
+  z-index: 2;
+  inset: auto 8px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  max-height: 50%;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+.reaction-display li {
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  animation: reaction-arrive 180ms ease-out;
+}
+.reaction-emoji {
+  font-size: 24px;
+}
+@keyframes reaction-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reaction-display li {
+    animation: none;
+  }
+}
+.desktop-social-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.reaction-controls {
+  position: relative;
+}
+.reaction-controls summary {
+  cursor: pointer;
+  list-style: none;
+}
+.reaction-controls summary::-webkit-details-marker {
+  display: none;
+}
+.reaction-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+.reaction-controls > .reaction-picker {
+  position: absolute;
+  z-index: 12;
+  inset: auto auto calc(100% + 8px) 0;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  padding: 12px;
+  border: 1.5px solid var(--foreground);
+  background: var(--background);
+}
+.reaction-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.reaction-buttons .action {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 10px;
+  font-size: 22px;
+}
+.reaction-preference {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.reaction-preference input {
+  width: 20px;
+  height: 20px;
+}
+.microphone-notice {
+  flex-wrap: wrap;
+}
+.phone-more-button,
+.control-label-short {
+  display: none;
+}
+@media (max-width: 959px) {
+  .hand-queue .lower-all-hands {
+    display: none;
+  }
+}
+@media (max-width: 600px) {
+  .meeting-controls {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .meeting-controls .desktop-social-controls,
+  .meeting-controls .desktop-leave,
+  .meeting-controls .control-label-full {
+    display: none;
+  }
+  .meeting-controls .phone-more-button,
+  .meeting-controls .control-label-short {
+    display: block;
+  }
+  .meeting-controls .action {
+    font-size: 12px;
+  }
+  .room-card .participant-actions-trigger {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .hand-queue {
+    padding: 8px;
+    border: 1px solid var(--border);
+  }
+}

@@ -1,6 +1,7 @@
 import type { components } from '@/contract/api'
 import type { Snapshot } from '@/domain/snapshot'
 import type { ChatEvent, MessagePage, PostedMessage } from '@/domain/chat'
+import type { MicrophonePacket, ReactionCode, ReactionPacket } from '@/domain/social'
 
 export type Joined = components['schemas']['JoinResponse']
 export type Credentials = { participantId: string; secret: string }
@@ -24,6 +25,8 @@ export type RoundCommand =
   | { type: 'motion'; text: string; infoslide: string }
   | { type: 'drum/draw' | 'drum/reset' }
   | { type: 'drum/configure'; enabled: Position[]; removeDrawn: boolean }
+  | { type: 'hands/raise' | 'hands/lower' | 'hands/lower-all' }
+  | { type: 'hands/lower-of' | 'mute' | 'request-unmute'; participantId: string }
 
 export type HistoryQuery = { before?: string; after?: string }
 export interface ChatApi {
@@ -57,6 +60,7 @@ export interface RoundApi {
     intent: RoundCommand,
     key: string,
   ): Promise<Snapshot>
+  reaction(roundId: string, credentials: Credentials, reaction: ReactionCode): Promise<void>
   leave(roundId: string, credentials: Credentials, sid: string): Promise<void>
 }
 
@@ -65,6 +69,10 @@ export interface Preferences {
   credentials(roundId: string): Credentials | null
   recent(): RecentRound[]
   remember(roundId: string, name: string, credentials: Credentials): void
+  volume(roundId: string, participantId: string): number
+  setVolume(roundId: string, participantId: string, value: number): void
+  reactionsHidden(): boolean
+  setReactionsHidden(hidden: boolean): void
 }
 
 export type MediaPerson = {
@@ -79,6 +87,8 @@ export type MediaEvents = {
   mayReconnect(): boolean
   snapshot(value: unknown): void
   chat(value: ChatEvent): void
+  microphone(value: MicrophonePacket): void
+  reaction(value: ReactionPacket): void
   people(value: MediaPerson[]): void
   reconnecting(): void
   reconnected(): void
@@ -101,6 +111,7 @@ export interface MediaSession {
   microphone(enabled: boolean): Promise<void>
   camera(enabled: boolean): Promise<void>
   startAudio(): Promise<void>
+  volume(identity: string, value: number): void
   attachVideo(identity: string, element: HTMLVideoElement): () => void
 }
 

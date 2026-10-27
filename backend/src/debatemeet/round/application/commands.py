@@ -19,7 +19,12 @@ from debatemeet.round.application.ports import (
     RoundTransaction,
     RoundTransactions,
 )
-from debatemeet.round.domain.events import DisconnectCause, PositionDrawn
+from debatemeet.round.domain.events import (
+    DisconnectCause,
+    MuteRequested,
+    PositionDrawn,
+    UnmuteRequested,
+)
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.name import participant_name
 from debatemeet.round.domain.round import Round
@@ -46,6 +51,14 @@ async def commit_changes(tx: RoundTransaction, round_: Round, actor: str, now: d
         if isinstance(event, PositionDrawn):
             await tx.system_messages.position_drawn(
                 round_.id, event.position.value, event.draw_no, event.at, round_.version
+            )
+        elif isinstance(event, MuteRequested):
+            await tx.media_outbox.control_microphone(
+                round_.id, event.participant_id, event.target_sid, "mute", event.at
+            )
+        elif isinstance(event, UnmuteRequested):
+            await tx.media_outbox.control_microphone(
+                round_.id, event.participant_id, event.target_sid, "request_unmute", event.at
             )
     await tx.events.append(round_.id, round_.version, events, actor)
     await tx.notifier.round_changed(round_.id)

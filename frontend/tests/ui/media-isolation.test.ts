@@ -116,6 +116,8 @@ const events: MediaEvents = {
   mayReconnect: () => true,
   snapshot: () => {},
   chat: () => {},
+  microphone: () => {},
+  reaction: () => {},
   people: () => {},
   reconnecting: () => {},
   reconnected: () => {},
@@ -146,6 +148,107 @@ function state(version: number, ownRoom: 'base' | 'og' | 'oo', bobRoom: 'base' |
 }
 
 describe('media subscription safety', () => {
+  it('delivers strict social envelopes only from the server within their separate byte cap', async () => {
+    const session = new LiveKitMediaSession()
+    const room = sdk.rooms[0]
+    if (!room) throw new Error('No SDK room')
+    const microphone = vi.fn<MediaEvents['microphone']>()
+    const reaction = vi.fn<MediaEvents['reaction']>()
+    await session.connect('ws://localhost', 'token', false, { ...events, microphone, reaction })
+    const value = snapshot()
+    await session.apply(value, SELF)
+    const control = {
+      topic: 'request_unmute',
+      roundId: value.roundId,
+      epoch: 1,
+      effectId: '1',
+      targetId: SELF,
+      targetSid: 'PA_self',
+      expiresAt: 30000,
+    }
+    const emit = (packet: unknown, topic: string, sender?: InstanceType<typeof sdk.Person>) =>
+      room.emit('DataReceived', new TextEncoder().encode(JSON.stringify(packet)), sender, 0, topic)
+    emit(control, 'request_unmute', new sdk.Person(BOB))
+    emit(control, 'microphone_muted')
+    emit({ ...control, roundId: 'x'.repeat(22) }, 'request_unmute')
+    emit({ ...control, effectId: '0' }, 'request_unmute')
+    room.emit(
+      'DataReceived',
+      new TextEncoder().encode(JSON.stringify(control).padEnd(1025, ' ')),
+      undefined,
+      0,
+      'request_unmute',
+    )
+    room.emit('DataReceived', new Uint8Array([0xff]), undefined, 0, 'request_unmute')
+    room.emit('TrackMuted')
+    expect(microphone).not.toHaveBeenCalled()
+    emit(control, 'request_unmute')
+    expect(microphone).toHaveBeenCalledExactlyOnceWith(control)
+    const muted = { ...control, topic: 'microphone_muted', effectId: '2' }
+    emit(muted, 'microphone_muted')
+    expect(microphone).toHaveBeenLastCalledWith(muted)
+    const packet = {
+      topic: 'reaction',
+      roundId: value.roundId,
+      epoch: 1,
+      version: 1,
+      room: 'base',
+      participantId: BOB,
+      reaction: 'clap',
+      nonce: 'n'.repeat(16),
+    }
+    emit(packet, 'reaction', new sdk.Person(BOB))
+    emit({ ...packet, reaction: '👏' }, 'reaction')
+    room.emit(
+      'DataReceived',
+      new TextEncoder().encode(JSON.stringify(packet).padEnd(1025, ' ')),
+      undefined,
+      0,
+      'reaction',
+    )
+    expect(reaction).not.toHaveBeenCalled()
+    emit(packet, 'reaction')
+    expect(reaction).toHaveBeenCalledExactlyOnceWith(packet)
+    await session.disconnect()
+  })
+
+  it('keeps saved volume across new tracks while the room fence always dominates the setting', async () => {
+    const session = new LiveKitMediaSession()
+    const room = sdk.rooms[0]
+    if (!room) throw new Error('No SDK room')
+    const bob = new sdk.Person(BOB),
+      publication = new sdk.Publication(),
+      first = new sdk.Audio()
+    publication.track = first
+    bob.trackPublications.set('TR_bob', publication)
+    room.remoteParticipants.set(BOB, bob)
+    session.volume(BOB, 0.5)
+    await session.connect('ws://localhost', 'token', false, events)
+    await session.apply(state(1, 'base', 'base'), SELF)
+    expect(first.volume).toBe(0.5)
+    const replacement = new sdk.Audio()
+    publication.track = replacement
+    room.emit('TrackSubscribed', replacement, publication, bob)
+    expect(first.volume).toBe(0)
+    expect(first.attached.size).toBe(0)
+    expect(replacement.volume).toBe(0.5)
+    await session.apply(state(2, 'og', 'base'), SELF)
+    session.volume(BOB, 0.8)
+    room.emit('TrackSubscribed', replacement, publication, bob)
+    expect(replacement.volume).toBe(0)
+    expect(replacement.attached.size).toBe(0)
+    await session.apply(state(3, 'base', 'base'), SELF)
+    expect(replacement.volume).toBe(0.8)
+    session.volume(BOB, -10)
+    expect(replacement.volume).toBe(0)
+    session.volume(BOB, 100)
+    expect(replacement.volume).toBe(1)
+    session.volume(BOB, NaN)
+    expect(replacement.volume).toBe(1)
+    await session.disconnect()
+    expect(replacement.volume).toBe(0)
+  })
+
   it('delivers only validated server chat topics through the existing media owner', async () => {
     const session = new LiveKitMediaSession()
     const room = sdk.rooms[0]

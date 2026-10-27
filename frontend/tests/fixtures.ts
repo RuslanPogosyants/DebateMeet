@@ -63,6 +63,20 @@ export function snapshot(version = 1, epoch = 1): Snapshot {
 export class MemoryPreferences implements Preferences {
   saved: Credentials | null = null
   savedName = ''
+  volumes = new Map<string, number>()
+  hidden = false
+  volume(round: string, participant: string) {
+    return this.volumes.get(`${round}.${participant}`) ?? 1
+  }
+  setVolume(round: string, participant: string, value: number) {
+    this.volumes.set(`${round}.${participant}`, value)
+  }
+  reactionsHidden() {
+    return this.hidden
+  }
+  setReactionsHidden(value: boolean) {
+    this.hidden = value
+  }
   name() {
     return this.savedName
   }
@@ -89,6 +103,11 @@ export class FakeApi implements RoundApi {
     snapshot: snapshot(),
   }
   failure: Error | null = null
+  reactions: string[] = []
+  reaction(_round: string, _credentials: Credentials, code: string) {
+    this.reactions.push(code)
+    return Promise.resolve()
+  }
   time() {
     return Promise.resolve(Date.now())
   }
@@ -146,6 +165,10 @@ export class FakeMedia implements MediaSession {
   microphoneChanges: boolean[] = []
   cameraChanges: boolean[] = []
   videos = new Map<string, HTMLVideoElement>()
+  volumes = new Map<string, number>()
+  volume(identity: string, value: number) {
+    this.volumes.set(identity, value)
+  }
   connect(_: string, __: string, camera: boolean, events: MediaEvents) {
     this.connections += 1
     this.events = events

@@ -1,0 +1,290 @@
+"""Current test harness; source/ alone contains historical A5 application code."""
+
+import asyncio
+import inspect
+import json
+import sys
+from collections.abc import Mapping, Sequence
+from datetime import datetime
+from pathlib import Path
+
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from debatemeet.media.application.ports import LiveKitApi, MediaRoom, MicrophoneTarget
+from debatemeet.media.application.publisher import SnapshotPublisher
+from debatemeet.media.infrastructure.postgres import (
+    PostgresMediaOutbox,
+    PostgresMediaStore,
+    PostgresPublisherLease,
+)
+from debatemeet.round.api.entry import RoundEndpoints, entry_router
+from debatemeet.round.api.rooms import room_router
+from debatemeet.round.application.commands import ReadSnapshot
+from debatemeet.round.application.credentials import Credentials
+from debatemeet.round.application.ports import PacketTopic
+from debatemeet.round.application.room_commands import Enter, ExecuteRoundCommand, PauseTimer
+from debatemeet.round.chat.api.messages import message_router
+from debatemeet.round.chat.application.read_messages import ReadMessages
+from debatemeet.round.chat.infrastructure.postgres import PostgresMessages
+from debatemeet.round.contract.microphone import ControlTopic, MicrophonePacket
+from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
+from debatemeet.round.domain.room import Room
+from debatemeet.round.domain.round import Round
+from debatemeet.round.domain.timer import TimerKind
+from debatemeet.round.infrastructure.postgres import PostgresRounds
+from debatemeet.shared.api.errors import install_error_handlers
+from debatemeet.shared.infrastructure.persistence import PostgresRateLimiter
+
+stage = "imports"
+
+
+def assert_a5_only(source):
+    for name, module in tuple(sys.modules.items()):
+        if name == "debatemeet" or name.startswith("debatemeet."):
+            assert Path(module.__file__).resolve().is_relative_to(source), name
+    assert not hasattr(Round, "raise_hand"), "B5 domain leaked into A5"
+
+
+class Clock:
+    def __init__(self, value):
+        self.value = value
+
+    def now(self):
+        return self.value
+
+
+class Forbidden:
+    async def __call__(self, *args, **kwargs):
+        raise AssertionError("this endpoint is outside the rollback exercise")
+
+
+class UnusedGateway:
+    url = "ws://unused.invalid"
+
+    async def observe(self, round_id):
+        raise AssertionError("ordinary A5 writes do not observe media")
+
+    async def open_media_room(self, round_id):
+        raise AssertionError("ordinary A5 writes do not create media")
+
+    def token(self, round_id, participant_id, name):
+        raise AssertionError("ordinary A5 writes do not issue tokens")
+
+
+class Boundary:
+    """Exact A5 SDK protocol, with no network and no mutating replay allowed."""
+
+    def __init__(self, request):
+        self.request = request
+        self.controls = []
+        self.lookups = []
+        self.mutes = []
+        self.states = []
+        self.metadata = []
+        self.removals = []
+        self.chat = []
+
+    async def microphone_target(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> MicrophoneTarget | None:
+        self.lookups.append(str(round_id))
+        target = self.request["sdk_targets"].get(round_id)
+        assert target is not None, "expired/attempted/stale epoch must not reach SDK lookup"
+        assert target["target_id"] == participant_id
+        return MicrophoneTarget(SessionId(target["sid"]), target["track_sid"])
+
+    async def mute_microphone(
+        self, round_id: RoundId, participant_id: ParticipantId, track_sid: str
+    ) -> bool:
+        self.mutes.append((round_id, participant_id, track_sid))
+        raise AssertionError("attempted or confirmed mute must never be replayed")
+
+    async def send_control(
+        self, round_id: RoundId, topic: ControlTopic, packet: bytes, target_id: ParticipantId
+    ) -> None:
+        parsed = MicrophonePacket.model_validate_json(packet)
+        assert parsed.round_id == round_id
+        assert parsed.target_id == target_id
+        assert parsed.target_sid == self.request["sdk_targets"][round_id]["sid"]
+        assert parsed.epoch == self.request["epoch"]
+        assert parsed.expires_at > self.request["now_ms"]
+        assert parsed.topic == topic
+        self.controls.append(
+            {
+                "roundId": round_id,
+                "targetId": target_id,
+                "topic": topic,
+                "packet": parsed.model_dump(mode="json", by_alias=True),
+            }
+        )
+
+    async def send_reaction(
+        self, round_id: RoundId, packet: bytes, destinations: Sequence[ParticipantId]
+    ) -> None:
+        raise AssertionError("A5 has no reaction use case")
+
+    async def create_room(self, round_id: RoundId, metadata: str) -> MediaRoom:
+        raise AssertionError("publisher must not create a MediaRoom")
+
+    async def rooms(self) -> Sequence[MediaRoom]:
+        raise AssertionError("publisher does not list rooms")
+
+    async def participants(self, round_id: RoundId) -> Mapping[ParticipantId, SessionId]:
+        raise AssertionError("control lookup uses its typed microphone port")
+
+    async def send_state(self, round_id: RoundId, packet: bytes) -> None:
+        self.states.append(json.loads(packet)["snapshot"])
+
+    async def send_packet(self, round_id: RoundId, topic: PacketTopic, packet: bytes) -> None:
+        self.chat.append(json.loads(packet))
+
+    async def update_metadata(self, round_id: RoundId, metadata: str) -> None:
+        self.metadata.append(json.loads(metadata))
+
+    async def remove_participant(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        self.removals.append((round_id, participant_id))
+
+    def token(self, round_id: RoundId, participant_id: ParticipantId, name: str) -> str:
+        raise AssertionError("publisher must not issue tokens")
+
+
+async def run(request, source):
+    global stage
+    assert_a5_only(source)
+    for name, method in LiveKitApi.__dict__.items():
+        if not name.startswith("_") and inspect.isfunction(method):
+            assert tuple(inspect.signature(method).parameters) == tuple(
+                inspect.signature(getattr(Boundary, name)).parameters
+            ), name
+    # The real publisher lease owns one connection; coordinator queries use the second.
+    engine = create_async_engine(request["database_url"], pool_size=2, max_overflow=0)
+    try:
+        rid = RoundId(request["round_id"])
+        alice = Credentials(ParticipantId(request["alice"]), request["alice_secret"])
+        bob = Credentials(ParticipantId(request["bob"]), request["bob_secret"])
+        clock = Clock(datetime.fromisoformat(request["now"]))
+        rounds = PostgresRounds(engine, PostgresMediaOutbox, request_system_messages)
+        execute = ExecuteRoundCommand(
+            rounds, UnusedGateway(), rounds, clock, PostgresRateLimiter(engine), NoRandom()
+        )
+        stage = "ordinary-writes"
+        await execute(rid, bob, request["enter_key"], Enter(Room.OO))
+        await execute(rid, alice, request["timer_key"], PauseTimer(TimerKind.PREP))
+        messages = PostgresMessages(engine)
+        app = FastAPI()
+        install_error_handlers(app)
+        endpoints = RoundEndpoints(Forbidden(), Forbidden(), Forbidden(), ReadSnapshot(rounds))
+        app.include_router(entry_router(endpoints, "compat-expand-a5"))
+        app.include_router(room_router(execute, "compat-expand-a5"))
+        app.include_router(message_router(ReadMessages(messages, rounds)))
+        stage = "authenticated-http"
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://compat.test"
+        ) as client:
+            base = f"/api/rounds/{rid}"
+            headers = {"Authorization": f"Bearer {alice.participant_id}.{alice.secret}"}
+            assert (await client.get(base + "/snapshot")).status_code == 401
+            response = await client.get(base + "/snapshot", headers=headers)
+            assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+            history = await client.get(base + "/messages", params={"after": "0"}, headers=headers)
+            assert history.status_code == 200
+            for path, body in (
+                ("hands/raise", {}),
+                ("hands/lower", {}),
+                ("hands/lower-all", {}),
+                ("hands/lower-of", {"participantId": bob.participant_id}),
+                ("mute", {"participantId": bob.participant_id}),
+                ("request-unmute", {"participantId": bob.participant_id}),
+                ("reactions", {"reaction": "clap"}),
+            ):
+                missing = await client.post(
+                    base + "/" + path,
+                    headers={**headers, "Idempotency-Key": request["unsupported_key"]},
+                    json=body,
+                )
+                assert missing.status_code in (404, 405)
+        snapshot = response.json()
+        stage = "publisher-within-ttl"
+        store = PostgresMediaStore(engine)
+        for round_id in request["wake_rounds"]:
+            await store.started(RoundId(round_id), "RM_compat")
+        api: LiveKitApi = Boundary(request)
+        publisher = SnapshotPublisher(
+            rounds, api, store, PostgresPublisherLease(engine), clock, "compat-expand-a5", messages
+        )
+        await publisher.publish_once()
+        assert api.mutes == []
+        assert len(api.controls) == 2
+        assert {item["topic"] for item in api.controls} == {"request_unmute", "microphone_muted"}
+        [primary_state] = [value for value in api.states if value["roundId"] == rid]
+        [primary_metadata] = [value for value in api.metadata if value["roundId"] == rid]
+        assert primary_state == primary_metadata == snapshot
+        assert await store.control_heads(clock.now()) == []
+        stage = "retained-receipts-after-day"
+        clock.value = datetime.fromisoformat(request["maintenance_now"])
+        await store.maintain(clock.now())
+        async with engine.connect() as connection:
+            receipts = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT round_id, participant_id, key::text, request_hash, retained FROM command_keys WHERE retained ORDER BY round_id, key"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            controls_left = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM media_outbox WHERE operation IN ('mute','request_unmute')"
+                )
+            )
+        assert controls_left == 0
+        assert len(receipts) == request["retained_count"]
+        assert_a5_only(source)
+        return {
+            "snapshot": snapshot,
+            "controls": api.controls,
+            "history": history.json(),
+            "sdk_lookups": api.lookups,
+            "mute_calls": len(api.mutes),
+            "receipts": [dict(row) for row in receipts],
+            "controls_after_cleanup": controls_left,
+        }
+    finally:
+        await engine.dispose()
+
+
+class NoRandom:
+    def token(self, size):
+        raise AssertionError("ordinary A5 writes must not consume randomness")
+
+    def below(self, upper):
+        raise AssertionError("ordinary A5 writes must not draw")
+
+
+def request_system_messages(connection):
+    # No ordinary command acquires the chat guard or emits a draw system line.
+    return ForbiddenSystemMessages()
+
+
+class ForbiddenSystemMessages:
+    async def prepare(self, round_id):
+        raise AssertionError("ordinary A5 writes must not prepare chat")
+
+    async def position_drawn(self, round_id, position, draw_no, now, round_version):
+        raise AssertionError("ordinary A5 writes must not create a draw system line")
+
+
+if __name__ == "__main__":
+    try:
+        request = json.load(sys.stdin)
+        result = asyncio.run(run(request, Path(sys.argv[1]).resolve()))
+        json.dump(result, sys.stdout, ensure_ascii=False)
+    except Exception as error:
+        sys.stderr.write(f"A5_FAILURE:{stage}:{type(error).__name__}\n")
+        raise SystemExit(1) from None

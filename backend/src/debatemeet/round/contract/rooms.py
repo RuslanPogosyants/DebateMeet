@@ -17,8 +17,12 @@ class EnterBody(EmptyCommandBody):
     room: Room
 
 
-class HandOverBody(EmptyCommandBody):
+class ParticipantBody(EmptyCommandBody):
     participant_id: ParticipantCode
+
+
+class HandOverBody(ParticipantBody):
+    pass
 
 
 class RecallBody(EmptyCommandBody):

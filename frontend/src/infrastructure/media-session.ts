@@ -12,6 +12,7 @@ import type { RemoteTrack } from 'livekit-client'
 import type { DeviceSelection, EndReason, MediaEvents, MediaSession } from '@/application/ports'
 import { record, subscriptions, type Snapshot } from '@/domain/snapshot'
 import { readChatEvent } from '@/domain/chat'
+import { readMicrophoneEvent, readReaction } from '@/domain/social'
 
 function ended(reason: DisconnectReason | undefined): EndReason {
   if (reason === DisconnectReason.DUPLICATE_IDENTITY) return 'replaced'
@@ -32,6 +33,7 @@ export class LiveKitMediaSession implements MediaSession {
   private intentional = false
   private readonly audio = new Map<string, { track: RemoteAudioTrack; element: HTMLMediaElement }>()
   private readonly video = new Map<string, HTMLVideoElement>()
+  private readonly volumes = new Map<string, number>()
 
   constructor() {
     // The round name is an access key. SDK debug logs must not print connection URLs/tokens.
@@ -89,9 +91,17 @@ export class LiveKitMediaSession implements MediaSession {
     })
     this.room.on(RoomEvent.DataReceived, (payload, participant, _, topic) => {
       if (
-        !['state', 'chat', 'chat_deleted'].includes(topic ?? '') ||
+        ![
+          'state',
+          'chat',
+          'chat_deleted',
+          'request_unmute',
+          'microphone_muted',
+          'reaction',
+        ].includes(topic ?? '') ||
         participant !== undefined ||
-        payload.byteLength > 15 * 1024
+        payload.byteLength >
+          (topic === 'state' || topic === 'chat' || topic === 'chat_deleted' ? 15 * 1024 : 1024)
       )
         return
       try {
@@ -103,9 +113,15 @@ export class LiveKitMediaSession implements MediaSession {
           typeof value.nonce === 'string'
         ) {
           this.events?.snapshot(value.snapshot)
-        } else if (topic !== 'state') {
+        } else if (topic === 'chat' || topic === 'chat_deleted') {
           const event = readChatEvent(value, this.snapshot?.roundId ?? '')
           if (event !== null && event.topic === topic) this.events?.chat(event)
+        } else if (topic === 'reaction') {
+          const reaction = readReaction(value, this.snapshot?.roundId ?? '')
+          if (reaction !== null) this.events?.reaction(reaction)
+        } else if (topic === 'request_unmute' || topic === 'microphone_muted') {
+          const control = readMicrophoneEvent(value, this.snapshot?.roundId ?? '')
+          if (control !== null && control.topic === topic) this.events?.microphone(control)
         }
       } catch {
         /* A malformed packet cannot change state. */
@@ -227,6 +243,18 @@ export class LiveKitMediaSession implements MediaSession {
     this.events?.playback(!this.room.canPlaybackAudio)
   }
 
+  volume(identity: string, value: number): void {
+    if (!Number.isFinite(value)) return
+    const volume = Math.max(0, Math.min(1, value))
+    this.volumes.set(identity, volume)
+    for (const publication of this.room.remoteParticipants
+      .get(identity)
+      ?.trackPublications.values() ?? []) {
+      if (publication.track instanceof RemoteAudioTrack)
+        publication.track.setVolume(this.wanted.has(identity) ? volume : 0)
+    }
+  }
+
   attachVideo(identity: string, element: HTMLVideoElement): () => void {
     this.video.set(identity, element)
     this.refresh()
@@ -290,10 +318,12 @@ export class LiveKitMediaSession implements MediaSession {
 
   private attach(track: RemoteTrack, identity: string): void {
     if (track instanceof RemoteAudioTrack) {
-      track.setVolume(1)
+      track.setVolume(this.wanted.has(identity) ? (this.volumes.get(identity) ?? 1) : 0)
+      if (!this.wanted.has(identity)) return
       const old = this.audio.get(identity)
       if (old?.track === track) return
       if (old !== undefined) {
+        old.track.setVolume(0)
         old.track.detach(old.element)
         old.element.remove()
       }
@@ -343,6 +373,7 @@ export class LiveKitMediaSession implements MediaSession {
   private clearTracks(): void {
     this.cancelTransition?.()
     for (const { track, element } of this.audio.values()) {
+      track.setVolume(0)
       track.detach(element)
       element.remove()
     }

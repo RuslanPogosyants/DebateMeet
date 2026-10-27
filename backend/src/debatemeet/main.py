@@ -26,6 +26,7 @@ from debatemeet.media.infrastructure.postgres import (
 )
 from debatemeet.media.infrastructure.runtime import MediaRuntime
 from debatemeet.round.api.entry import RoundEndpoints, entry_router
+from debatemeet.round.api.reactions import reaction_router
 from debatemeet.round.api.rooms import room_router
 from debatemeet.round.application.commands import CreateRound, JoinRound, LeaveRound, ReadSnapshot
 from debatemeet.round.application.presence import (
@@ -33,6 +34,7 @@ from debatemeet.round.application.presence import (
     DisconnectParticipant,
     SyncPresence,
 )
+from debatemeet.round.application.reactions import SendReaction
 from debatemeet.round.application.room_commands import ExecuteRoundCommand
 from debatemeet.round.chat.api.messages import message_router
 from debatemeet.round.chat.application.post_message import PostMessage
@@ -47,6 +49,7 @@ from debatemeet.round.contract.entry import StatePacket
 from debatemeet.round.contract.microphone import MicrophonePacket
 from debatemeet.round.contract.reaction import ReactionPacket
 from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
+from debatemeet.round.infrastructure.reaction_limits import SlidingReactionLimiter
 from debatemeet.shared.api.errors import install_error_handlers
 from debatemeet.shared.api.health import health_router
 from debatemeet.shared.api.time import time_router
@@ -75,6 +78,7 @@ def build_app(
     room_commands: ExecuteRoundCommand | None = None,
     messages: ReadMessages | None = None,
     post_message: PostMessage | None = None,
+    reactions: SendReaction | None = None,
 ) -> FastAPI:
     """The HTTP app over ports; tests call it with fakes."""
     app = FastAPI(
@@ -92,6 +96,7 @@ def build_app(
     app.include_router(entry_router(round_commands, version))
     app.include_router(room_router(room_commands, version))
     app.include_router(message_router(messages, post_message))
+    app.include_router(reaction_router(reactions))
     # Data packets travel through LiveKit, but their schema belongs to the same public contract.
     schema = app.openapi()
     schemas = schema.setdefault("components", {}).setdefault("schemas", {})
@@ -186,4 +191,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         room_commands=ExecuteRoundCommand(rounds, media, rounds, clock, limiter, random),
         messages=ReadMessages(messages, rounds),
         post_message=PostMessage(chat_transactions, messages, rounds, clock, limiter),
+        reactions=SendReaction(rounds, media, SlidingReactionLimiter(), random),
     )

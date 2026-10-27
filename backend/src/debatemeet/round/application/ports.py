@@ -9,6 +9,8 @@ from typing import Literal, Protocol
 from debatemeet.round.domain.ids import ParticipantId as ParticipantId
 from debatemeet.round.domain.ids import RoundId as RoundId
 from debatemeet.round.domain.ids import SessionId as SessionId
+from debatemeet.round.domain.reaction import ReactionCode
+from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.ports import CommandKeys, EventLog
 
@@ -205,3 +207,26 @@ class MediaGateway(Protocol):
         """The participants of the media room within about a second; empty when there is no
         media room, None when LiveKit did not answer."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class ReactionMessage:
+    round_id: RoundId
+    epoch: int
+    version: int
+    room: Room
+    participant_id: ParticipantId
+    reaction: ReactionCode
+    nonce: str
+
+
+class ReactionGateway(Protocol):
+    async def send_reaction(
+        self, message: ReactionMessage, recipients: tuple[ParticipantId, ...]
+    ) -> None:
+        """One lossy attempt outside locks; an empty destination is never a broadcast."""
+        ...
+
+
+class ReactionLimiter(Protocol):
+    def allow(self, round_id: RoundId, participant_id: ParticipantId) -> bool: ...
