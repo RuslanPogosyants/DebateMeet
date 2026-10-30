@@ -4,6 +4,7 @@ import type { RoundController } from '@/application/round-controller'
 import type { LogicalRoom, RoundCommand, SubRoom } from '@/application/ports'
 import { ConfirmDialog } from './confirm-dialog'
 import { Sheet } from './sheet'
+import { TimerControls, TimerReadouts } from './round-timers'
 import type { MeetingLayout } from '@/ui/use-meeting-layout'
 import {
   enterRoom,
@@ -360,7 +361,9 @@ export function JudgeControl({
           title={strings.round.youJudge}
           closeLabel={strings.round.closeJudge}
           onClose={() => setPanelOpen(false)}
+          pinned={<TimerReadouts controller={controller} />}
         >
+          <TimerControls controller={controller} />
           <JudgeControl controller={controller} />
           <button
             className="action-primary"

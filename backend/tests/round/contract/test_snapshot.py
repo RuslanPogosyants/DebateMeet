@@ -1,8 +1,11 @@
+from datetime import UTC, datetime
+
 from debatemeet.round.contract.snapshot import RoundSnapshot, snapshot_of
 from debatemeet.round.domain.ids import ParticipantId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import MAX_PARTICIPANTS
+from debatemeet.round.domain.timer import JS_MAX_SAFE_INTEGER, SpeechUndo, Timer, TimerStatus
 from tests.round.builders import ROUND_ID, a_round, at, connected, disconnected, pending
 
 # Invariant 14: a snapshot with the largest values fits a reliable data packet of 15 KiB.
@@ -64,6 +67,22 @@ def test_the_snapshot_speaks_camel_case_and_epoch_milliseconds() -> None:
             "releasedReason": "holder_disconnected",
             "releasedAt": ms + 4000,
         },
+        "timers": {
+            "prep": {
+                "durationMs": 900000,
+                "status": "stopped",
+                "endsAt": None,
+                "remainingMs": 900000,
+            },
+            "speech": {
+                "durationMs": 420000,
+                "status": "stopped",
+                "endsAt": None,
+                "remainingMs": 420000,
+            },
+        },
+        "speechNo": 1,
+        "speechUndo": None,
     }
 
 
@@ -87,9 +106,62 @@ def test_the_largest_snapshot_fits_a_data_packet() -> None:
         released_at=at(0),
     )
     round_.version = 2**40
+    round_.prep_timer = Timer(1800000, TimerStatus.PAUSED, None, -JS_MAX_SAFE_INTEGER)
+    round_.speech_timer = Timer(900000, TimerStatus.PAUSED, None, JS_MAX_SAFE_INTEGER)
+    round_.speech_no = JS_MAX_SAFE_INTEGER
+    round_.speech_undo = SpeechUndo(
+        JS_MAX_SAFE_INTEGER,
+        Timer(900000, TimerStatus.RUNNING, datetime.max.replace(tzinfo=UTC), None),
+    )
 
     snapshot = snapshot_of(
         round_, epoch=2**31, committed_at=at(0), app_version="2026.09.29-0123456789ab"
     )
 
     assert len(snapshot_json(snapshot).encode()) <= SNAPSHOT_LIMIT_BYTES
+
+
+def test_nondefault_timers_and_undo_are_part_of_the_shared_snapshot() -> None:
+    round_ = a_round().build()
+    round_.prep_timer = Timer(1800000, TimerStatus.RUNNING, at(100), None)
+    round_.speech_timer = Timer(420000, TimerStatus.PAUSED, None, -1500)
+    round_.speech_no = 3
+    round_.speech_undo = SpeechUndo(2, Timer(300000, TimerStatus.RUNNING, at(-2), None))
+
+    snapshot = snapshot_of(round_, epoch=1, committed_at=at(0), app_version="A")
+    data = snapshot.model_dump(by_alias=True)
+    ms = int(at(0).timestamp() * 1000)
+
+    assert data["timers"] == {
+        "prep": {
+            "durationMs": 1800000,
+            "status": "running",
+            "endsAt": ms + 100000,
+            "remainingMs": None,
+        },
+        "speech": {
+            "durationMs": 420000,
+            "status": "paused",
+            "endsAt": None,
+            "remainingMs": -1500,
+        },
+    }
+    assert data["speechNo"] == 3
+    assert data["speechUndo"] == {
+        "speechNo": 2,
+        "timer": {
+            "durationMs": 300000,
+            "status": "running",
+            "endsAt": ms - 2000,
+            "remainingMs": None,
+        },
+    }
+
+
+def test_a_deadline_before_the_epoch_stays_a_signed_millisecond_value() -> None:
+    round_ = a_round().build()
+    round_.speech_timer = Timer(420000, TimerStatus.RUNNING, datetime(1960, 1, 1, tzinfo=UTC), None)
+
+    snapshot = snapshot_of(round_, epoch=1, committed_at=at(0), app_version="A")
+
+    assert snapshot.timers.speech.ends_at == -315619200000

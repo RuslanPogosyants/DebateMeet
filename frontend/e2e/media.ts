@@ -5,7 +5,7 @@ export type AudioFrame = { at: number; room: string; bands: number[] }
 declare global {
   interface Window {
     debatemeetAudioOutputs: AnalyserNode[]
-    debatemeetReadBands(frequencies: number[]): number[]
+    debatemeetReadBands(frequencies: number[], contexts?: readonly BaseAudioContext[]): number[]
     debatemeetAudioFrames: AudioFrame[]
     debatemeetAudioRecording: number | undefined
   }
@@ -63,11 +63,12 @@ export async function measureRenderedAudio(page: Page, toneHz?: number) {
         Reflect.apply(disconnect, this, args)
       },
     })
-    window.debatemeetReadBands = (bands) =>
+    window.debatemeetReadBands = (bands, contexts) =>
       bands.map((frequency) => {
         let peak = 0
         for (const analyser of window.debatemeetAudioOutputs) {
           if (analyser.context.state !== 'running') continue
+          if (contexts !== undefined && !contexts.includes(analyser.context)) continue
           const bins = new Float32Array(analyser.frequencyBinCount)
           analyser.getFloatFrequencyData(bins)
           const center = Math.round((frequency * analyser.fftSize) / analyser.context.sampleRate)

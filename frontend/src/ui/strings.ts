@@ -82,7 +82,8 @@ export const strings = {
     handOverTo: 'Кому передать флаг',
     chooseParticipant: 'Выберите участника',
     claimTitle: 'Стать судьёй?',
-    claimDescription: 'Вы сможете возвращать комнаты в базу и передавать флаг другому участнику.',
+    claimDescription:
+      'Вы сможете управлять таймерами, возвращать комнаты в базу и передавать флаг другому участнику.',
     recallAll: 'Всех в базу',
     recall: 'Вернуть в базу',
     recallTitle: 'Вернуть участников в базу?',
@@ -102,6 +103,46 @@ export const strings = {
     takeoverDescription: 'Раунд уже открыт в другой вкладке. После переноса та сессия завершится.',
     takeover: 'Перенести',
     keepPreviousTab: 'Остаться в прежней вкладке',
+  },
+  timers: {
+    heading: 'Время раунда',
+    controls: 'Управление таймерами',
+    roundTitle: 'Раунд — DebateMeet',
+    prep: 'Подготовка',
+    speech: 'Речь',
+    speechTimer: 'Таймер речи',
+    prepTimer: 'Таймер подготовки',
+    running: 'идёт',
+    paused: 'пауза',
+    stopped: 'не запущен',
+    of: 'из',
+    remaining: 'осталось',
+    prepOvertime: 'время подготовки вышло',
+    protected: 'POI нельзя',
+    poi: 'POI можно',
+    grace: 'грейс — ещё',
+    overtime: 'сверх времени',
+    approximate: 'Время приблизительное',
+    degraded: 'Не удалось уточнить время; используем последнюю поправку',
+    syncing: 'Уточняем время…',
+    resync: 'Уточнить время',
+    start: 'Старт',
+    pause: 'Пауза',
+    reset: 'Сбросить',
+    set: 'Выставить время',
+    configure: 'Длительность',
+    next: 'Следующая речь',
+    configureConfirm: 'Изменить и сбросить',
+    configureWarning: 'Таймер будет сброшен и остановлен.',
+    resetWarning:
+      'Текущее время будет потеряно. Таймер вернётся к своей длительности и остановится.',
+    setConfirm: 'Выставить',
+    durationInput: 'Длительность, мм:сс',
+    elapsedInput: 'Прошедшее время, мм:сс',
+    remainingInput: 'Остаток, мм:сс',
+    signedHint: 'Формат — минуты:секунды, например 7:12 или −0:15. Знак минус допустим.',
+    prepBounds: 'От 1:00 до 30:00. По умолчанию — 15:00.',
+    speechBounds: 'От 1:00 до 15:00. По умолчанию — 7:00; грейс — всегда 0:15.',
   },
   notFound: {
     title: 'Страница не найдена',
@@ -135,6 +176,9 @@ const errors: Record<string, string> = {
   coordination_unavailable:
     'Браузер не поддерживает безопасный перенос сессии. Используйте актуальный браузер.',
   invalid_response: 'Получен неполный ответ сервера. Обновите страницу и повторите.',
+  invalid_timer_value: 'Время вне допустимого диапазона. Проверьте значение.',
+  speech_undo_unavailable: 'Отменять пока нечего: следующая речь ещё не начиналась.',
+  command_unavailable: 'Эта команда временно недоступна. Звонок продолжается.',
 }
 
 export function errorText(code: string | null): string {
@@ -187,6 +231,26 @@ export function enterRoom(name: string): string {
 }
 export function recallRoom(name: string): string {
   return `Вернуть ${name} в базу`
+}
+
+export function timerHeading(kind: 'prep' | 'speech', speechNo: number): string {
+  return kind === 'prep' ? strings.timers.prep : `${strings.timers.speech} ${speechNo}`
+}
+
+export function timerAction(
+  action: 'start' | 'pause' | 'reset' | 'resetConfirm' | 'set' | 'configure',
+  kind: 'prep' | 'speech',
+): string {
+  const name = kind === 'prep' ? 'подготовки' : 'речи'
+  if (action === 'start') return kind === 'prep' ? 'Запустить подготовку' : 'Запустить речь'
+  if (action === 'pause') return `Пауза ${name}`
+  if (action === 'reset') return kind === 'prep' ? 'Сбросить подготовку' : 'Сбросить речь'
+  if (action === 'resetConfirm') return `Сбросить таймер ${name}?`
+  return action === 'set' ? `Выставить время ${name}` : `Изменить длительность ${name}`
+}
+
+export function undoSpeechLabel(speechNo: number, time: string): string {
+  return `Отменить: речь ${speechNo}, ${time}`
 }
 
 export function roomChangeText(

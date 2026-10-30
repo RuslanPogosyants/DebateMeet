@@ -15,6 +15,7 @@ from debatemeet.round.domain.judge import JudgeFlag, ReleaseReason
 from debatemeet.round.domain.presence import Connected, Pending, Presence
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Participant, Round
+from debatemeet.round.domain.timer import SpeechUndo, Timer, TimerStatus
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -51,6 +52,23 @@ class JudgeFlagView(ContractModel):
     released_at: int | None
 
 
+class TimerView(ContractModel):
+    duration_ms: int
+    status: TimerStatus
+    ends_at: int | None
+    remaining_ms: int | None
+
+
+class TimersView(ContractModel):
+    prep: TimerView
+    speech: TimerView
+
+
+class SpeechUndoView(ContractModel):
+    speech_no: int
+    timer: TimerView
+
+
 class RoundSnapshot(ContractModel):
     round_id: str
     # Changes when a backup is restored: a client takes a new epoch whatever the version.
@@ -63,6 +81,9 @@ class RoundSnapshot(ContractModel):
     participants: list[ParticipantView]
     entry_closed: bool
     judge_flag: JudgeFlagView
+    timers: TimersView
+    speech_no: int
+    speech_undo: SpeechUndoView | None
 
 
 def snapshot_of(
@@ -77,6 +98,9 @@ def snapshot_of(
         participants=[_participant(participant) for participant in round_.participants.values()],
         entry_closed=round_.entry_closed,
         judge_flag=_judge_flag(round_.judge_flag),
+        timers=TimersView(prep=_timer(round_.prep_timer), speech=_timer(round_.speech_timer)),
+        speech_no=round_.speech_no,
+        speech_undo=_speech_undo(round_.speech_undo),
     )
 
 
@@ -111,3 +135,18 @@ def _judge_flag(flag: JudgeFlag) -> JudgeFlagView:
 
 def _ms(moment: datetime) -> int:
     return (moment - _EPOCH) // timedelta(milliseconds=1)
+
+
+def _timer(timer: Timer) -> TimerView:
+    return TimerView(
+        duration_ms=timer.duration_ms,
+        status=timer.status,
+        ends_at=_ms(timer.ends_at) if timer.ends_at is not None else None,
+        remaining_ms=timer.remaining_ms,
+    )
+
+
+def _speech_undo(previous: SpeechUndo | None) -> SpeechUndoView | None:
+    if previous is None:
+        return None
+    return SpeechUndoView(speech_no=previous.speech_no, timer=_timer(previous.timer))

@@ -9,6 +9,8 @@ import { BrowserDevices } from '@/infrastructure/devices'
 import { BrowserPreferences } from '@/infrastructure/preferences'
 import { BrowserSessionOwnership } from '@/infrastructure/session-ownership'
 import { HttpRoundApi } from '@/infrastructure/round-api'
+import { BrowserClientClock } from '@/infrastructure/client-clock'
+import { WebAudioTimerAudio } from '@/infrastructure/timer-audio'
 import type { Services } from '@/application/ports'
 import '@/ui/styles.css'
 
@@ -19,6 +21,8 @@ if (container === null) {
 
 const services: Services = {
   api: new HttpRoundApi(),
+  clientClock: new BrowserClientClock(),
+  timerAudio: (events) => new WebAudioTimerAudio(events),
   preferences: new BrowserPreferences(),
   devices: new BrowserDevices(),
   ownership: (roundId) => new BrowserSessionOwnership(roundId),

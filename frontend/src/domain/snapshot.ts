@@ -11,8 +11,10 @@ export function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-const integer = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+const signedInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value)
+
+const integer = (value: unknown): value is number => signedInteger(value) && value >= 0
 
 export function isSnapshot(value: unknown): value is Snapshot {
   if (!record(value) || typeof value.roundId !== 'string' || !/^[\w-]{22}$/u.test(value.roundId)) {
@@ -26,7 +28,8 @@ export function isSnapshot(value: unknown): value is Snapshot {
     typeof value.entryClosed !== 'boolean' ||
     !Array.isArray(value.participants) ||
     value.participants.length > 40 ||
-    !record(value.judgeFlag)
+    !record(value.judgeFlag) ||
+    !timerExtension(value)
   )
     return false
   const identities = new Set<string>()
@@ -62,8 +65,56 @@ export function isSnapshot(value: unknown): value is Snapshot {
   )
 }
 
+function timer(value: unknown, maximumDuration: number): boolean {
+  if (
+    !record(value) ||
+    !integer(value.durationMs) ||
+    value.durationMs < 60000 ||
+    value.durationMs > maximumDuration
+  )
+    return false
+  if (value.status === 'running') return signedInteger(value.endsAt) && value.remainingMs === null
+  return (
+    (value.status === 'stopped' || value.status === 'paused') &&
+    value.endsAt === null &&
+    signedInteger(value.remainingMs)
+  )
+}
+
+function timerExtension(value: Record<string, unknown>): boolean {
+  if (
+    !record(value.timers) ||
+    !timer(value.timers.prep, 1800000) ||
+    !timer(value.timers.speech, 900000) ||
+    !integer(value.speechNo) ||
+    value.speechNo < 1
+  )
+    return false
+  return (
+    value.speechUndo === null ||
+    (record(value.speechUndo) &&
+      integer(value.speechUndo.speechNo) &&
+      value.speechUndo.speechNo >= 1 &&
+      timer(value.speechUndo.timer, 900000))
+  )
+}
+
 export function readSnapshot(value: unknown, roundId: string): Snapshot | null {
-  return isSnapshot(value) && value.roundId === roundId ? value : null
+  // Only the complete pre-A format has defaults. A damaged additive extension must
+  // not silently stop an existing timer or discard the judge's undo state.
+  const normalized =
+    record(value) && !('timers' in value) && !('speechNo' in value) && !('speechUndo' in value)
+      ? {
+          ...value,
+          timers: {
+            prep: { durationMs: 900000, status: 'stopped', endsAt: null, remainingMs: 900000 },
+            speech: { durationMs: 420000, status: 'stopped', endsAt: null, remainingMs: 420000 },
+          },
+          speechNo: 1,
+          speechUndo: null,
+        }
+      : value
+  return isSnapshot(normalized) && normalized.roundId === roundId ? normalized : null
 }
 
 export function newerSnapshot(current: Snapshot | null, next: Snapshot): boolean {

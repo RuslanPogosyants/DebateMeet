@@ -474,7 +474,14 @@ jobs:
         run: docker compose up -d --wait
       - name: Built application entry and remote audio
         working-directory: frontend
-        run: pnpm test:e2e
+        # Ubuntu allows sandboxed user namespaces for its installed Chrome executable,
+        # unlike downloaded Chromium. Native checks retain the browser's own defaults.
+        env:
+          DM_E2E_CHROME_EXECUTABLE: /opt/google/chrome/chrome
+        run: |
+          test -x "$DM_E2E_CHROME_EXECUTABLE"
+          "$DM_E2E_CHROME_EXECUTABLE" --version
+          pnpm test:e2e
       - name: Service logs
         if: failure()
         run: docker compose logs --tail 100

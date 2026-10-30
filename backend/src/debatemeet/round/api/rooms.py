@@ -9,16 +9,26 @@ from debatemeet.round.api.entry import RoundPath, no_store, participant_credenti
 from debatemeet.round.application.credentials import Credentials
 from debatemeet.round.application.room_commands import (
     ClaimJudge,
+    ConfigureTimer,
     Enter,
     ExecuteRoundCommand,
     HandOverJudge,
+    NextSpeech,
+    PauseTimer,
     Recall,
     RecallAll,
     ReleaseJudge,
+    ResetTimer,
+    RoundCommand,
+    SetTimer,
+    StartTimer,
+    UndoNextSpeech,
 )
 from debatemeet.round.contract.rooms import EmptyCommandBody, EnterBody, HandOverBody, RecallBody
 from debatemeet.round.contract.snapshot import RoundSnapshot, snapshot_of
+from debatemeet.round.contract.timers import ConfigureTimerBody, SetTimerBody
 from debatemeet.round.domain.ids import ParticipantId, RoundId
+from debatemeet.round.domain.timer import TimerKind
 from debatemeet.shared.api.errors import ApiError, ErrorResponse
 
 type IdempotencyKey = Annotated[UUID, Header(alias="Idempotency-Key")]
@@ -38,7 +48,7 @@ def room_router(execute: ExecuteRoundCommand | None, app_version: str) -> APIRou
         round_id: str,
         credentials: Credentials,
         key: UUID,
-        command: Enter | ClaimJudge | ReleaseJudge | HandOverJudge | Recall | RecallAll,
+        command: RoundCommand,
     ) -> RoundSnapshot:
         if execute is None:
             raise ApiError(503, "unavailable", "Round commands are not configured")
@@ -105,5 +115,73 @@ def room_router(execute: ExecuteRoundCommand | None, app_version: str) -> APIRou
         key: IdempotencyKey,
     ) -> RoundSnapshot:
         return await run(round_id, credentials, key, RecallAll())
+
+    @router.post("/timers/{kind}/start", response_model=RoundSnapshot)
+    async def start_timer(
+        round_id: RoundPath,
+        kind: TimerKind,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, StartTimer(kind))
+
+    @router.post("/timers/{kind}/pause", response_model=RoundSnapshot)
+    async def pause_timer(
+        round_id: RoundPath,
+        kind: TimerKind,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, PauseTimer(kind))
+
+    @router.post("/timers/{kind}/reset", response_model=RoundSnapshot)
+    async def reset_timer(
+        round_id: RoundPath,
+        kind: TimerKind,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, ResetTimer(kind))
+
+    @router.post("/timers/{kind}/set", response_model=RoundSnapshot)
+    async def set_timer(
+        round_id: RoundPath,
+        kind: TimerKind,
+        body: SetTimerBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, SetTimer(kind, body.remaining_ms))
+
+    @router.post("/timers/{kind}/configure", response_model=RoundSnapshot)
+    async def configure_timer(
+        round_id: RoundPath,
+        kind: TimerKind,
+        body: ConfigureTimerBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, ConfigureTimer(kind, body.duration_ms))
+
+    @router.post("/speech/next", response_model=RoundSnapshot)
+    async def next_speech(
+        round_id: RoundPath,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, NextSpeech())
+
+    @router.post("/speech/undo", response_model=RoundSnapshot)
+    async def undo_next_speech(
+        round_id: RoundPath,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, UndoNextSpeech())
 
     return router

@@ -76,3 +76,52 @@ it('sends the command payload without its route discriminant and retains the int
     body: JSON.stringify({ participantId: 'b'.repeat(12) }),
   })
 })
+
+it('uses the existing clock endpoint and rejects a malformed timestamp', async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(Response.json({ serverTime: 123456 }))
+    .mockResolvedValueOnce(Response.json({ serverTime: 1.5 }))
+  vi.stubGlobal('fetch', fetch)
+  const api = new HttpRoundApi()
+  expect(await api.time()).toBe(123456)
+  expect(fetch.mock.calls[0]?.[0]).toBe('/api/time')
+  await expect(api.time()).rejects.toMatchObject({ code: 'invalid_response' })
+})
+
+it('keeps an existing round usable when an older backend lacks a timer command', async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(
+      Response.json({ code: 'not_found', message: 'route missing' }, { status: 404 }),
+    )
+    .mockResolvedValueOnce(Response.json(snapshot()))
+  vi.stubGlobal('fetch', fetch)
+  await expect(
+    new HttpRoundApi().command(ROUND_ID, credentials, { type: 'timers/speech/start' }, 'same-key'),
+  ).rejects.toMatchObject({ code: 'command_unavailable' })
+  expect(fetch.mock.calls[1]?.[0]).toBe(`/api/rounds/${ROUND_ID}/snapshot`)
+  expect(fetch.mock.calls[1]?.[1]?.headers).toMatchObject({
+    Authorization: `Bearer ${credentials.participantId}.${credentials.secret}`,
+  })
+})
+
+it.each(['network', 'not_found', 'participant_removed'])(
+  'preserves the verification outcome %s after a missing command',
+  async (code) => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ code: 'not_found', message: 'missing' }, { status: 404 }),
+      )
+    if (code === 'network') fetch.mockRejectedValueOnce(new Error('offline'))
+    else
+      fetch.mockResolvedValueOnce(
+        Response.json({ code, message: code }, { status: code === 'not_found' ? 404 : 401 }),
+      )
+    vi.stubGlobal('fetch', fetch)
+    await expect(
+      new HttpRoundApi().command(ROUND_ID, credentials, { type: 'speech/next' }, 'same-key'),
+    ).rejects.toMatchObject({ code })
+  },
+)

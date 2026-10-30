@@ -353,3 +353,64 @@ it('keeps the intent retryable when media reconnect interrupts command snapshot 
   expect(controller.store.getState().snapshot?.version).toBe(4)
   expect(controller.store.getState().commandUncertain).toBe(false)
 })
+
+it('applies accepted timer state before a delayed room subscription transition', async () => {
+  const { controller, api, media, timerAudio } = setup()
+  await controller.join('Вика', false)
+  await controller.timers.resync()
+  const first = media[0]
+  if (!first) throw new Error('No media')
+  const pending: { resolve?: () => void } = {}
+  vi.spyOn(first, 'apply').mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        pending.resolve = resolve
+      }),
+  )
+  const running = snapshot(2)
+  running.timers.speech = {
+    durationMs: 420000,
+    status: 'running',
+    endsAt: Date.now() + 420000,
+    remainingMs: null,
+  }
+  vi.spyOn(api, 'command').mockResolvedValue(running)
+  const sending = controller.command({ type: 'timers/speech/start' })
+  await vi.waitFor(() => {
+    expect(controller.timers.store.getState().snapshot?.version).toBe(2)
+  })
+  expect(controller.store.getState().snapshot?.version).toBe(1)
+  expect(timerAudio[0]?.plans.at(-1)).toHaveLength(4)
+  await controller.leave()
+  pending.resolve?.()
+  await sending
+  expect(controller.timers.store.getState().audio).toBe('closed')
+  expect(timerAudio[0]?.plans.at(-1)).toEqual([])
+})
+
+it('never blocks media entry on an unresolved timer autoplay resume', async () => {
+  const { controller, services } = setup()
+  const original = services.timerAudio.bind(services)
+  vi.spyOn(services, 'timerAudio').mockImplementation((events) => {
+    const audio = original(events)
+    vi.spyOn(audio, 'resume').mockImplementation(() => new Promise(() => {}))
+    return audio
+  })
+  await controller.join('Вика', false)
+  expect(controller.store.getState().stage).toBe('connected')
+})
+
+it('keeps the call and round snapshot when a compatible backend has no timer command', async () => {
+  const { controller, api, media } = setup()
+  await controller.join('Вика', false)
+  vi.spyOn(api, 'command').mockRejectedValue(new ClientError('command_unavailable'))
+  await controller.command({ type: 'timers/speech/start' })
+  expect(controller.store.getState()).toMatchObject({
+    stage: 'connected',
+    error: 'command_unavailable',
+    commandPending: false,
+    commandUncertain: false,
+  })
+  expect(media[0]?.stopped).toBe(0)
+  expect(controller.timers.store.getState().snapshot?.version).toBe(1)
+})
