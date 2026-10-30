@@ -1,0 +1,30 @@
+[
+  {
+    "roundId": "CCCCCCCCCCCCCCCCCCCCCC",
+    "targetId": "bbbbbbbbbbbb",
+    "topic": "microphone_muted",
+    "packet": {
+      "roundId": "CCCCCCCCCCCCCCCCCCCCCC",
+      "epoch": 2,
+      "targetId": "bbbbbbbbbbbb",
+      "targetSid": "S-bbbbbbbbbbbb",
+      "topic": "microphone_muted",
+      "effectId": "11",
+      "expiresAt": 1790704839750
+    }
+  },
+  {
+    "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+    "targetId": "bbbbbbbbbbbb",
+    "topic": "request_unmute",
+    "packet": {
+      "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+      "epoch": 2,
+      "targetId": "bbbbbbbbbbbb",
+      "targetSid": "S-bbbbbbbbbbbb",
+      "topic": "request_unmute",
+      "effectId": "9",
+      "expiresAt": 1790704839750
+    }
+  }
+]

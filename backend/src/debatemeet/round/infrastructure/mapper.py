@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
+from debatemeet.round.domain.hand import Hand
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
 from debatemeet.round.domain.motion import Motion
@@ -33,6 +34,9 @@ def encode_round(round_: Round) -> dict[str, object]:
                 "room": participant.room.value,
                 "presence": _encode_presence(participant.presence),
                 "last_ended_sid": participant.last_ended_sid,
+                "hand_raised_at": participant.hand.raised_at.isoformat()
+                if participant.hand is not None
+                else None,
             }
             for participant in round_.participants.values()
         ],
@@ -242,12 +246,14 @@ def _participant(value: object) -> Participant:
         case _:
             raise ValueError("unknown presence")
     ended = _optional_string(data["last_ended_sid"])
+    hand = data.get("hand_raised_at")
     return Participant(
         id=ParticipantId(_string(data["id"])),
         name=_string(data["name"]),
         room=Room(_string(data["room"])),
         presence=presence,
         last_ended_sid=SessionId(ended) if ended is not None else None,
+        hand=Hand(_time(hand)) if hand is not None else None,
     )
 
 

@@ -1,9 +1,8 @@
-import { createHmac } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
 import { expect, type Page } from '@playwright/test'
 import { readSnapshot, type Snapshot } from '../src/domain/snapshot'
 
-export async function mediaSid(page: Page, identity: string): Promise<string | null> {
-  const room = new URL(page.url()).pathname.split('/').at(-1) ?? ''
+function observerToken(room: string): string {
   const now = Math.floor(Date.now() / 1000)
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')
   const payload = Buffer.from(
@@ -18,11 +17,16 @@ export async function mediaSid(page: Page, identity: string): Promise<string | n
   const signature = createHmac('sha256', 'dev-secret-only-for-local-livekit-000000')
     .update(`${header}.${payload}`)
     .digest('base64url')
+  return `${header}.${payload}.${signature}`
+}
+
+export async function mediaSid(page: Page, identity: string): Promise<string | null> {
+  const room = new URL(page.url()).pathname.split('/').at(-1) ?? ''
   const response = await fetch('http://127.0.0.1:7880/twirp/livekit.RoomService/ListParticipants', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${header}.${payload}.${signature}`,
+      Authorization: `Bearer ${observerToken(room)}`,
     },
     body: JSON.stringify({ room }),
   })
@@ -135,4 +139,32 @@ export async function claimJudge(page: Page) {
   await page.getByRole('button', { name: 'Стать судьёй', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Стать судьёй', exact: true }).click()
   await expect.poll(async () => (await snapshot(page)).judgeFlag.holder).not.toBeNull()
+}
+
+// A privileged local test fault injector; normal actions still use the backend API.
+export async function sendServerPacket(
+  page: Page,
+  topic: string,
+  packet: unknown,
+  targets: readonly string[],
+): Promise<void> {
+  const address = new URL(page.url())
+  const room = address.pathname.split('/').at(-1) ?? ''
+  if (address.origin !== 'http://127.0.0.1:4173' || !/^[A-Za-z0-9_-]{22}$/u.test(room))
+    throw new Error('The packet probe requires an owned local test round')
+  if (targets.length === 0 || targets.some((id) => !/^[A-Za-z0-9_-]{12}$/u.test(id)))
+    throw new Error('The packet probe requires explicit test recipients')
+  const response = await fetch('http://127.0.0.1:7880/twirp/livekit.RoomService/SendData', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${observerToken(room)}` },
+    body: JSON.stringify({
+      room,
+      topic,
+      data: Buffer.from(JSON.stringify(packet)).toString('base64'),
+      kind: 0,
+      destinationIdentities: targets,
+      nonce: randomBytes(16).toString('base64'),
+    }),
+  })
+  if (!response.ok) throw new Error(`The local packet probe returned ${response.status}`)
 }

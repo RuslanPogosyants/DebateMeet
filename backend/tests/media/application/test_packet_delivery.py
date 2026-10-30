@@ -8,7 +8,7 @@ from datetime import datetime
 import pytest
 
 from debatemeet.media.application import publisher as publisher_module
-from debatemeet.media.application.ports import PacketEffect, RemovalEffect
+from debatemeet.media.application.ports import MediaEffect, PacketEffect, RemovalEffect
 from debatemeet.media.application.publisher import SnapshotPublisher
 from debatemeet.round.application.ports import PacketTopic, RoundId
 from debatemeet.round.domain.ids import ParticipantId
@@ -41,7 +41,7 @@ class ObservedStore(MemoryMedia):
         self.expected_acks = expected_acks
         self.acks_reached = asyncio.Event()
 
-    async def effect_delivered(self, effect: RemovalEffect | PacketEffect, now: datetime) -> None:
+    async def effect_delivered(self, effect: MediaEffect, now: datetime) -> None:
         await super().effect_delivered(effect, now)
         if len(self.delivered) >= self.expected_acks:
             self.acks_reached.set()

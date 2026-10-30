@@ -2,8 +2,10 @@ import { createStore } from 'zustand/vanilla'
 import { SubscriptionManager } from './subscription-manager'
 import { TimerSession } from './timer-session'
 import { ChatSession } from './chat-session'
+import { SocialSession } from './social-session'
 import { AloneWatchdog } from './alone-watchdog'
 import { readSnapshot, type Snapshot } from '@/domain/snapshot'
+import type { ReactionCode } from '@/domain/social'
 import {
   ClientError,
   type Credentials,
@@ -38,6 +40,7 @@ export type RoundState = {
 export class RoundController {
   readonly timers: TimerSession
   readonly chat: ChatSession
+  readonly social: SocialSession
   readonly store = createStore<RoundState>(() => ({
     stage: 'prejoin',
     snapshot: null,
@@ -93,6 +96,9 @@ export class RoundController {
     this.chat = new ChatSession(roundId, services.chat, (code) => {
       void this.leave(code === 'not_found' ? 'deleted' : 'removed')
     })
+    this.social = new SocialSession(roundId, services.preferences, services.clientClock, () =>
+      this.timers.serverNow(),
+    )
   }
 
   private async accept(value: unknown, ownCommand = false): Promise<void> {
@@ -100,6 +106,9 @@ export class RoundController {
     if (next === null) return
     this.timers.accept(next)
     this.chat.observeEpoch(next.epoch)
+    this.social.acceptSnapshot(next)
+    for (const person of next.participants)
+      this.session?.volume(person.id, this.social.volume(person.id))
     const generation = this.generation
     if (
       !(await this.subscriptions.apply(next, this.credentials?.participantId ?? null, this.session))
@@ -178,6 +187,7 @@ export class RoundController {
       this.session = null
       this.timers.close()
       this.chat.close()
+      this.social.close()
       this.ownership.release()
       this.store.setState({
         stage: 'prejoin',
@@ -200,6 +210,7 @@ export class RoundController {
       this.session = null
       this.timers.close()
       this.chat.close()
+      this.social.close()
       this.ownership.release()
       this.store.setState({
         stage: 'prejoin',
@@ -211,12 +222,14 @@ export class RoundController {
   cancelTransfer(): void {
     this.timers.close()
     this.chat.close()
+    this.social.close()
     this.store.setState({ stage: 'prejoin' })
   }
 
   private ownershipLost(): void {
     this.timers.close()
     this.chat.close()
+    this.social.close()
     ++this.generation
     this.stopPolling()
     this.stopAlone()
@@ -257,6 +270,8 @@ export class RoundController {
         throw new ClientError('session_replaced')
       }
       this.session = session
+      for (const person of (this.subscriptions.latest ?? joined.snapshot).participants)
+        session.volume(person.id, this.social.volume(person.id))
       await session.apply(this.subscriptions.latest ?? joined.snapshot, joined.participantId)
       // A tile can survive a full media reconnect without mounting again.
       for (const [identity, video] of this.videos) {
@@ -277,6 +292,12 @@ export class RoundController {
             chat: (value) => {
               if (generation === this.generation) this.chat.receive(value)
             },
+            microphone: (value) => {
+              if (generation === this.generation) this.social.microphone(value)
+            },
+            reaction: (value) => {
+              if (generation === this.generation) this.social.reaction(value)
+            },
             people: (people) => {
               if (generation === this.generation) {
                 this.store.setState({ people })
@@ -288,6 +309,7 @@ export class RoundController {
               if (connected && generation === this.generation) {
                 this.store.setState({ stage: 'reconnecting' })
                 this.chat.suspend()
+                this.social.suspend()
                 void this.ownership.current().then((current) => {
                   if (!current && generation === this.generation) this.ownershipLost()
                 })
@@ -297,6 +319,7 @@ export class RoundController {
               if (!connected || generation !== this.generation) return
               this.store.setState({ stage: 'connected' })
               this.timers.foreground()
+              this.social.start(joined.participantId, session.sid)
               this.motionBaseline = null
               if (this.credentials !== null)
                 this.chat.start(
@@ -335,6 +358,7 @@ export class RoundController {
     })
     if (generation !== this.generation) return
     this.chat.start(this.credentials, this.subscriptions.latest?.epoch ?? joined.snapshot.epoch)
+    this.social.start(joined.participantId, this.session?.sid ?? null)
     this.store.setState({ stage: 'connected', controlUnavailable: false })
     this.alone.update(this.store.getState().people.length === 1)
     if (this.idleTimer !== null) clearInterval(this.idleTimer)
@@ -349,6 +373,8 @@ export class RoundController {
   }
 
   private async disconnected(reason: EndReason): Promise<void> {
+    if (reason === 'network') this.social.suspend()
+    else this.social.close()
     if (reason === 'network') this.chat.suspend()
     else this.chat.close()
     if (reason === 'network') this.timers.suspend()
@@ -386,6 +412,7 @@ export class RoundController {
       const code = error instanceof ClientError ? error.code : 'media_unavailable'
       this.timers.close()
       this.chat.close()
+      this.social.close()
       this.store.setState({
         stage: 'left',
         ended: code === 'participant_removed' ? 'removed' : 'network',
@@ -433,6 +460,7 @@ export class RoundController {
       return
     if (this.pendingIntent !== null) return
     this.pendingIntent = { intent, key: crypto.randomUUID() }
+    if (intent.type === 'enter') this.social.enterPending(true)
     await this.sendIntent()
   }
 
@@ -457,6 +485,7 @@ export class RoundController {
       await this.accept(snapshot, true)
       if (generation !== this.generation || this.pendingIntent !== pending) return
       this.pendingIntent = null
+      if (pending.intent.type === 'enter') this.social.enterPending(false)
       this.store.setState({ controlUnavailable: false })
     } catch (error) {
       if (generation !== this.generation) return
@@ -467,7 +496,10 @@ export class RoundController {
         'internal_error',
         'command_unavailable',
       ].includes(code)
-      if (!uncertain) this.pendingIntent = null
+      if (!uncertain) {
+        this.pendingIntent = null
+        if (pending.intent.type === 'enter') this.social.enterPending(false)
+      }
       this.store.setState({ error: code, commandUncertain: uncertain })
       if (code === 'participant_removed' || code === 'unauthorized' || code === 'not_found')
         await this.leave(code === 'not_found' ? 'deleted' : 'removed')
@@ -487,12 +519,49 @@ export class RoundController {
   }
 
   async microphone(enabled: boolean): Promise<void> {
+    const generation = this.generation
+    const session = this.session
+    const notice = this.social.store.getState().notice
     try {
-      await this.session?.microphone(enabled)
+      await session?.microphone(enabled)
+      if (generation !== this.generation || session !== this.session) return
+      if (
+        enabled &&
+        notice?.topic === 'request_unmute' &&
+        // A restore can reuse an effect id within the same media session.
+        this.social.store.getState().notice === notice
+      )
+        this.social.dismissNotice()
       this.store.setState({ deviceError: null })
     } catch (deviceError) {
+      if (generation !== this.generation || session !== this.session) return
       this.store.setState({ deviceError })
     }
+  }
+
+  async react(reaction: ReactionCode): Promise<void> {
+    if (
+      this.credentials === null ||
+      this.store.getState().stage !== 'connected' ||
+      !this.social.canReact()
+    )
+      return
+    const generation = this.generation
+    this.social.dismissError()
+    try {
+      await this.services.api.reaction(this.roundId, this.credentials, reaction)
+    } catch (error) {
+      if (generation !== this.generation) return
+      const code = error instanceof ClientError ? error.code : 'network'
+      this.social.error(code)
+      if (code === 'participant_removed' || code === 'unauthorized' || code === 'not_found')
+        await this.leave(code === 'not_found' ? 'deleted' : 'removed')
+    }
+  }
+
+  setVolume(identity: string, value: number): void {
+    this.social.setVolume(identity, value)
+    this.session?.volume(identity, this.social.volume(identity))
   }
 
   async cameraEnabled(enabled: boolean): Promise<void> {
@@ -544,6 +613,7 @@ export class RoundController {
   async leave(reason: EndReason = 'left'): Promise<void> {
     this.timers.close()
     this.chat.close()
+    this.social.close()
     this.pageHidden()
     this.ownership.release()
     ++this.generation
@@ -567,6 +637,7 @@ export class RoundController {
   dispose(): void {
     this.timers.close()
     this.chat.close()
+    this.social.close()
     this.pageHidden()
     this.ownership.release()
     ++this.generation

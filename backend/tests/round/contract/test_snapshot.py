@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from debatemeet.round.contract.snapshot import RoundSnapshot, snapshot_of
 from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
+from debatemeet.round.domain.hand import Hand
 from debatemeet.round.domain.ids import ParticipantId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
 from debatemeet.round.domain.motion import Motion
@@ -49,18 +50,21 @@ def test_the_snapshot_speaks_camel_case_and_epoch_milliseconds() -> None:
                 "name": "Вика Сомова",
                 "room": "og",
                 "presence": {"status": "connected", "since": ms + 1000},
+                "handRaisedAt": None,
             },
             {
                 "id": "bob",
                 "name": "Bob",
                 "room": "base",
                 "presence": {"status": "pending", "since": ms + 2000},
+                "handRaisedAt": None,
             },
             {
                 "id": "carol",
                 "name": "Carol",
                 "room": "base",
                 "presence": {"status": "disconnected", "since": ms + 3000},
+                "handRaisedAt": None,
             },
         ],
         "entryClosed": False,
@@ -133,6 +137,8 @@ def test_the_largest_snapshot_fits_a_data_packet() -> None:
         JS_MAX_SAFE_INTEGER,
         Timer(900000, TimerStatus.RUNNING, datetime.max.replace(tzinfo=UTC), None),
     )
+    for participant in round_.participants.values():
+        participant.hand = Hand(datetime.max.replace(tzinfo=UTC))
 
     snapshot = snapshot_of(
         round_, epoch=JS_MAX_SAFE_INTEGER, committed_at=at(0), app_version="2026.09.29-0123456789ab"

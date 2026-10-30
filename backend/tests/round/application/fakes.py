@@ -10,9 +10,10 @@ from datetime import datetime, timedelta
 from debatemeet.round.application.ports import (
     ArchivedParticipant,
     CommittedRound,
+    MicrophoneOperation,
     Observation,
 )
-from debatemeet.round.domain.ids import ParticipantId, RoundId
+from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.ports import KeyClaim
 from debatemeet.shared.domain.events import DomainEvent
@@ -34,10 +35,14 @@ class Store:
     last_joined: dict[tuple[RoundId, ParticipantId], datetime] = field(default_factory=dict)
     log: list[LoggedEvent] = field(default_factory=list)
     keys: dict[tuple[str, str | None, str], str] = field(default_factory=dict)
+    retained_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
     notified: list[RoundId] = field(default_factory=list)
     commits: int = 0
     media_removals: list[tuple[RoundId, ParticipantId, datetime]] = field(default_factory=list)
     media_packets: list[tuple[RoundId, str, bytes, datetime]] = field(default_factory=list)
+    media_controls: list[
+        tuple[RoundId, ParticipantId, SessionId, MicrophoneOperation, datetime]
+    ] = field(default_factory=list)
     chat_prepared: list[RoundId] = field(default_factory=list)
     system_draws: list[tuple[RoundId, str, int, datetime, int]] = field(default_factory=list)
 
@@ -123,6 +128,16 @@ class _MediaOutbox:
     ) -> None:
         self._store.media_packets.append((round_id, topic, payload, now))
 
+    async def control_microphone(
+        self,
+        round_id: RoundId,
+        participant_id: ParticipantId,
+        target_sid: SessionId,
+        operation: MicrophoneOperation,
+        now: datetime,
+    ) -> None:
+        self._store.media_controls.append((round_id, participant_id, target_sid, operation, now))
+
 
 class _EventLog:
     def __init__(self, store: Store) -> None:
@@ -150,6 +165,12 @@ class _SystemMessages:
 class _CommandKeys:
     def __init__(self, store: Store) -> None:
         self._store = store
+
+    async def retain(self, *, round_id: str, participant_id: str | None, key: str) -> None:
+        claimed = (round_id, participant_id, key)
+        if claimed not in self._store.keys:
+            raise RuntimeError("Only a claimed command key can be retained")
+        self._store.retained_keys.add(claimed)
 
     async def claim(
         self,

@@ -9,6 +9,11 @@ from uuid import uuid4
 
 import structlog
 
+from debatemeet.media.application.control_delivery import (
+    ControlCoordinator,
+    ControlDelivery,
+    ControlResult,
+)
 from debatemeet.media.application.ports import (
     LiveKitApi,
     MediaRoomMissingError,
@@ -55,6 +60,7 @@ class SnapshotPublisher:
         self._clock = clock
         self._app_version = app_version
         self._packets = packets
+        self._controls = ControlCoordinator(api, store, clock)
         self._last_maintenance: datetime | None = None
 
     async def run(self) -> None:
@@ -90,11 +96,25 @@ class SnapshotPublisher:
                             await self._finish_delivery(leader, packet_delivery)
                         finally:
                             await self._cancel_delivery(packet_delivery)
+                for control_effect in await self._store.control_heads(self._clock.now()):
+                    control = await self._controls.start(leader, control_effect)
+                    try:
+                        while control is not None:
+                            previous = control
+                            try:
+                                control = await self._controls.finish(leader, previous)
+                            finally:
+                                await self._cancel_delivery(previous)
+                    finally:
+                        if control is not None:
+                            await self._cancel_delivery(control)
 
     async def _serve_leader(self, leader: PublisherWakeup) -> None:
         removal: _EffectDelivery | None = None
         packets: dict[RoundId, _EffectDelivery] = {}
         last_round: RoundId | None = None
+        control: ControlDelivery | None = None
+        last_control_round: RoundId | None = None
         try:
             while True:
                 await leader.assert_alive()
@@ -108,6 +128,9 @@ class SnapshotPublisher:
                         await self._finish_delivery(leader, pending)
                         del packets[round_id]
                         progressed = True
+                if control is not None and control.task.done():
+                    control = await self._controls.finish(leader, control)
+                    progressed = True
                 if removal is None:
                     effects = await self._store.pending_effects(self._clock.now())
                     if effects:
@@ -135,10 +158,27 @@ class SnapshotPublisher:
                             progressed = True
                         else:
                             packets[head.round_id] = packet_delivery
+                if control is None:
+                    control_heads = list(await self._store.control_heads(self._clock.now()))
+                    control_heads.sort(key=lambda head: head.round_id)
+                    if last_control_round is not None:
+                        control_heads = [
+                            head for head in control_heads if head.round_id > last_control_round
+                        ] + [head for head in control_heads if head.round_id <= last_control_round]
+                    if control_heads:
+                        control_head = control_heads[0]
+                        last_control_round = control_head.round_id
+                        control = await self._controls.start(leader, control_head)
+                        if control is None:
+                            progressed = True
                 await self._publish_batch(leader)
-                tasks = [pending.task for pending in packets.values()]
+                tasks: list[asyncio.Task[bool] | asyncio.Task[ControlResult]] = [
+                    pending.task for pending in packets.values()
+                ]
                 if removal is not None:
                     tasks.append(removal.task)
+                if control is not None:
+                    tasks.append(control.task)
                 if progressed or any(task.done() for task in tasks):
                     continue
                 # SDK completion wakes immediately; throughput is not one ack per tick.
@@ -160,6 +200,8 @@ class SnapshotPublisher:
                 pending_tasks.append(removal)
             for pending in pending_tasks:
                 await self._cancel_delivery(pending)
+            if control is not None:
+                await self._cancel_delivery(control)
 
     def _start_removal(self, effect: RemovalEffect) -> _EffectDelivery:
         return _EffectDelivery(
@@ -222,7 +264,7 @@ class SnapshotPublisher:
             log.warning("media_effect_retrying", operation=operation)
 
     @staticmethod
-    async def _cancel_delivery(pending: _EffectDelivery) -> None:
+    async def _cancel_delivery(pending: _EffectDelivery | ControlDelivery) -> None:
         pending.task.cancel()
         with suppress(asyncio.CancelledError, Exception):
             await pending.task

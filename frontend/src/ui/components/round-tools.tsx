@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { useStore } from 'zustand'
 import type { RoundController } from '@/application/round-controller'
 import type { LogicalRoom, RoundCommand, SubRoom } from '@/application/ports'
+import { handQueue } from '@/domain/social'
 import { ConfirmDialog } from './confirm-dialog'
 import { Sheet } from './sheet'
 import { TimerControls, TimerReadouts } from './round-timers'
 import { DrumPanel } from './round-drum'
 import { MotionEditorButton } from './round-motion'
+import { HandBadge, JudgeSocialPanel, ParticipantActions } from './round-social'
 import type { MeetingLayout } from '@/ui/use-meeting-layout'
 import {
   enterRoom,
@@ -52,6 +54,7 @@ export function RoomMap({
       <div className="room-map-grid">
         {rooms.map((room) => {
           const people = state.snapshot?.participants.filter((person) => person.room === room) ?? []
+          const queue = state.snapshot ? handQueue(state.snapshot, room) : []
           return (
             <section
               key={room}
@@ -92,6 +95,9 @@ export function RoomMap({
                     const media = state.people.find((connected) => connected.id === person.id)
                     return (
                       <li key={person.id}>
+                        <HandBadge
+                          position={queue.findIndex((raised) => raised.id === person.id) + 1}
+                        />{' '}
                         {media?.speaking && (
                           <span className="speaker-dash" aria-label="говорит">
                             —{' '}
@@ -101,6 +107,7 @@ export function RoomMap({
                         {person.id === state.self && (
                           <span className="text-caption"> · {strings.round.you}</span>
                         )}
+                        <ParticipantActions controller={controller} participant={person} />
                         <span className="room-person-state">
                           {state.snapshot?.judgeFlag.holder === person.id &&
                             `${strings.round.judge} · `}
@@ -366,6 +373,7 @@ export function JudgeControl({
           pinned={<TimerReadouts controller={controller} />}
         >
           <TimerControls controller={controller} />
+          <JudgeSocialPanel controller={controller} />
           <DrumPanel controller={controller} />
           <MotionEditorButton controller={controller} />
           <JudgeControl controller={controller} />

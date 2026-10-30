@@ -183,6 +183,44 @@ const errors: Record<string, string> = {
   invalid_timer_value: 'Время вне допустимого диапазона. Проверьте значение.',
   speech_undo_unavailable: 'Отменять пока нечего: следующая речь ещё не начиналась.',
   command_unavailable: 'Эта команда временно недоступна. Звонок продолжается.',
+  participant_not_found: 'Участник уже вышел из раунда.',
+  invalid_reaction: 'Эта реакция недоступна.',
+}
+
+export const socialStrings = {
+  hand: 'Рука',
+  raise: 'Поднять руку',
+  lower: 'Опустить руку',
+  queue: 'Очередь рук',
+  queueEmpty: 'Поднятых рук пока нет',
+  lowerAll: 'Опустить все руки',
+  hands: 'Руки и микрофоны',
+  reactions: 'Реакции',
+  receivedReactions: 'Реакции участников',
+  hideReactions: 'Скрыть реакции',
+  more: 'Ещё',
+  requestUnmute: 'Судья просит включить микрофон',
+  enableMicrophone: 'Включить микрофон',
+  microphoneMuted: 'Судья выключил микрофон',
+} as const
+
+export function handPosition(position: number): string {
+  return `Рука — ${position}`
+}
+export function participantActions(name: string): string {
+  return `Действия — ${name}`
+}
+export function lowerHandOf(name: string): string {
+  return `Опустить руку — ${name}`
+}
+export function microphoneAction(name: string, enabled: boolean): string {
+  return `${enabled ? 'Выключить микрофон' : 'Попросить включить микрофон'} — ${name}`
+}
+export function participantVolume(name: string): string {
+  return `Громкость — ${name}`
+}
+export function reactionLabel(emoji: string): string {
+  return `Реакция — ${emoji}`
 }
 
 export const contentStrings = {

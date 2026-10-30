@@ -3,10 +3,19 @@
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 
-from debatemeet.round.application.ports import PacketTopic, ParticipantId, RoundId, SessionId
+from debatemeet.round.application.ports import (
+    MicrophoneOperation,
+    PacketTopic,
+    ParticipantId,
+    RoundId,
+    SessionId,
+)
+from debatemeet.round.contract.microphone import ControlTopic
+
+CONTROL_LIFETIME = timedelta(seconds=30)
 
 
 class MediaRoomMissingError(Exception):
@@ -47,7 +56,54 @@ class PacketEffect:
     revision: int = 1
 
 
+@dataclass(frozen=True, slots=True)
+class MicrophoneTarget:
+    sid: SessionId
+    track_sid: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ControlEffect:
+    id: int
+    round_id: RoundId
+    operation: MicrophoneOperation
+    target_id: ParticipantId
+    target_sid: SessionId
+    epoch: int
+    created_at: datetime
+    attempts: int = 0
+    revision: int = 1
+    dispatched_at: datetime | None = None
+    track_sid: str | None = None
+    confirmed_at: datetime | None = None
+
+    @property
+    def expires_at(self) -> datetime:
+        return self.created_at + CONTROL_LIFETIME
+
+
+type MediaEffect = RemovalEffect | PacketEffect | ControlEffect
+
+
 class LiveKitApi(Protocol):
+    async def microphone_target(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> MicrophoneTarget | None: ...
+
+    async def mute_microphone(
+        self, round_id: RoundId, participant_id: ParticipantId, track_sid: str
+    ) -> bool:
+        """One mutating attempt; true only for the exact microphone track returned muted."""
+        ...
+
+    async def send_control(
+        self, round_id: RoundId, topic: ControlTopic, packet: bytes, target_id: ParticipantId
+    ) -> None: ...
+
+    async def send_reaction(
+        self, round_id: RoundId, packet: bytes, destinations: Sequence[ParticipantId]
+    ) -> None: ...
+
     async def create_room(self, round_id: RoundId, metadata: str) -> MediaRoom: ...
 
     async def rooms(self) -> Sequence[MediaRoom]: ...
@@ -70,6 +126,18 @@ class LiveKitApi(Protocol):
 
 
 class MediaStore(Protocol):
+    async def control_heads(self, now: datetime) -> Sequence[ControlEffect]: ...
+
+    async def control_dispatched(
+        self, effect: ControlEffect, track_sid: str, at: datetime
+    ) -> ControlEffect | None:
+        """CAS the durable marker before the sole mutating SDK attempt."""
+        ...
+
+    async def control_confirmed(self, effect: ControlEffect, at: datetime) -> ControlEffect | None:
+        """Persist an exactly confirmed result before any notice delivery."""
+        ...
+
     async def started(self, round_id: RoundId, room_sid: str) -> None:
         """Register a new media room, resetting delivery only when its SID changed."""
         ...
@@ -94,11 +162,9 @@ class MediaStore(Protocol):
         """Eligible first undelivered packet per round; a waiting retry blocks its successors."""
         ...
 
-    async def effect_delivered(
-        self, effect: RemovalEffect | PacketEffect, at: datetime
-    ) -> None: ...
+    async def effect_delivered(self, effect: MediaEffect, at: datetime) -> None: ...
 
-    async def effect_failed(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None: ...
+    async def effect_failed(self, effect: MediaEffect, at: datetime) -> None: ...
 
 
 class PublisherWakeup(Protocol):

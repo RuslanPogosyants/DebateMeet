@@ -5,7 +5,18 @@ import { useStore } from 'zustand'
 import { RoundController } from '@/application/round-controller'
 import type { DeviceSelection, MediaPerson } from '@/application/ports'
 import type { Participant } from '@/domain/snapshot'
+import { handQueue } from '@/domain/social'
 import { RoomMap, RoomNavigation, JudgeControl } from '@/ui/components/round-tools'
+import {
+  HandBadge,
+  HandButton,
+  HandQueue,
+  ParticipantActions,
+  ReactionControls,
+  ReactionDisplay,
+  SocialNotices,
+  SoundControls,
+} from '@/ui/components/round-social'
 import { useMeetingLayout } from '@/ui/use-meeting-layout'
 import { ConfirmDialog } from '@/ui/components/confirm-dialog'
 import { DevicePreview } from '@/ui/components/device-preview'
@@ -13,7 +24,7 @@ import { RoundTimers, TimerHealth } from '@/ui/components/round-timers'
 import { MotionDisplay } from '@/ui/components/round-motion'
 import { RoundSidebar } from '@/ui/components/round-sidebar'
 import { Sheet } from '@/ui/components/sheet'
-import { contentStrings } from '@/ui/strings'
+import { contentStrings, socialStrings } from '@/ui/strings'
 import { useServices } from '@/ui/services'
 import {
   deviceErrorText,
@@ -159,11 +170,13 @@ function ParticipantTile({
   media,
   self,
   controller,
+  hand,
 }: {
   participant: Participant
   media: MediaPerson | undefined
   self: boolean
   controller: RoundController
+  hand: number
 }) {
   const video = useRef<HTMLVideoElement>(null)
   useEffect(() => {
@@ -171,6 +184,10 @@ function ParticipantTile({
   }, [controller, participant.id])
   return (
     <article className={`participant-tile${self ? ' own-tile' : ''}`} aria-label={participant.name}>
+      <div className="tile-actions">
+        <HandBadge position={hand} />
+        <ParticipantActions controller={controller} participant={participant} />
+      </div>
       <video
         ref={video}
         autoPlay
@@ -203,6 +220,7 @@ function Meeting({ controller }: { controller: RoundController }) {
   const [judgeLeave, setJudgeLeave] = useState(false)
   const [transferAndLeave, setTransferAndLeave] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const unread = useStore(controller.chat.store, (chat) => chat.unread)
   const chatLabel =
     unread > 0 ? `${contentStrings.chatButton} — ${unread} новых` : contentStrings.chatButton
@@ -215,6 +233,12 @@ function Meeting({ controller }: { controller: RoundController }) {
         person.room === room &&
         (person.id === state.self || state.people.some((media) => media.id === person.id)),
     ) ?? []
+  const queue = state.snapshot ? handQueue(state.snapshot, room) : []
+  function leave() {
+    setMoreOpen(false)
+    if (state.snapshot?.judgeFlag.holder === state.self) setJudgeLeave(true)
+    else void controller.leave()
+  }
   return (
     <main className="meeting-shell">
       <header className="meeting-heading">
@@ -227,6 +251,7 @@ function Meeting({ controller }: { controller: RoundController }) {
       </header>
       <TimerHealth controller={controller} />
       <div className="meeting-notices">
+        <SocialNotices controller={controller} />
         {state.motionChanged && (
           <div className="meeting-banner" role="status">
             <span>{contentStrings.motionChanged}</span>
@@ -330,7 +355,9 @@ function Meeting({ controller }: { controller: RoundController }) {
               {strings.round.backToBase}
             </button>
           )}
+          <HandQueue controller={controller} />
           <section className="meeting-stage" aria-label={strings.round.people}>
+            <ReactionDisplay controller={controller} />
             <div className="participant-grid">
               {visible.slice(0, 12).map((participant) => (
                 <ParticipantTile
@@ -339,6 +366,7 @@ function Meeting({ controller }: { controller: RoundController }) {
                   media={state.people.find((person) => person.id === participant.id)}
                   self={participant.id === state.self}
                   controller={controller}
+                  hand={queue.findIndex((person) => person.id === participant.id) + 1}
                 />
               ))}
             </div>
@@ -363,22 +391,39 @@ function Meeting({ controller }: { controller: RoundController }) {
           className="action"
           type="button"
           aria-pressed={self?.microphone ?? false}
+          aria-label={self?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
           onClick={() => {
             void controller.microphone(!self?.microphone)
           }}
         >
-          {self?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+          <span className="control-label-full">
+            {self?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+          </span>
+          <span className="control-label-short" aria-hidden="true">
+            {strings.round.microphone}
+          </span>
         </button>
         <button
           className="action"
           type="button"
           aria-pressed={self?.camera ?? false}
+          aria-label={self?.camera ? strings.round.cameraOn : strings.round.cameraOff}
           onClick={() => {
             void controller.cameraEnabled(!self?.camera)
           }}
         >
-          {self?.camera ? strings.round.cameraOn : strings.round.cameraOff}
+          <span className="control-label-full">
+            {self?.camera ? strings.round.cameraOn : strings.round.cameraOff}
+          </span>
+          <span className="control-label-short" aria-hidden="true">
+            {strings.round.camera}
+          </span>
         </button>
+        <HandButton controller={controller} />
+        <div className="desktop-social-controls">
+          <ReactionControls controller={controller} />
+          <SoundControls controller={controller} />
+        </div>
         {layout === 'narrow' && (
           <button
             className="action phone-chat-button"
@@ -389,16 +434,28 @@ function Meeting({ controller }: { controller: RoundController }) {
           </button>
         )}
         <button
-          className="action leave-action"
+          className="action phone-more-button"
           type="button"
-          onClick={() => {
-            if (state.snapshot?.judgeFlag.holder === state.self) setJudgeLeave(true)
-            else void controller.leave()
-          }}
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen(true)}
         >
+          {socialStrings.more}
+        </button>
+        <button className="action leave-action desktop-leave" type="button" onClick={leave}>
           {strings.round.leave}
         </button>
       </footer>
+      {moreOpen && (
+        <Sheet title={socialStrings.more} onClose={() => setMoreOpen(false)}>
+          <div className="more-controls">
+            <ReactionControls controller={controller} expanded />
+            <SoundControls controller={controller} />
+            <button className="action" type="button" onClick={leave}>
+              {strings.round.leave}
+            </button>
+          </div>
+        </Sheet>
+      )}
       {chatOpen && layout === 'narrow' && (
         <Sheet
           title={contentStrings.chat}

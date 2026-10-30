@@ -128,6 +128,36 @@ class ConfigureDrum:
         object.__setattr__(self, "enabled", canonical)
 
 
+@dataclass(frozen=True, slots=True)
+class RaiseHand:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class LowerHand:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class LowerHandOf:
+    participant_id: ParticipantId
+
+
+@dataclass(frozen=True, slots=True)
+class LowerAllHands:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class Mute:
+    participant_id: ParticipantId
+
+
+@dataclass(frozen=True, slots=True)
+class RequestUnmute:
+    participant_id: ParticipantId
+
+
 type RoundCommand = (
     Enter
     | ClaimJudge
@@ -146,6 +176,12 @@ type RoundCommand = (
     | Draw
     | ResetDrum
     | ConfigureDrum
+    | RaiseHand
+    | LowerHand
+    | LowerHandOf
+    | LowerAllHands
+    | Mute
+    | RequestUnmute
 )
 
 
@@ -192,6 +228,18 @@ def _request_hash(command: RoundCommand) -> str:
                     "removeDrawn": remove_drawn,
                 },
             )
+        case RaiseHand():
+            operation, payload = "hands/raise", {}
+        case LowerHand():
+            operation, payload = "hands/lower", {}
+        case LowerHandOf(participant_id):
+            operation, payload = "hands/lower-of", {"participantId": str(participant_id)}
+        case LowerAllHands():
+            operation, payload = "hands/lower-all", {}
+        case Mute(participant_id):
+            operation, payload = "mute", {"participantId": str(participant_id)}
+        case RequestUnmute(participant_id):
+            operation, payload = "request-unmute", {"participantId": str(participant_id)}
     canonical = json.dumps([operation, payload], sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -283,7 +331,21 @@ class ExecuteRoundCommand:
                         round_.reset_drum(actor, now)
                     case ConfigureDrum(enabled, remove_drawn):
                         round_.configure_drum(actor, enabled, remove_drawn, now)
+                    case RaiseHand():
+                        round_.raise_hand(actor, now)
+                    case LowerHand():
+                        round_.lower_hand(actor, now)
+                    case LowerHandOf(participant_id):
+                        round_.lower_hand_of(actor, participant_id, now)
+                    case LowerAllHands():
+                        round_.lower_all_hands(actor, now)
+                    case Mute(participant_id):
+                        round_.mute(actor, participant_id, now)
+                    case RequestUnmute(participant_id):
+                        round_.request_unmute(actor, participant_id, now)
                 await commit_changes(tx, round_, actor, now)
+                if isinstance(command, Mute | RequestUnmute):
+                    await tx.command_keys.retain(round_id=round_id, participant_id=actor, key=key)
         committed = await self._reader.committed(round_id)
         if committed is None:
             raise NotFoundError

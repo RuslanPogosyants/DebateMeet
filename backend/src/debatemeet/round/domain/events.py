@@ -180,3 +180,31 @@ class DrumReset(DomainEvent):
 class DrumConfigured(DomainEvent):
     enabled: tuple[Position, ...]
     remove_drawn: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HandRaised(DomainEvent):
+    participant_id: ParticipantId
+    raised_at_ms: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HandLowered(DomainEvent):
+    participant_id: ParticipantId
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AllHandsLowered(DomainEvent):
+    participant_ids: tuple[ParticipantId, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MuteRequested(DomainEvent):
+    participant_id: ParticipantId
+    target_sid: SessionId
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UnmuteRequested(DomainEvent):
+    participant_id: ParticipantId
+    target_sid: SessionId

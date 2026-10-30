@@ -290,7 +290,11 @@ test('long multiline motion preserves visible controls at every supported layout
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true)
-    for (const name of ['Микрофон выключен', 'Камера выключена', 'Выйти']) {
+    const controls =
+      size.width <= 600
+        ? ['Микрофон выключен', 'Камера выключена', 'Поднять руку', 'Чат', 'Ещё']
+        : ['Микрофон выключен', 'Камера выключена', 'Поднять руку', 'Выйти']
+    for (const name of controls) {
       const box = await page.getByRole('button', { name, exact: true }).boundingBox()
       if (box === null) throw new Error(`The ${name} control is hidden`)
       expect(box.y).toBeGreaterThanOrEqual(0)

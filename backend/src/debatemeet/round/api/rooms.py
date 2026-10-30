@@ -15,11 +15,17 @@ from debatemeet.round.application.room_commands import (
     Enter,
     ExecuteRoundCommand,
     HandOverJudge,
+    LowerAllHands,
+    LowerHand,
+    LowerHandOf,
+    Mute,
     NextSpeech,
     PauseTimer,
+    RaiseHand,
     Recall,
     RecallAll,
     ReleaseJudge,
+    RequestUnmute,
     ResetDrum,
     ResetTimer,
     RoundCommand,
@@ -29,7 +35,13 @@ from debatemeet.round.application.room_commands import (
     UndoNextSpeech,
 )
 from debatemeet.round.contract.motion_drum import ConfigureDrumBody, SetMotionBody
-from debatemeet.round.contract.rooms import EmptyCommandBody, EnterBody, HandOverBody, RecallBody
+from debatemeet.round.contract.rooms import (
+    EmptyCommandBody,
+    EnterBody,
+    HandOverBody,
+    ParticipantBody,
+    RecallBody,
+)
 from debatemeet.round.contract.snapshot import RoundSnapshot, snapshot_of
 from debatemeet.round.contract.timers import ConfigureTimerBody, SetTimerBody
 from debatemeet.round.domain.ids import ParticipantId, RoundId
@@ -225,6 +237,64 @@ def room_router(execute: ExecuteRoundCommand | None, app_version: str) -> APIRou
     ) -> RoundSnapshot:
         return await run(
             round_id, credentials, key, ConfigureDrum(tuple(body.enabled), body.remove_drawn)
+        )
+
+    @router.post("/hands/raise", response_model=RoundSnapshot)
+    async def raise_hand(
+        round_id: RoundPath,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, RaiseHand())
+
+    @router.post("/hands/lower", response_model=RoundSnapshot)
+    async def lower_hand(
+        round_id: RoundPath,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, LowerHand())
+
+    @router.post("/hands/lower-of", response_model=RoundSnapshot)
+    async def lower_hand_of(
+        round_id: RoundPath,
+        body: ParticipantBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(
+            round_id, credentials, key, LowerHandOf(ParticipantId(body.participant_id))
+        )
+
+    @router.post("/hands/lower-all", response_model=RoundSnapshot)
+    async def lower_all_hands(
+        round_id: RoundPath,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, LowerAllHands())
+
+    @router.post("/mute", response_model=RoundSnapshot)
+    async def mute(
+        round_id: RoundPath,
+        body: ParticipantBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, Mute(ParticipantId(body.participant_id)))
+
+    @router.post("/request-unmute", response_model=RoundSnapshot)
+    async def request_unmute(
+        round_id: RoundPath,
+        body: ParticipantBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(
+            round_id, credentials, key, RequestUnmute(ParticipantId(body.participant_id))
         )
 
     return router

@@ -51,7 +51,14 @@ test('two participants join with muted microphones, hear a remote tone and retur
     await expect(page.getByLabel('Ваше имя')).toHaveValue('Алиса')
     await join(page, 'Алиса')
     await expect(page.getByRole('article', { name: 'Алиса', exact: true })).toHaveCount(1)
-    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page.getByRole('button', { name: 'Ещё', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: 'Ещё', exact: true })
+      .getByRole('button', { name: 'Выйти', exact: true })
+      .click()
+    await expect(
+      page.getByRole('heading', { name: 'Вы вышли из раунда.', exact: true }),
+    ).toBeVisible()
     await page.goto('/')
     await expect(page.getByRole('link', { name: /Открыть/u }).first()).toHaveAttribute(
       'href',

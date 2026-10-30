@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpRoundApi } from '@/infrastructure/round-api'
+import type { RoundCommand } from '@/application/ports'
 import { ROUND_ID, credentials, snapshot } from '../fixtures'
 
 afterEach(() => {
@@ -7,6 +8,53 @@ afterEach(() => {
 })
 
 describe('HTTP round boundary', () => {
+  it.each<RoundCommand>([
+    { type: 'hands/raise' },
+    { type: 'hands/lower' },
+    { type: 'hands/lower-all' },
+    { type: 'hands/lower-of', participantId: 'b'.repeat(12) },
+    { type: 'mute', participantId: 'b'.repeat(12) },
+    { type: 'request-unmute', participantId: 'b'.repeat(12) },
+  ])('posts the social intent %j through the UUID command path', async (intent) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json(snapshot(2)))
+    vi.stubGlobal('fetch', fetch)
+    await new HttpRoundApi().command(ROUND_ID, credentials, intent, 'retained-key')
+    const { type, ...payload } = intent
+    expect(fetch.mock.calls[0]?.[0]).toBe(`/api/rounds/${ROUND_ID}/${type}`)
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { 'Idempotency-Key': 'retained-key' },
+    })
+  })
+
+  it('posts a best-effort reaction once without a command UUID or response body', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetch)
+    await new HttpRoundApi().reaction(ROUND_ID, credentials, 'thumbs_up')
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch.mock.calls[0]?.[0]).toBe(`/api/rounds/${ROUND_ID}/reactions`)
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ reaction: 'thumbs_up' }),
+      headers: { Authorization: `Bearer ${credentials.participantId}.${credentials.secret}` },
+    })
+    expect(fetch.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Idempotency-Key')
+  })
+
+  it('keeps reaction rollback recoverable after authenticated verification', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(Response.json({ code: 'method_not_allowed' }, { status: 405 }))
+      .mockResolvedValueOnce(Response.json(snapshot()))
+    vi.stubGlobal('fetch', fetch)
+    await expect(new HttpRoundApi().reaction(ROUND_ID, credentials, 'clap')).rejects.toMatchObject({
+      code: 'command_unavailable',
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
   it('sends bearer credentials and treats 304 as unchanged', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

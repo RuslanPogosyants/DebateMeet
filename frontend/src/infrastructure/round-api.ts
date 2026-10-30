@@ -6,8 +6,26 @@ import {
   type RoundCommand,
 } from '@/application/ports'
 import { readSnapshot, record, type Snapshot } from '@/domain/snapshot'
+import type { ReactionCode } from '@/domain/social'
 
 export class HttpRoundApi implements RoundApi {
+  private async unsupported(
+    response: Response,
+    roundId: string,
+    credentials: Credentials,
+  ): Promise<never> {
+    const error = await this.accepted(response).catch((failure: unknown) => failure)
+    if (
+      error instanceof ClientError &&
+      (error.code === 'not_found' || error.code === 'method_not_allowed')
+    ) {
+      // An older compatible backend may lack this command while the round still exists.
+      const existing = await this.snapshot(roundId, credentials, null)
+      if (existing === null) throw new ClientError('invalid_response')
+      throw new ClientError('command_unavailable')
+    }
+    throw error instanceof Error ? error : new ClientError('invalid_response')
+  }
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
     try {
       return await fetch(path, { ...init, cache: 'no-store', signal: AbortSignal.timeout(10_000) })
@@ -124,19 +142,28 @@ export class HttpRoundApi implements RoundApi {
       },
       body: JSON.stringify(payload),
     })
-    if (response.status === 404) {
-      const error = await this.accepted(response).catch((failure: unknown) => failure)
-      if (error instanceof ClientError && error.code === 'not_found') {
-        // An older compatible backend may lack this command while the round still exists.
-        const existing = await this.snapshot(roundId, credentials, null)
-        if (existing === null) throw new ClientError('invalid_response')
-        throw new ClientError('command_unavailable')
-      }
-      throw error instanceof Error ? error : new ClientError('invalid_response')
+    if (response.status === 404 || response.status === 405) {
+      return this.unsupported(response, roundId, credentials)
     }
     const snapshot = readSnapshot(await this.accepted(response), roundId)
     if (snapshot === null) throw new ClientError('invalid_response')
     return snapshot
+  }
+
+  async reaction(roundId: string, credentials: Credentials, reaction: ReactionCode): Promise<void> {
+    const response = await this.request(`/api/rounds/${encodeURIComponent(roundId)}/reactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credentials.participantId}.${credentials.secret}`,
+      },
+      body: JSON.stringify({ reaction }),
+    })
+    if (response.status === 204) return
+    if (response.status === 404 || response.status === 405)
+      return this.unsupported(response, roundId, credentials)
+    await this.accepted(response)
+    throw new ClientError('invalid_response')
   }
 
   async leave(roundId: string, credentials: Credentials, sid: string): Promise<void> {

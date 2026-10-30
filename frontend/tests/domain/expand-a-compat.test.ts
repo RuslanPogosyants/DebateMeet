@@ -10,6 +10,7 @@ it('preserves the public timer/undo snapshot emitted by the actual frozen A3 ser
   expect(isSnapshot(transported)).toBe(false)
   expect(isSnapshot(parsed)).toBe(true)
   expect(parsed).toMatchObject(transported)
+  expect(parsed?.participants.every((participant) => participant.handRaisedAt === null)).toBe(true)
   expect(parsed?.motion).toEqual({ text: '', infoslide: '' })
   expect(parsed?.drum).toEqual({
     enabled: ['og', 'oo', 'cg', 'co'],

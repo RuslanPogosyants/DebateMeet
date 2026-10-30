@@ -7,18 +7,23 @@ eviction is lazy, it happens on any command of the round.
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
 from debatemeet.round.domain.events import (
+    AllHandsLowered,
     DisconnectCause,
     DrumConfigured,
     DrumReset,
     EntryChanged,
+    HandLowered,
+    HandRaised,
     JudgeFlagClaimed,
     JudgeFlagHandedOver,
     JudgeFlagReleased,
     MotionSet,
+    MuteRequested,
     ParticipantConnected,
     ParticipantDisconnected,
     ParticipantEntered,
@@ -35,8 +40,10 @@ from debatemeet.round.domain.events import (
     TimerReset,
     TimerSet,
     TimerStarted,
+    UnmuteRequested,
     timer_state,
 )
+from debatemeet.round.domain.hand import Hand
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
 from debatemeet.round.domain.motion import Motion
@@ -77,6 +84,7 @@ class Participant:
     presence: Presence
     # The last closed session, so that a late webhook about it does not bring it back.
     last_ended_sid: SessionId | None = None
+    hand: Hand | None = None
 
 
 @dataclass(eq=False)
@@ -281,6 +289,65 @@ class Round:
         if self.judge_flag.holder is not None:
             self._release_flag(self.participants[self.judge_flag.holder], ReleaseReason.ADMIN, now)
 
+    def raise_hand(self, actor: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        participant = self._connected(actor)
+        if participant.hand is not None:
+            return
+        hand = Hand(now)
+        participant.hand = hand
+        raised_at_ms = (hand.raised_at - datetime(1970, 1, 1, tzinfo=UTC)) // timedelta(
+            milliseconds=1
+        )
+        self._record(HandRaised(at=now, participant_id=actor, raised_at_ms=raised_at_ms))
+
+    def lower_hand(self, actor: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        self._lower_hand(self._participant(actor), now)
+
+    def lower_hand_of(
+        self, actor: ParticipantId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        self._evict_absent(now)
+        self._judge(actor)
+        self._lower_hand(self._participant(participant_id), now)
+
+    def lower_all_hands(self, actor: ParticipantId, now: datetime) -> None:
+        self._evict_absent(now)
+        self._judge(actor)
+        raised = tuple(
+            person.id for person in self.participants.values() if person.hand is not None
+        )
+        if not raised:
+            return
+        for participant_id in raised:
+            self.participants[participant_id].hand = None
+        self._record(AllHandsLowered(at=now, participant_ids=raised))
+
+    def _lower_hand(self, participant: Participant, now: datetime) -> None:
+        if participant.hand is None:
+            return
+        participant.hand = None
+        self._record(HandLowered(at=now, participant_id=participant.id))
+
+    def mute(self, actor: ParticipantId, participant_id: ParticipantId, now: datetime) -> None:
+        sid = self._microphone_target(actor, participant_id, now)
+        self._record(MuteRequested(at=now, participant_id=participant_id, target_sid=sid))
+
+    def request_unmute(
+        self, actor: ParticipantId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        sid = self._microphone_target(actor, participant_id, now)
+        self._record(UnmuteRequested(at=now, participant_id=participant_id, target_sid=sid))
+
+    def _microphone_target(
+        self, actor: ParticipantId, participant_id: ParticipantId, now: datetime
+    ) -> SessionId:
+        self._evict_absent(now)
+        self._judge(actor)
+        target = self._connected(participant_id)
+        return cast(Connected, target.presence).sid
+
     def set_motion(self, actor: ParticipantId, text: str, infoslide: str, now: datetime) -> None:
         self._evict_absent(now)
         self._judge(actor)
@@ -472,10 +539,14 @@ class Round:
             self.entry_closed = closed
             self._record(EntryChanged(at=now, closed=closed))
 
-    def _connected(self, participant_id: ParticipantId) -> Participant:
+    def _participant(self, participant_id: ParticipantId) -> Participant:
         participant = self.participants.get(participant_id)
         if participant is None:
             raise DomainError("participant_not_found")
+        return participant
+
+    def _connected(self, participant_id: ParticipantId) -> Participant:
+        participant = self._participant(participant_id)
         if not isinstance(participant.presence, Connected):
             raise DomainError("not_connected")
         return participant

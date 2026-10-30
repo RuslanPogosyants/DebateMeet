@@ -243,7 +243,19 @@ async def test_actual_a4_preserves_b4_state_history_packets_and_supports_b4_resu
             assert result["unsupported_status"] == 405
             for name in ("snapshot", "history", "packets"):
                 assert result[name] == json.loads((GOLDENS / f"expand-a4-{name}.json").read_text())
-            snapshot = RoundSnapshot.model_validate(result["snapshot"])
+            # A4 predates hands. Keep its actual output/goldens untouched and adapt
+            # only the current DTO assertion to the additive A5 field.
+            legacy_snapshot = result["snapshot"]
+            assert isinstance(legacy_snapshot, dict)
+            legacy_participants = legacy_snapshot["participants"]
+            assert isinstance(legacy_participants, list)
+            participants = []
+            for participant in legacy_participants:
+                assert isinstance(participant, dict)
+                participants.append({**participant, "handRaisedAt": None})
+            snapshot = RoundSnapshot.model_validate(
+                {**legacy_snapshot, "participants": participants}
+            )
             restored = await state.rounds.committed(RID)
             assert restored is not None
             before, after = state.before.round, restored.round
