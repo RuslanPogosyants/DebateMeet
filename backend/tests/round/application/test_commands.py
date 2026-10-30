@@ -50,9 +50,9 @@ class World:
         self.media = FakeMedia(self.rounds)
         self.create = CreateRound(self.rounds, self.clock, self.random, self.limits)
         self.join = JoinRound(
-            self.rounds, self.media, self.rounds, self.clock, self.random, self.limits
+            self.rounds, self.media, self.rounds, self.clock, self.random, self.limits, self.rounds
         )
-        self.leave = LeaveRound(self.rounds, self.clock)
+        self.leave = LeaveRound(self.rounds, self.clock, self.rounds, self.limits)
         self.read = ReadSnapshot(self.rounds)
 
     async def new_round(self) -> RoundId:

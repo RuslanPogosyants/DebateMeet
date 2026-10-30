@@ -33,6 +33,8 @@
 
 {$DM_APP_DOMAIN} {
 	import headers
+	# Participant credentials stay in localStorage; only our bundle may execute scripts.
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://{$DM_LIVEKIT_DOMAIN} wss://{$DM_LIVEKIT_DOMAIN}; media-src 'self' blob:; img-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 	encode zstd gzip
 
 	# The API. /internal/ is never proxied: LiveKit sends webhooks to the backend directly.

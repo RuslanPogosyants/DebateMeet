@@ -6,18 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
+from debatemeet.round.domain.ids import ParticipantId as ParticipantId
+from debatemeet.round.domain.ids import RoundId as RoundId
+from debatemeet.round.domain.ids import SessionId as SessionId
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.ports import CommandKeys, EventLog
-
-
-class RoundUnreadableError(Exception):
-    """The stored round has a schema this code does not know: 503 round_unreadable and an
-    alert, never a reset (docs/architecture.md, section 5)."""
-
-
-class MediaUnavailableError(Exception):
-    """LiveKit did not answer: the media room is not open, the join cannot finish. 503."""
 
 
 @dataclass(frozen=True, slots=True)

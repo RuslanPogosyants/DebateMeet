@@ -30,6 +30,7 @@ from debatemeet.shared.application.ports import RandomSource, RateLimiter, Syste
 # Section 8 of the architecture, per IP: a club behind one NAT joins in a burst.
 ROUNDS_PER_HOUR = 10
 NEW_PARTICIPANTS_PER_MINUTE = 60
+COMMANDS_PER_SECOND = 10
 # The actor of `create_round` in the event log: someone on the start page, not a participant.
 VISITOR = "visitor"
 
@@ -102,6 +103,7 @@ class JoinRound:
         clock: Clock,
         random: RandomSource,
         rate_limiter: RateLimiter,
+        reader: RoundReader,
     ) -> None:
         self._transactions = transactions
         self._media = media
@@ -109,34 +111,39 @@ class JoinRound:
         self._clock = clock
         self._random = random
         self._rate_limiter = rate_limiter
+        self._reader = reader
 
     async def __call__(self, request: JoinRequest) -> Joined:
         name = participant_name(request.name)
         now = self._clock.now()
         secret: str | None = None
+        known = None
+        if request.credentials is not None:
+            record = await self._reader.participant(
+                request.round_id, request.credentials.participant_id
+            )
+            # An unknown id (for example after a backup restore) starts a new participant.
+            if record is not None:
+                known = verify(record, request.credentials)
+        if known is None:
+            # Never hold a command connection while taking a second one for the independent
+            # limiter transaction: even a one-connection pool must support joining.
+            if not await self._rate_limiter.allow(
+                f"join:{request.client_ip}", NEW_PARTICIPANTS_PER_MINUTE, timedelta(minutes=1), now
+            ):
+                raise RateLimitedError
+            participant_id = ParticipantId(self._random.token(PARTICIPANT_ID_BYTES))
+            secret = self._random.token(SECRET_BYTES)
+        else:
+            participant_id = known.id
         async with self._transactions.begin() as tx:
-            known = None
-            if request.credentials is not None:
-                record = await tx.archive.find(request.round_id, request.credentials.participant_id)
-                # An id the server does not know, say after an old backup is restored, is a new
-                # participant; a known id with a wrong secret is refused.
-                if record is not None:
-                    known = verify(record, request.credentials)
-            if known is None:
-                if not await self._rate_limiter.allow(
-                    f"join:{request.client_ip}",
-                    NEW_PARTICIPANTS_PER_MINUTE,
-                    timedelta(minutes=1),
-                    now,
-                ):
-                    raise RateLimitedError
-                participant_id = ParticipantId(self._random.token(PARTICIPANT_ID_BYTES))
-                secret = self._random.token(SECRET_BYTES)
-            else:
-                participant_id = known.id
             round_ = await tx.rounds.get_for_update(request.round_id)
             if round_ is None:
                 raise NotFoundError
+            if known is not None and request.credentials is not None:
+                # A secret may have been revoked while we waited for the round lock.
+                verify(await tx.archive.find(request.round_id, participant_id), request.credentials)
+            now = self._clock.now()
             round_.join(participant_id, name, now, returning=known is not None)
             if secret is not None:
                 await tx.archive.add(
@@ -159,19 +166,35 @@ class LeaveRound:
     """`leave`: the browser closes the tab and names its session. A tab pushed out by a second
     one does not send it."""
 
-    def __init__(self, transactions: RoundTransactions, clock: Clock) -> None:
+    def __init__(
+        self,
+        transactions: RoundTransactions,
+        clock: Clock,
+        reader: RoundReader,
+        rate_limiter: RateLimiter,
+    ) -> None:
         self._transactions = transactions
         self._clock = clock
+        self._reader = reader
+        self._rate_limiter = rate_limiter
 
     async def __call__(self, round_id: RoundId, credentials: Credentials, sid: SessionId) -> None:
-        now = self._clock.now()
+        verify(await self._reader.participant(round_id, credentials.participant_id), credentials)
+        if not await self._rate_limiter.allow(
+            f"command:{round_id}:{credentials.participant_id}",
+            COMMANDS_PER_SECOND,
+            timedelta(seconds=1),
+            self._clock.now(),
+        ):
+            raise RateLimitedError
         async with self._transactions.begin() as tx:
-            participant = verify(
-                await tx.archive.find(round_id, credentials.participant_id), credentials
-            )
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:
                 raise NotFoundError
+            participant = verify(
+                await tx.archive.find(round_id, credentials.participant_id), credentials
+            )
+            now = self._clock.now()
             round_.disconnect(participant.id, sid, now, cause=DisconnectCause.LEAVE)
             await commit_changes(tx, round_, participant.id, now)
 

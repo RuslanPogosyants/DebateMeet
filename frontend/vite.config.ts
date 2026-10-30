@@ -13,6 +13,9 @@ export default defineConfig({
     // The backend of `just dev-backend`: in dev the API is same-origin, as behind Caddy.
     proxy: { '/api': 'http://localhost:8000' },
   },
+  preview: {
+    proxy: { '/api': 'http://localhost:8000' },
+  },
   build: {
     // Browser matrix of docs/architecture.md §7: Chrome, Edge and Yandex Browser (Chromium),
     // the last two versions; Safari 17 and newer; the latest Firefox.

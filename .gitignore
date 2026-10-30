@@ -15,6 +15,7 @@ htmlcov/
 
 # Node
 node_modules/
+.pnpm-store/
 dist/
 
 # Claude Code: only the shared settings and hooks are tracked

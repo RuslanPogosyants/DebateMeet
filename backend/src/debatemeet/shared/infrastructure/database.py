@@ -11,7 +11,7 @@ log = structlog.get_logger(__name__)
 
 
 def create_engine(database_url: str) -> AsyncEngine:
-    return create_async_engine(database_url, pool_pre_ping=True)
+    return create_async_engine(database_url, pool_pre_ping=True, hide_parameters=True)
 
 
 class PostgresHealthProbe:
