@@ -88,6 +88,10 @@ test('logical rooms isolate actual speaker output and recall restores it without
       Math.max(0.001, (baseline[listener]?.[source] ?? 0) * 0.08)
 
     await enter(second, 'OG')
+    // The command response precedes snapshot delivery to the other listeners.
+    await expect
+      .poll(async () => (await outputBands(page, frequencies))[1])
+      .toBeLessThan(threshold(0, 1))
     await startOutputRecording(page, frequencies)
     await enter(page, 'OG')
     await expect
@@ -133,6 +137,10 @@ test('logical rooms isolate actual speaker output and recall restores it without
       .poll(() => recordedRoomSamples(page, 'OG'), { intervals: [20] })
       .toBeGreaterThanOrEqual(3)
     const frames = await stopOutputRecording(page)
+    await testInfo.attach('audio-transitions', {
+      body: JSON.stringify(frames),
+      contentType: 'application/json',
+    })
     let previous = '',
       changedAt = 0
     const segments: { room: string; checked: number }[] = []
@@ -155,10 +163,6 @@ test('logical rooms isolate actual speaker output and recall restores it without
     const transitions = segments.slice(-4)
     expect(transitions.map((segment) => segment.room)).toEqual(['OG', 'База', 'OO', 'OG'])
     for (const segment of transitions) expect(segment.checked).toBeGreaterThan(0)
-    await testInfo.attach('audio-transitions', {
-      body: JSON.stringify(frames),
-      contentType: 'application/json',
-    })
 
     await claimJudge(page)
     await page.setViewportSize({ width: 1366, height: 650 })
