@@ -20,9 +20,9 @@ def image_state(ref: str) -> dict[str, Any]:
     if (info["Os"], info["Architecture"]) != ("linux", "amd64"):
         raise ValueError(f"not a Linux/amd64 image: {ref}")
     return {
-        "id": info["Id"],
-        "layers": info["RootFS"]["Layers"],
-        "labels": info["Config"]["Labels"],
+        "platform": "linux/amd64",
+        "rootfs": info["RootFS"],
+        "config": info["Config"],
     }
 
 
@@ -108,7 +108,7 @@ def build(directory: Path) -> None:
         state = image_state(ref)
         if (
             name in ("backend", "web", "bundle")
-            and state["labels"]["org.opencontainers.image.version"] != version
+            and state["config"]["Labels"]["org.opencontainers.image.version"] != version
         ):
             raise ValueError(f"image version differs from the checkout: {name}")
         images[ref] = state

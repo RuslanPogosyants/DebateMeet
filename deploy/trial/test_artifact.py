@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from artifact import verify
+from artifact import image_state, verify
 
 
 class ArtifactVerificationTest(unittest.TestCase):
@@ -63,6 +63,48 @@ class ArtifactVerificationTest(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "loaded image differs"),
         ):
             verify(self.directory, self.commit, loaded=True)
+
+    def test_same_image_can_have_different_ids_between_docker_stores(self) -> None:
+        original = {
+            "Id": "config-digest",
+            "Os": "linux",
+            "Architecture": "amd64",
+            "RootFS": {"Layers": ["layer"]},
+            "Config": {"Cmd": ["server"], "Labels": {}},
+        }
+        imported = dict(original, Id="manifest-digest")
+        with patch(
+            "artifact.run", side_effect=[json.dumps([original]), json.dumps([imported])]
+        ):
+            self.assertEqual(image_state("before"), image_state("after"))
+
+    def test_changed_runtime_command_is_not_the_same_image(self) -> None:
+        original = {
+            "Id": "same-store-id",
+            "Os": "linux",
+            "Architecture": "amd64",
+            "RootFS": {"Layers": ["layer"]},
+            "Config": {"Cmd": ["server"], "Labels": {}},
+        }
+        changed = dict(original, Config={"Cmd": ["another-command"], "Labels": {}})
+        with patch(
+            "artifact.run", side_effect=[json.dumps([original]), json.dumps([changed])]
+        ):
+            self.assertNotEqual(image_state("before"), image_state("after"))
+
+    def test_changed_layers_are_not_the_same_image(self) -> None:
+        original = {
+            "Id": "same-store-id",
+            "Os": "linux",
+            "Architecture": "amd64",
+            "RootFS": {"Layers": ["layer"]},
+            "Config": {"Cmd": ["server"], "Labels": {}},
+        }
+        changed = dict(original, RootFS={"Layers": ["another-layer"]})
+        with patch(
+            "artifact.run", side_effect=[json.dumps([original]), json.dumps([changed])]
+        ):
+            self.assertNotEqual(image_state("before"), image_state("after"))
 
 
 if __name__ == "__main__":
