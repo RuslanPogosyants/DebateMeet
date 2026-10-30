@@ -474,7 +474,13 @@ jobs:
         run: docker compose up -d --wait
       - name: Built application entry and remote audio
         working-directory: frontend
-        run: pnpm test:e2e
+        # Ubuntu restricts user namespaces for downloaded Chromium; retain its sandbox
+        # through the root-owned helper supplied by the runner's Google Chrome package.
+        env:
+          CHROME_DEVEL_SANDBOX: /opt/google/chrome/chrome-sandbox
+        run: |
+          test -u "$CHROME_DEVEL_SANDBOX"
+          pnpm test:e2e
       - name: Service logs
         if: failure()
         run: docker compose logs --tail 100
