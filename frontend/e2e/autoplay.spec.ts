@@ -233,14 +233,14 @@ test('native autoplay blocks media and timer audio until one trusted sound actio
     await expect
       .poll(async () => {
         const state = await nativeState(passiveSession)
-        return (
-          state.contexts.length === 2 &&
-          state.contexts.some((context) => context.mediaSources > 0) &&
-          state.clockReady &&
-          state.enableAudio
-        )
+        return {
+          contexts: state.contexts.length,
+          mediaSource: state.contexts.some((context) => context.mediaSources > 0),
+          clockReady: state.clockReady,
+          enableAudio: state.enableAudio,
+        }
       })
-      .toBe(true)
+      .toEqual({ contexts: 2, mediaSource: true, clockReady: true, enableAudio: true })
     const before = await nativeState(passiveSession)
     expect(before.activated).toBe(false)
     expect(before.contexts.map((context) => context.state)).toEqual(['suspended', 'suspended'])
