@@ -3,7 +3,14 @@
 import asyncio
 
 from debatemeet.media.application.ports import LiveKitApi, MediaRoomMissingError, MediaStore
-from debatemeet.round.application.ports import Observation, ParticipantId, RoundId, RoundReader
+from debatemeet.round.application.ports import (
+    Observation,
+    ParticipantId,
+    ReactionMessage,
+    RoundId,
+    RoundReader,
+)
+from debatemeet.round.contract.reaction import ReactionPacket
 from debatemeet.round.contract.snapshot import snapshot_of
 from debatemeet.shared.application.clock import Clock
 from debatemeet.shared.application.errors import MediaUnavailableError, NotFoundError
@@ -41,7 +48,8 @@ class RoundMediaGateway:
             app_version=self._app_version,
         )
         room = await self._api.create_room(round_id, snapshot.model_dump_json(by_alias=True))
-        await self._store.started(round_id, room.sid)
+        if not await self._store.started(round_id, room.sid, self._clock.now()):
+            raise NotFoundError
 
     def token(self, round_id: RoundId, participant_id: ParticipantId, name: str) -> str:
         return self._api.token(round_id, participant_id, name)
@@ -57,3 +65,27 @@ class RoundMediaGateway:
         except MediaUnavailableError, TimeoutError:
             return None
         return Observation(at, participants)
+
+    async def send_reaction(
+        self, message: ReactionMessage, recipients: tuple[ParticipantId, ...]
+    ) -> None:
+        if not recipients:
+            return
+        packet = (
+            ReactionPacket(
+                round_id=message.round_id,
+                epoch=message.epoch,
+                version=message.version,
+                room=message.room,
+                participant_id=message.participant_id,
+                reaction=message.reaction,
+                nonce=message.nonce,
+            )
+            .model_dump_json(by_alias=True)
+            .encode()
+        )
+        try:
+            async with asyncio.timeout(1):
+                await self._api.send_reaction(message.round_id, packet, recipients)
+        except MediaRoomMissingError:
+            return

@@ -1,0 +1,110 @@
+{
+  "initial": {
+    "epoch": 1,
+    "messages": [
+      {
+        "id": "1",
+        "changeId": "1",
+        "kind": "user",
+        "authorId": "aaaaaaaaaaaa",
+        "authorName": "Алиса",
+        "text": "Живое сообщение\nвсем",
+        "createdAt": 1790704800000,
+        "deletedAt": null
+      },
+      {
+        "id": "3",
+        "changeId": "3",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704804000,
+        "deletedAt": null
+      },
+      {
+        "id": "4",
+        "changeId": "4",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704805000,
+        "deletedAt": null
+      },
+      {
+        "id": "5",
+        "changeId": "5",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704807000,
+        "deletedAt": null
+      }
+    ],
+    "asOfCursor": "6",
+    "nextBefore": null,
+    "nextAfter": null,
+    "hasMore": false
+  },
+  "after": {
+    "epoch": 1,
+    "messages": [
+      {
+        "id": "1",
+        "changeId": "1",
+        "kind": "user",
+        "authorId": "aaaaaaaaaaaa",
+        "authorName": "Алиса",
+        "text": "Живое сообщение\nвсем",
+        "createdAt": 1790704800000,
+        "deletedAt": null
+      },
+      {
+        "id": "3",
+        "changeId": "3",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704804000,
+        "deletedAt": null
+      },
+      {
+        "id": "4",
+        "changeId": "4",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704805000,
+        "deletedAt": null
+      },
+      {
+        "id": "5",
+        "changeId": "5",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704807000,
+        "deletedAt": null
+      },
+      {
+        "id": "2",
+        "changeId": "6",
+        "kind": "user",
+        "authorId": "bbbbbbbbbbbb",
+        "authorName": null,
+        "text": null,
+        "createdAt": 1790704800000,
+        "deletedAt": 1790704809000
+      }
+    ],
+    "asOfCursor": "6",
+    "nextBefore": null,
+    "nextAfter": "6",
+    "hasMore": false
+  }
+}

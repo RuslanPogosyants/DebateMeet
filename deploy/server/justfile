@@ -1,0 +1,7 @@
+# Run beside the deployed agent and compose.yaml, using this release's environment files.
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+# Inspect or administer a round: just admin show ROUND_ID
+[positional-arguments]
+admin +args:
+    python3 agent.py compose exec -T backend python -m debatemeet.admin "$@"

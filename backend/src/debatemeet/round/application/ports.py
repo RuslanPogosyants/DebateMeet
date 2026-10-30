@@ -4,11 +4,13 @@ from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from debatemeet.round.domain.ids import ParticipantId as ParticipantId
 from debatemeet.round.domain.ids import RoundId as RoundId
 from debatemeet.round.domain.ids import SessionId as SessionId
+from debatemeet.round.domain.reaction import ReactionCode
+from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.ports import CommandKeys, EventLog
 
@@ -35,7 +37,7 @@ class CommittedRound:
 
 class RoundRepository(Protocol):
     async def add(self, round_: Round, now: datetime) -> None:
-        """Insert a new round as version 1."""
+        """Insert at version 1; a live or deleted link raises RoundIdCollisionError."""
         ...
 
     async def get_for_update(self, round_id: RoundId) -> Round | None:
@@ -52,6 +54,12 @@ class ParticipantArchive(Protocol):
         self, round_id: RoundId, participant_id: ParticipantId
     ) -> ArchivedParticipant | None: ...
 
+    async def find_shared(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> ArchivedParticipant | None:
+        """Keep the author and credential decision stable until a chat transaction commits."""
+        ...
+
     async def add(
         self,
         round_id: RoundId,
@@ -67,10 +75,63 @@ class ParticipantArchive(Protocol):
         """A rejoin replaces the name and moves the time of the last join."""
         ...
 
+    async def revoke(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        """Permanently refuse this participant's secret, in the command transaction."""
+        ...
+
+
+type PacketTopic = Literal["chat", "chat_deleted"]
+type MicrophoneOperation = Literal["mute", "request_unmute"]
+
+
+class ChatPacketReader(Protocol):
+    async def current_packet(
+        self, round_id: RoundId, topic: PacketTopic, payload: bytes
+    ) -> bytes | None:
+        """Resolve pending content against current history; None means obsolete, not retry."""
+        ...
+
+
+class MediaOutbox(Protocol):
+    async def control_microphone(
+        self,
+        round_id: RoundId,
+        participant_id: ParticipantId,
+        target_sid: SessionId,
+        operation: MicrophoneOperation,
+        now: datetime,
+    ) -> None:
+        """Queue one manual intent for its captured target session in the caller transaction."""
+        ...
+
+    async def remove_participant(
+        self, round_id: RoundId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        """Queue an idempotent media removal in the caller-owned transaction."""
+        ...
+
+    async def publish_packet(
+        self, round_id: RoundId, topic: PacketTopic, payload: bytes, now: datetime
+    ) -> None:
+        """Queue a bounded server packet on the caller's connection and transaction."""
+        ...
+
 
 class ChangeNotifier(Protocol):
     async def round_changed(self, round_id: RoundId) -> None:
         """NOTIFY for the publisher; Postgres delivers it only when the transaction commits."""
+        ...
+
+
+class SystemMessages(Protocol):
+    async def prepare(self, round_id: RoundId) -> None:
+        """Acquire the chat writer guard before taking the round row lock for a draw."""
+        ...
+
+    async def position_drawn(
+        self, round_id: RoundId, position: str, draw_no: int, now: datetime, round_version: int
+    ) -> None:
+        """Persist the system message, event and packet on this caller-owned transaction."""
         ...
 
 
@@ -92,6 +153,12 @@ class RoundTransaction(Protocol):
 
     @property
     def notifier(self) -> ChangeNotifier: ...
+
+    @property
+    def media_outbox(self) -> MediaOutbox: ...
+
+    @property
+    def system_messages(self) -> SystemMessages: ...
 
 
 class RoundTransactions(Protocol):
@@ -140,3 +207,26 @@ class MediaGateway(Protocol):
         """The participants of the media room within about a second; empty when there is no
         media room, None when LiveKit did not answer."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class ReactionMessage:
+    round_id: RoundId
+    epoch: int
+    version: int
+    room: Room
+    participant_id: ParticipantId
+    reaction: ReactionCode
+    nonce: str
+
+
+class ReactionGateway(Protocol):
+    async def send_reaction(
+        self, message: ReactionMessage, recipients: tuple[ParticipantId, ...]
+    ) -> None:
+        """One lossy attempt outside locks; an empty destination is never a broadcast."""
+        ...
+
+
+class ReactionLimiter(Protocol):
+    def allow(self, round_id: RoundId, participant_id: ParticipantId) -> bool: ...

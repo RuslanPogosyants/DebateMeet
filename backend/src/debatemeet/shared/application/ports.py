@@ -18,6 +18,10 @@ class RandomSource(Protocol):
         """`size` random bytes from a cryptographic source, in base64url without padding."""
         ...
 
+    def below(self, upper: int) -> int:
+        """Uniformly choose an index in range(upper), with upper strictly positive."""
+        ...
+
 
 class EventLog(Protocol):
     async def append(
@@ -36,6 +40,14 @@ class KeyClaim(StrEnum):
 
 
 class CommandKeys(Protocol):
+    async def retain(self, *, round_id: str, participant_id: str | None, key: str) -> None:
+        """Keep a claimed irreversible control intent until its round is deleted.
+
+        The caller retains the key in the same transaction as its effect and events;
+        delivery cleanup must never make an old microphone command a new intent.
+        """
+        ...
+
     async def claim(
         self,
         *,

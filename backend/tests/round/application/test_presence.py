@@ -58,13 +58,16 @@ class TestConnect:
         assert world.rounds.round(round_id).version == version
         assert presence(world, round_id, vika) == Disconnected(at(1))
 
-    async def test_someone_the_archive_does_not_know_changes_nothing(self) -> None:
+    async def test_unknown_identity_is_removed_without_changing_the_snapshot(self) -> None:
         world, round_id, _ = await a_round_with_vika()
         version = world.rounds.round(round_id).version
 
         await world.connect(round_id, ParticipantId("stranger0000"), S1, "EV_1")
 
         assert world.rounds.round(round_id).version == version
+        assert world.rounds.store.media_removals == [
+            (round_id, ParticipantId("stranger0000"), world.clock.now())
+        ]
         # The event id is spent: a repeat is not looked at again.
         assert (round_id, None, "EV_1") in world.rounds.store.keys
 
@@ -74,6 +77,7 @@ class TestConnect:
         await world.connect(RoundId("R" * 22), ParticipantId("p" * 12), S1, "EV_1")
 
         assert world.rounds.store.rounds == {}
+        assert world.rounds.store.keys == {}
 
     async def test_a_participant_back_from_the_archive_takes_the_archived_name(self) -> None:
         world, round_id, vika = await a_round_with_vika()
@@ -85,6 +89,14 @@ class TestConnect:
 
 
 class TestDisconnect:
+    async def test_a_late_leave_for_a_missing_round_keeps_no_receipt(self) -> None:
+        world = PresenceWorld()
+
+        await world.disconnect(RoundId("R" * 22), ParticipantId("p" * 12), S1, "EV_late")
+
+        assert world.rounds.store.keys == {}
+        assert world.rounds.store.log == []
+
     async def test_the_session_closes(self) -> None:
         world, round_id, vika = await a_round_with_vika()
         await world.connect(round_id, vika, S1, "EV_1")
@@ -106,13 +118,21 @@ class TestDisconnect:
 
 
 class TestSyncPresence:
+    async def test_an_observed_room_without_an_aggregate_is_complete(self) -> None:
+        world = PresenceWorld()
+        world.media.observation = Observation(at=at(3), sessions={})
+
+        assert await world.sync(RoundId("R" * 22)) is True
+        assert world.rounds.store.media_removals == []
+
     async def test_what_livekit_lists_is_applied(self) -> None:
         world, round_id, vika = await a_round_with_vika()
         world.media.observation = Observation(at=at(3), sessions={vika: S1})
         world.clock.moment = at(4)
 
-        await world.sync(round_id)
+        completed = await world.sync(round_id)
 
+        assert completed is True
         assert presence(world, round_id, vika) == Connected(S1, at(4))
 
     async def test_no_answer_from_livekit_means_no_reconciliation(self) -> None:
@@ -120,8 +140,9 @@ class TestSyncPresence:
         world.media.observation = None
         version = world.rounds.round(round_id).version
 
-        await world.sync(round_id)
+        completed = await world.sync(round_id)
 
+        assert completed is False
         assert world.rounds.round(round_id).version == version
 
     async def test_nothing_to_change_keeps_the_version(self) -> None:
@@ -130,7 +151,8 @@ class TestSyncPresence:
         world.media.observation = Observation(at=at(3), sessions={vika: S1})
         version = world.rounds.round(round_id).version
 
-        await world.sync(round_id)
+        completed = await world.sync(round_id)
 
+        assert completed is True
         assert world.rounds.round(round_id).version == version
         assert world.rounds.store.notified.count(round_id) == 2

@@ -1,10 +1,48 @@
-import { ClientError, type Credentials, type Joined, type RoundApi } from '@/application/ports'
+import {
+  ClientError,
+  type Credentials,
+  type Joined,
+  type RoundApi,
+  type RoundCommand,
+} from '@/application/ports'
 import { readSnapshot, record, type Snapshot } from '@/domain/snapshot'
+import type { ReactionCode } from '@/domain/social'
 
 export class HttpRoundApi implements RoundApi {
+  private readonly observeVersion: ((value: unknown) => void) | undefined
+  constructor(observeVersion?: (value: unknown) => void) {
+    this.observeVersion = observeVersion
+  }
+  private async unsupported(
+    response: Response,
+    roundId: string,
+    credentials: Credentials,
+  ): Promise<never> {
+    const error = await this.accepted(response).catch((failure: unknown) => failure)
+    if (
+      error instanceof ClientError &&
+      (error.code === 'not_found' || error.code === 'method_not_allowed')
+    ) {
+      // An older compatible backend may lack this command while the round still exists.
+      const existing = await this.snapshot(roundId, credentials, null)
+      if (existing === null) throw new ClientError('invalid_response')
+      throw new ClientError('command_unavailable')
+    }
+    throw error instanceof Error ? error : new ClientError('invalid_response')
+  }
   private async request(path: string, init: RequestInit = {}): Promise<Response> {
     try {
-      return await fetch(path, { ...init, cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+      const response = await fetch(path, {
+        ...init,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      })
+      try {
+        this.observeVersion?.(response.headers.get('X-App-Version'))
+      } catch {
+        /* Passive version observation never gates an API response. */
+      }
+      return response
     } catch {
       throw new ClientError('network')
     }
@@ -22,6 +60,17 @@ export class HttpRoundApi implements RoundApi {
         record(value) && typeof value.code === 'string' ? value.code : 'network',
       )
     return value
+  }
+
+  async time(): Promise<number> {
+    const value = await this.accepted(await this.request('/api/time'))
+    if (
+      !record(value) ||
+      typeof value.serverTime !== 'number' ||
+      !Number.isSafeInteger(value.serverTime)
+    )
+      throw new ClientError('invalid_response')
+    return value.serverTime
   }
 
   async healthy(): Promise<boolean> {
@@ -89,6 +138,46 @@ export class HttpRoundApi implements RoundApi {
     const snapshot = readSnapshot(await this.accepted(response), roundId)
     if (snapshot === null) throw new ClientError('invalid_response')
     return snapshot
+  }
+
+  async command(
+    roundId: string,
+    credentials: Credentials,
+    intent: RoundCommand,
+    key: string,
+  ): Promise<Snapshot> {
+    const { type, ...payload } = intent
+    const response = await this.request(`/api/rounds/${encodeURIComponent(roundId)}/${type}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credentials.participantId}.${credentials.secret}`,
+        'Idempotency-Key': key,
+      },
+      body: JSON.stringify(payload),
+    })
+    if (response.status === 404 || response.status === 405) {
+      return this.unsupported(response, roundId, credentials)
+    }
+    const snapshot = readSnapshot(await this.accepted(response), roundId)
+    if (snapshot === null) throw new ClientError('invalid_response')
+    return snapshot
+  }
+
+  async reaction(roundId: string, credentials: Credentials, reaction: ReactionCode): Promise<void> {
+    const response = await this.request(`/api/rounds/${encodeURIComponent(roundId)}/reactions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credentials.participantId}.${credentials.secret}`,
+      },
+      body: JSON.stringify({ reaction }),
+    })
+    if (response.status === 204) return
+    if (response.status === 404 || response.status === 405)
+      return this.unsupported(response, roundId, credentials)
+    await this.accepted(response)
+    throw new ClientError('invalid_response')
   }
 
   async leave(roundId: string, credentials: Credentials, sid: string): Promise<void> {

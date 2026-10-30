@@ -1,10 +1,15 @@
 import { writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
 
 // The fake microphone repeats a known tone. No physical microphone or speakers are used.
 const tone = join(tmpdir(), 'debatemeet-e2e-tone.wav')
+// Shared by the parent config, worker and owned backend; never a production database.
+const stateFile =
+  process.env['DM_E2E_STATE_FILE'] ?? join(tmpdir(), `debatemeet-e2e-${randomUUID()}.json`)
+process.env['DM_E2E_STATE_FILE'] = stateFile
 const rate = 48000
 const samples = rate
 const wav = Buffer.alloc(44 + samples * 2)
@@ -37,6 +42,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     ...devices['Desktop Chrome'],
+    actionTimeout: 15000,
     baseURL: 'http://127.0.0.1:4173',
     permissions: ['camera', 'microphone'],
     trace: 'retain-on-failure',
@@ -51,13 +57,13 @@ export default defineConfig({
   },
   webServer: [
     {
-      command:
-        'cd ../backend && .venv/bin/python -m debatemeet.migrate && exec .venv/bin/uvicorn debatemeet.main:create_app --factory --host 0.0.0.0 --port 8000',
+      command: 'cd ../backend && exec .venv/bin/python -m tests.e2e_server',
       url: 'http://127.0.0.1:8000/api/health',
       timeout: 60000,
       gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
       env: {
         DM_ENVIRONMENT: 'test',
+        DM_E2E_STATE_FILE: stateFile,
         DM_DATABASE_URL:
           process.env['DM_E2E_DATABASE_URL'] ??
           'postgresql+asyncpg://debatemeet:debatemeet@127.0.0.1:5450/debatemeet_test',

@@ -5,6 +5,7 @@ Run: uvicorn debatemeet.main:create_app --factory
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from functools import partial
 
 from fastapi import FastAPI
 
@@ -18,24 +19,55 @@ from debatemeet.media.application.webhooks import (
 )
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
 from debatemeet.media.infrastructure.livekit_webhooks import LiveKitWebhookVerifier
-from debatemeet.media.infrastructure.postgres import PostgresMediaStore, PostgresPublisherLease
+from debatemeet.media.infrastructure.postgres import (
+    PostgresMediaOutbox,
+    PostgresMediaStore,
+    PostgresPublisherLease,
+)
 from debatemeet.media.infrastructure.runtime import MediaRuntime
+from debatemeet.round.api.diagnostics import diagnostics_router
 from debatemeet.round.api.entry import RoundEndpoints, entry_router
+from debatemeet.round.api.reactions import reaction_router
+from debatemeet.round.api.rooms import room_router
 from debatemeet.round.application.commands import CreateRound, JoinRound, LeaveRound, ReadSnapshot
+from debatemeet.round.application.diagnostics import ReceiveDiagnostics
 from debatemeet.round.application.presence import (
     ConnectParticipant,
     DisconnectParticipant,
     SyncPresence,
 )
+from debatemeet.round.application.reactions import SendReaction
+from debatemeet.round.application.room_commands import ExecuteRoundCommand
+from debatemeet.round.chat.api.messages import message_router
+from debatemeet.round.chat.application.post_message import PostMessage
+from debatemeet.round.chat.application.read_messages import ReadMessages
+from debatemeet.round.chat.contract.messages import ChatDeletedPacket, ChatPacket, PostedMessage
+from debatemeet.round.chat.infrastructure.postgres import PostgresMessages
+from debatemeet.round.chat.infrastructure.transactions import (
+    PostgresChatTransactions,
+    PostgresSystemMessages,
+)
 from debatemeet.round.contract.entry import StatePacket
-from debatemeet.round.infrastructure.postgres import PostgresRounds
+from debatemeet.round.contract.microphone import MicrophonePacket
+from debatemeet.round.contract.reaction import ReactionPacket
+from debatemeet.round.infrastructure.diagnostics import (
+    PostgresDiagnosticTransactions,
+    SlidingDiagnosticLimiter,
+)
+from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
+from debatemeet.round.infrastructure.reaction_limits import SlidingReactionLimiter
 from debatemeet.shared.api.errors import install_error_handlers
 from debatemeet.shared.api.health import health_router
+from debatemeet.shared.api.metrics import metrics_router
 from debatemeet.shared.api.time import time_router
+from debatemeet.shared.api.version import VersionHeaders
 from debatemeet.shared.application.clock import Clock
+from debatemeet.shared.application.diagnostics import DiagnosticReader
 from debatemeet.shared.application.health import HealthProbe
 from debatemeet.shared.infrastructure.clock import SystemClock
 from debatemeet.shared.infrastructure.database import PostgresHealthProbe, create_engine
+from debatemeet.shared.infrastructure.diagnostic_runtime import DiagnosticRuntime
+from debatemeet.shared.infrastructure.diagnostics import PostgresDiagnostics
 from debatemeet.shared.infrastructure.logs import configure_logging
 from debatemeet.shared.infrastructure.persistence import PostgresRateLimiter
 from debatemeet.shared.infrastructure.randomness import SecureRandom
@@ -54,6 +86,12 @@ def build_app(
     docs: bool = False,
     lifespan: Lifespan | None = None,
     round_commands: RoundEndpoints | None = None,
+    room_commands: ExecuteRoundCommand | None = None,
+    messages: ReadMessages | None = None,
+    post_message: PostMessage | None = None,
+    reactions: SendReaction | None = None,
+    diagnostics: ReceiveDiagnostics | None = None,
+    diagnostic_reader: DiagnosticReader | None = None,
 ) -> FastAPI:
     """The HTTP app over ports; tests call it with fakes."""
     app = FastAPI(
@@ -64,18 +102,32 @@ def build_app(
         redoc_url=None,
         lifespan=lifespan,
     )
-    install_error_handlers(app)
+    install_error_handlers(app, version=version)
+    app.add_middleware(VersionHeaders, version=version)
     app.include_router(health_router(health_probe, version))
     app.include_router(time_router(clock))
     app.include_router(webhook_router(webhook_verifier, media_events))
     app.include_router(entry_router(round_commands, version))
+    app.include_router(room_router(room_commands, version))
+    app.include_router(message_router(messages, post_message))
+    app.include_router(reaction_router(reactions))
+    app.include_router(diagnostics_router(diagnostics))
+    app.include_router(metrics_router(diagnostic_reader, clock))
     # Data packets travel through LiveKit, but their schema belongs to the same public contract.
     schema = app.openapi()
-    packet_schema = StatePacket.model_json_schema(ref_template="#/components/schemas/{model}")
     schemas = schema.setdefault("components", {}).setdefault("schemas", {})
-    for name, definition in packet_schema.pop("$defs", {}).items():
-        schemas.setdefault(name, definition)
-    schemas["StatePacket"] = packet_schema
+    for packet in (
+        StatePacket,
+        ChatPacket,
+        ChatDeletedPacket,
+        PostedMessage,
+        MicrophonePacket,
+        ReactionPacket,
+    ):
+        packet_schema = packet.model_json_schema(ref_template="#/components/schemas/{model}")
+        for name, definition in packet_schema.pop("$defs", {}).items():
+            schemas.setdefault(name, definition)
+        schemas[packet.__name__] = packet_schema
     return app
 
 
@@ -84,8 +136,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(environment=settings.environment, level=settings.log_level)
     engine = create_engine(settings.database_url)
     clock = SystemClock()
-    rounds = PostgresRounds(engine)
+    rounds = PostgresRounds(
+        engine,
+        PostgresMediaOutbox,
+        system_messages_factory=partial(PostgresSystemMessages, outbox_factory=PostgresMediaOutbox),
+    )
+    messages = PostgresMessages(engine)
+    chat_transactions = PostgresChatTransactions(
+        engine, PostgresParticipantArchive, PostgresMediaOutbox
+    )
     limiter = PostgresRateLimiter(engine)
+    diagnostic_store = PostgresDiagnostics(engine)
+    diagnostic_runtime = DiagnosticRuntime(diagnostic_store, clock)
     random = SecureRandom()
     livekit = LiveKitApiAdapter(
         settings.livekit_server_url,
@@ -105,7 +167,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     runtime = MediaRuntime(
         SnapshotPublisher(
-            rounds, livekit, delivery, PostgresPublisherLease(engine), clock, settings.app_version
+            rounds,
+            livekit,
+            delivery,
+            PostgresPublisherLease(engine),
+            clock,
+            settings.app_version,
+            packets=messages,
         ),
         handler,
         livekit,
@@ -114,13 +182,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await runtime.start()
+        await diagnostic_runtime.start()
         try:
             yield
         finally:
             try:
-                await runtime.close()
+                await diagnostic_runtime.close()
             finally:
-                await engine.dispose()
+                try:
+                    await runtime.close()
+                finally:
+                    await engine.dispose()
 
     return build_app(
         clock=clock,
@@ -138,4 +210,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             LeaveRound(rounds, clock, rounds, limiter),
             ReadSnapshot(rounds),
         ),
+        room_commands=ExecuteRoundCommand(rounds, media, rounds, clock, limiter, random),
+        messages=ReadMessages(messages, rounds),
+        post_message=PostMessage(chat_transactions, messages, rounds, clock, limiter),
+        reactions=SendReaction(rounds, media, SlidingReactionLimiter(), random),
+        diagnostics=ReceiveDiagnostics(
+            PostgresDiagnosticTransactions(engine, PostgresParticipantArchive),
+            clock,
+            SlidingDiagnosticLimiter(),
+        ),
+        diagnostic_reader=diagnostic_store,
     )

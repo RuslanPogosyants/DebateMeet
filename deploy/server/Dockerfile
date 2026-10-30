@@ -4,7 +4,7 @@
 # and its systemd units; nothing to run. Its labels pin the backend and web images of the release,
 # so CI builds it after pushing them. Build context: deploy/server/; `just images` builds it.
 FROM scratch
-COPY compose.yaml env.example agent.py /bundle/
+COPY compose.yaml env.example agent.py justfile /bundle/
 COPY caddy/ /bundle/caddy/
 COPY livekit/ /bundle/livekit/
 COPY systemd/ /bundle/systemd/

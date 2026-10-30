@@ -159,7 +159,7 @@ layers = ["api | infrastructure", "application | contract", "domain"]
 name = "Layers of chat"
 type = "layers"
 containers = ["debatemeet.round.chat"]
-layers = ["api | infrastructure", "application", "domain"]
+layers = ["api | infrastructure", "application | contract", "domain"]
 
 [[tool.importlinter.contracts]]
 name = "Layers of media"

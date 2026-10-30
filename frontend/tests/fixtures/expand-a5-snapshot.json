@@ -1,0 +1,80 @@
+{
+  "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+  "epoch": 2,
+  "version": 23,
+  "committedAt": 1790704810000,
+  "appVersion": "compat-expand-a5",
+  "participants": [
+    {
+      "id": "aaaaaaaaaaaa",
+      "name": "Алиса",
+      "room": "base",
+      "presence": {
+        "status": "connected",
+        "since": 1790704800000
+      },
+      "handRaisedAt": 1790704809123
+    },
+    {
+      "id": "bbbbbbbbbbbb",
+      "name": "Борис",
+      "room": "oo",
+      "presence": {
+        "status": "connected",
+        "since": 1790704800000
+      },
+      "handRaisedAt": 1790704809123
+    }
+  ],
+  "entryClosed": false,
+  "judgeFlag": {
+    "holder": "aaaaaaaaaaaa",
+    "lastHolder": null,
+    "releasedReason": null,
+    "releasedAt": null
+  },
+  "timers": {
+    "prep": {
+      "durationMs": 1234567,
+      "status": "paused",
+      "endsAt": null,
+      "remainingMs": 102111
+    },
+    "speech": {
+      "durationMs": 765432,
+      "status": "running",
+      "endsAt": 1790705457321,
+      "remainingMs": null
+    }
+  },
+  "speechNo": 2,
+  "speechUndo": {
+    "speechNo": 1,
+    "timer": {
+      "durationMs": 765432,
+      "status": "running",
+      "endsAt": 1790705301123,
+      "remainingMs": null
+    }
+  },
+  "motion": {
+    "text": "Эта палата поддерживает <plain text>\nВторая строка",
+    "infoslide": "Отдельный инфослайд\nещё строка"
+  },
+  "drum": {
+    "enabled": ["og", "oo"],
+    "drawn": [
+      {
+        "position": "co",
+        "drawNo": 3
+      }
+    ],
+    "removeDrawn": false,
+    "last": {
+      "position": "co",
+      "drawNo": 3,
+      "at": 1790704807000
+    },
+    "drawCount": 3
+  }
+}

@@ -50,6 +50,11 @@ test: up
 test-e2e: up
     cd frontend && pnpm test:e2e
 
+# Explicit local SLO measurement: 30 transitions, 100 +/- 20 ms delay and 1% packet loss
+measure-rooms: up
+    docker build -f deploy/dev/netem.Dockerfile --tag debatemeet-netem:dev deploy/dev
+    cd frontend && bash ../tools/with-netem.sh pnpm measure:rooms
+
 # Linters, type checks and layer rules
 lint:
     cd backend && uv run ruff check && uv run ruff format --check && uv run mypy && uv run lint-imports
@@ -66,9 +71,14 @@ fmt:
 migrate: up
     cd backend && uv run python -m debatemeet.migrate
 
-# Start a revision in backend/src/debatemeet/migrations/versions: just migration 0002 "add rounds"
+# Start a revision in backend/src/debatemeet/migrations/versions: just migration 0004 "add timers"
 migration rev message:
     cd backend && uv run alembic revision --rev-id {{ rev }} -m "{{ message }}"
+
+# Local administration; on a server use the justfile installed with the deploy bundle
+[positional-arguments]
+admin +args:
+    cd backend && uv run python -m debatemeet.admin "$@"
 
 # Start N bots in a media room: a tone and a test picture each; Ctrl-C stops them
 bots n="1" room="bots": up

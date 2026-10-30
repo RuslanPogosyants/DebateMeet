@@ -6,15 +6,18 @@ secrets and no session ids in it; the position of a raised hand is counted by th
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from debatemeet.round.domain.drum import Drum
 from debatemeet.round.domain.judge import JudgeFlag, ReleaseReason
+from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.presence import Connected, Pending, Presence
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Participant, Round
+from debatemeet.round.domain.timer import JS_MAX_SAFE_INTEGER, SpeechUndo, Timer, TimerStatus
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -37,6 +40,7 @@ class ParticipantView(ContractModel):
     name: str
     room: Room
     presence: PresenceView
+    hand_raised_at: Annotated[int, Field(strict=True, ge=0, le=JS_MAX_SAFE_INTEGER)] | None
 
 
 class FormerHolderView(ContractModel):
@@ -51,6 +55,47 @@ class JudgeFlagView(ContractModel):
     released_at: int | None
 
 
+class TimerView(ContractModel):
+    duration_ms: int
+    status: TimerStatus
+    ends_at: int | None
+    remaining_ms: int | None
+
+
+class TimersView(ContractModel):
+    prep: TimerView
+    speech: TimerView
+
+
+class SpeechUndoView(ContractModel):
+    speech_no: int
+    timer: TimerView
+
+
+class MotionView(ContractModel):
+    text: str
+    infoslide: str
+
+
+class DrawnPositionView(ContractModel):
+    position: Position
+    draw_no: int
+
+
+class DrawResultView(ContractModel):
+    position: Position
+    draw_no: int
+    at: int
+
+
+class DrumView(ContractModel):
+    enabled: list[Position]
+    drawn: list[DrawnPositionView]
+    remove_drawn: bool
+    last: DrawResultView | None
+    draw_count: int
+
+
 class RoundSnapshot(ContractModel):
     round_id: str
     # Changes when a backup is restored: a client takes a new epoch whatever the version.
@@ -63,6 +108,11 @@ class RoundSnapshot(ContractModel):
     participants: list[ParticipantView]
     entry_closed: bool
     judge_flag: JudgeFlagView
+    timers: TimersView
+    speech_no: int
+    speech_undo: SpeechUndoView | None
+    motion: MotionView
+    drum: DrumView
 
 
 def snapshot_of(
@@ -77,6 +127,11 @@ def snapshot_of(
         participants=[_participant(participant) for participant in round_.participants.values()],
         entry_closed=round_.entry_closed,
         judge_flag=_judge_flag(round_.judge_flag),
+        timers=TimersView(prep=_timer(round_.prep_timer), speech=_timer(round_.speech_timer)),
+        speech_no=round_.speech_no,
+        speech_undo=_speech_undo(round_.speech_undo),
+        motion=MotionView(text=round_.motion.text, infoslide=round_.motion.infoslide),
+        drum=_drum(round_.drum),
     )
 
 
@@ -86,6 +141,7 @@ def _participant(participant: Participant) -> ParticipantView:
         name=participant.name,
         room=participant.room,
         presence=_presence(participant.presence),
+        hand_raised_at=_ms(participant.hand.raised_at) if participant.hand is not None else None,
     )
 
 
@@ -111,3 +167,34 @@ def _judge_flag(flag: JudgeFlag) -> JudgeFlagView:
 
 def _ms(moment: datetime) -> int:
     return (moment - _EPOCH) // timedelta(milliseconds=1)
+
+
+def _timer(timer: Timer) -> TimerView:
+    return TimerView(
+        duration_ms=timer.duration_ms,
+        status=timer.status,
+        ends_at=_ms(timer.ends_at) if timer.ends_at is not None else None,
+        remaining_ms=timer.remaining_ms,
+    )
+
+
+def _speech_undo(previous: SpeechUndo | None) -> SpeechUndoView | None:
+    if previous is None:
+        return None
+    return SpeechUndoView(speech_no=previous.speech_no, timer=_timer(previous.timer))
+
+
+def _drum(drum: Drum) -> DrumView:
+    last = drum.last
+    return DrumView(
+        enabled=list(drum.enabled),
+        drawn=[
+            DrawnPositionView(position=value.position, draw_no=value.draw_no)
+            for value in drum.drawn
+        ],
+        remove_drawn=drum.remove_drawn,
+        last=DrawResultView(position=last.position, draw_no=last.draw_no, at=_ms(last.at))
+        if last is not None
+        else None,
+        draw_count=drum.draw_count,
+    )

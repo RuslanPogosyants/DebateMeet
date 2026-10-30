@@ -1,0 +1,105 @@
+{
+  "revision": "ca18693ea72b5ddf7499448fcf8b71e39bac0f34",
+  "files": [
+    {
+      "original_path": "backend/src/debatemeet/__init__.py",
+      "fixture_path": "source/debatemeet/__init__.py.fixture",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/__init__.py",
+      "fixture_path": "source/debatemeet/round/__init__.py.fixture",
+      "sha256": "ce69631337dc631029e7605d1483da8b423a944563c9bd66032d5be877a7a5df"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/contract/__init__.py",
+      "fixture_path": "source/debatemeet/round/contract/__init__.py.fixture",
+      "sha256": "aed4768854e8f2b800b05822fd72325714aad2ab277c9fc96632df3884dc0d68"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/contract/snapshot.py",
+      "fixture_path": "source/debatemeet/round/contract/snapshot.py.fixture",
+      "sha256": "1189dd69f1a8b41da70569779baf9188813b734eacd64e46923c9b1c6d075949"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/__init__.py",
+      "fixture_path": "source/debatemeet/round/domain/__init__.py.fixture",
+      "sha256": "438e9e199975b9194195501ed6e93744c97ac007b3b25009e282fb38aab7050d"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/events.py",
+      "fixture_path": "source/debatemeet/round/domain/events.py.fixture",
+      "sha256": "605bd7af0784c72281ef5edec2c2c84a849f0321d946dcfe03c6ba5dcb0f0310"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/ids.py",
+      "fixture_path": "source/debatemeet/round/domain/ids.py.fixture",
+      "sha256": "58f44ba2a59e0f19d88830a4a0ace9e009c1366005a000d90803c47e7b2f9a34"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/judge.py",
+      "fixture_path": "source/debatemeet/round/domain/judge.py.fixture",
+      "sha256": "16a013b27260121a9a55a97d85615d4e0e13143092631df4d62c48048ebba39f"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/presence.py",
+      "fixture_path": "source/debatemeet/round/domain/presence.py.fixture",
+      "sha256": "a3afb4d1903e6e7e86932c2aef6c4e0ef7b064ea1917eac4e194ef773f6c4bc5"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/room.py",
+      "fixture_path": "source/debatemeet/round/domain/room.py.fixture",
+      "sha256": "800b67f10cf3ed60aa9ddd29b21cdefc554b19315222c4256e9aa2ac8c019507"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/round.py",
+      "fixture_path": "source/debatemeet/round/domain/round.py.fixture",
+      "sha256": "5bcaa39a6aee66e24a998ba6e0f4229f5b162724d3749be4176e4390fc2bfb97"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/domain/timer.py",
+      "fixture_path": "source/debatemeet/round/domain/timer.py.fixture",
+      "sha256": "ccc15c08d80ff30e10bb6e9a4ebeae7e599f8bce290e2f42479135c58d42a8ef"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/infrastructure/__init__.py",
+      "fixture_path": "source/debatemeet/round/infrastructure/__init__.py.fixture",
+      "sha256": "a13f0fcb7f1b980ec6cf436e93d1fd38d7431681b665debbf3f2256594ac0019"
+    },
+    {
+      "original_path": "backend/src/debatemeet/round/infrastructure/mapper.py",
+      "fixture_path": "source/debatemeet/round/infrastructure/mapper.py.fixture",
+      "sha256": "5ce7483426c96ad5546f2e95b5f120ba51c7022c2d35dd497aa91036a77c70b0"
+    },
+    {
+      "original_path": "backend/src/debatemeet/shared/__init__.py",
+      "fixture_path": "source/debatemeet/shared/__init__.py.fixture",
+      "sha256": "1ad8a13ce9f229c6b690ad175f25f54af2166a4e6b86de1982772e7c84162233"
+    },
+    {
+      "original_path": "backend/src/debatemeet/shared/application/__init__.py",
+      "fixture_path": "source/debatemeet/shared/application/__init__.py.fixture",
+      "sha256": "94b6b38a0598f3695830779508137f58f17f1e96435986135a2a81da55990591"
+    },
+    {
+      "original_path": "backend/src/debatemeet/shared/application/errors.py",
+      "fixture_path": "source/debatemeet/shared/application/errors.py.fixture",
+      "sha256": "827b707acd13f390ac94dff4f188483c2b7c49bbfb5663b2424f1e9eee1c184e"
+    },
+    {
+      "original_path": "backend/src/debatemeet/shared/domain/__init__.py",
+      "fixture_path": "source/debatemeet/shared/domain/__init__.py.fixture",
+      "sha256": "2588b710fcd8ecc59d205e7e8f80ea13bc6b77785012fe4196422a928258db22"
+    },
+    {
+      "original_path": "backend/src/debatemeet/shared/domain/errors.py",
+      "fixture_path": "source/debatemeet/shared/domain/errors.py.fixture",
+      "sha256": "50dee88361501ca591f62d5290bb1d76871966c66b56086051b5fc5a5863a054"
+    },
+    {
+      "original_path": "backend/src/debatemeet/shared/domain/events.py",
+      "fixture_path": "source/debatemeet/shared/domain/events.py.fixture",
+      "sha256": "242794e7f6c4cbb03eff2bc38479bb0417d46b92dd245f13c2a3f937172289e5"
+    }
+  ]
+}

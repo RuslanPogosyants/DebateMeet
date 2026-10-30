@@ -7,12 +7,14 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
+from debatemeet.round.application.errors import RoundIdCollisionError
 from debatemeet.round.application.ports import (
     ArchivedParticipant,
     CommittedRound,
+    MicrophoneOperation,
     Observation,
 )
-from debatemeet.round.domain.ids import ParticipantId, RoundId
+from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.ports import KeyClaim
 from debatemeet.shared.domain.events import DomainEvent
@@ -34,8 +36,16 @@ class Store:
     last_joined: dict[tuple[RoundId, ParticipantId], datetime] = field(default_factory=dict)
     log: list[LoggedEvent] = field(default_factory=list)
     keys: dict[tuple[str, str | None, str], str] = field(default_factory=dict)
+    retained_keys: set[tuple[str, str | None, str]] = field(default_factory=set)
     notified: list[RoundId] = field(default_factory=list)
     commits: int = 0
+    media_removals: list[tuple[RoundId, ParticipantId, datetime]] = field(default_factory=list)
+    media_packets: list[tuple[RoundId, str, bytes, datetime]] = field(default_factory=list)
+    media_controls: list[
+        tuple[RoundId, ParticipantId, SessionId, MicrophoneOperation, datetime]
+    ] = field(default_factory=list)
+    chat_prepared: list[RoundId] = field(default_factory=list)
+    system_draws: list[tuple[RoundId, str, int, datetime, int]] = field(default_factory=list)
 
 
 def _stored(round_: Round) -> Round:
@@ -50,7 +60,8 @@ class _Rounds:
         self._store = store
 
     async def add(self, round_: Round, now: datetime) -> None:
-        assert round_.id not in self._store.rounds
+        if round_.id in self._store.rounds:
+            raise RoundIdCollisionError
         round_.version = 1
         self._store.rounds[round_.id] = _stored(round_)
         self._store.committed_at[round_.id] = now
@@ -75,6 +86,11 @@ class _Archive:
     ) -> ArchivedParticipant | None:
         return self._store.archive.get((round_id, participant_id))
 
+    async def find_shared(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> ArchivedParticipant | None:
+        return await self.find(round_id, participant_id)
+
     async def add(
         self,
         round_id: RoundId,
@@ -95,6 +111,35 @@ class _Archive:
         self._store.archive[key] = replace(self._store.archive[key], name=name)
         self._store.last_joined[key] = now
 
+    async def revoke(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        key = (round_id, participant_id)
+        self._store.archive[key] = replace(self._store.archive[key], revoked=True)
+
+
+class _MediaOutbox:
+    def __init__(self, store: Store) -> None:
+        self._store = store
+
+    async def remove_participant(
+        self, round_id: RoundId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        self._store.media_removals.append((round_id, participant_id, now))
+
+    async def publish_packet(
+        self, round_id: RoundId, topic: str, payload: bytes, now: datetime
+    ) -> None:
+        self._store.media_packets.append((round_id, topic, payload, now))
+
+    async def control_microphone(
+        self,
+        round_id: RoundId,
+        participant_id: ParticipantId,
+        target_sid: SessionId,
+        operation: MicrophoneOperation,
+        now: datetime,
+    ) -> None:
+        self._store.media_controls.append((round_id, participant_id, target_sid, operation, now))
+
 
 class _EventLog:
     def __init__(self, store: Store) -> None:
@@ -106,9 +151,28 @@ class _EventLog:
         self._store.log.extend(LoggedEvent(round_id, version, event, actor) for event in events)
 
 
+class _SystemMessages:
+    def __init__(self, store: Store) -> None:
+        self._store = store
+
+    async def prepare(self, round_id: RoundId) -> None:
+        self._store.chat_prepared.append(round_id)
+
+    async def position_drawn(
+        self, round_id: RoundId, position: str, draw_no: int, now: datetime, round_version: int
+    ) -> None:
+        self._store.system_draws.append((round_id, position, draw_no, now, round_version))
+
+
 class _CommandKeys:
     def __init__(self, store: Store) -> None:
         self._store = store
+
+    async def retain(self, *, round_id: str, participant_id: str | None, key: str) -> None:
+        claimed = (round_id, participant_id, key)
+        if claimed not in self._store.keys:
+            raise RuntimeError("Only a claimed command key can be retained")
+        self._store.retained_keys.add(claimed)
 
     async def claim(
         self,
@@ -141,6 +205,8 @@ class Transaction:
         self.events = _EventLog(store)
         self.command_keys = _CommandKeys(store)
         self.notifier = _Notifier(store)
+        self.media_outbox = _MediaOutbox(store)
+        self.system_messages = _SystemMessages(store)
 
 
 class InMemoryRounds:
@@ -182,11 +248,18 @@ class SequentialRandom:
 
     def __init__(self) -> None:
         self.issued = 0
+        self.bounds: list[int] = []
 
     def token(self, size: int) -> str:
         self.issued += 1
         length = -(-size * 4 // 3)
         return f"t{self.issued}".ljust(length, "x")
+
+    def below(self, upper: int) -> int:
+        if upper <= 0:
+            raise ValueError("upper must be positive")
+        self.bounds.append(upper)
+        return 0
 
 
 class CountingRateLimiter:

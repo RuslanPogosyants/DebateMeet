@@ -12,6 +12,7 @@ from debatemeet.round.application.credentials import (
     secret_hash,
     verify,
 )
+from debatemeet.round.application.errors import RoundIdCollisionError
 from debatemeet.round.application.ports import (
     CommittedRound,
     MediaGateway,
@@ -19,12 +20,17 @@ from debatemeet.round.application.ports import (
     RoundTransaction,
     RoundTransactions,
 )
-from debatemeet.round.domain.events import DisconnectCause
+from debatemeet.round.domain.events import (
+    DisconnectCause,
+    MuteRequested,
+    PositionDrawn,
+    UnmuteRequested,
+)
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.name import participant_name
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.clock import Clock
-from debatemeet.shared.application.errors import NotFoundError, RateLimitedError
+from debatemeet.shared.application.errors import NotFoundError, RateLimitedError, RoundBusyError
 from debatemeet.shared.application.ports import RandomSource, RateLimiter, SystemState
 
 # Section 8 of the architecture, per IP: a club behind one NAT joins in a burst.
@@ -42,6 +48,19 @@ async def commit_changes(tx: RoundTransaction, round_: Round, actor: str, now: d
     if not events:
         return
     await tx.rounds.save(round_, now)
+    for event in events:
+        if isinstance(event, PositionDrawn):
+            await tx.system_messages.position_drawn(
+                round_.id, event.position.value, event.draw_no, event.at, round_.version
+            )
+        elif isinstance(event, MuteRequested):
+            await tx.media_outbox.control_microphone(
+                round_.id, event.participant_id, event.target_sid, "mute", event.at
+            )
+        elif isinstance(event, UnmuteRequested):
+            await tx.media_outbox.control_microphone(
+                round_.id, event.participant_id, event.target_sid, "request_unmute", event.at
+            )
     await tx.events.append(round_.id, round_.version, events, actor)
     await tx.notifier.round_changed(round_.id)
 
@@ -65,11 +84,16 @@ class CreateRound:
             f"create_round:{client_ip}", ROUNDS_PER_HOUR, timedelta(hours=1), now
         ):
             raise RateLimitedError
-        round_ = Round.create(RoundId(self._random.token(ROUND_ID_BYTES)), now)
-        async with self._transactions.begin() as tx:
-            await tx.rounds.add(round_, now)
-            await tx.events.append(round_.id, round_.version, round_.pull_events(), VISITOR)
-        return round_.id
+        for _ in range(3):
+            round_ = Round.create(RoundId(self._random.token(ROUND_ID_BYTES)), now)
+            try:
+                async with self._transactions.begin() as tx:
+                    await tx.rounds.add(round_, now)
+                    await tx.events.append(round_.id, round_.version, round_.pull_events(), VISITOR)
+            except RoundIdCollisionError:
+                continue
+            return round_.id
+        raise RoundBusyError
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,179 @@
+"""Active test harness; only source/ contains immutable application source from A4."""
+
+import asyncio
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from debatemeet.media.application.ports import PacketEffect, RemovalEffect
+from debatemeet.media.infrastructure.postgres import PostgresMediaOutbox, PostgresMediaStore
+from debatemeet.round.application.commands import ReadSnapshot
+from debatemeet.round.application.credentials import Credentials
+from debatemeet.round.application.room_commands import Enter, ExecuteRoundCommand, PauseTimer
+from debatemeet.round.chat.api.messages import message_router
+from debatemeet.round.chat.application.read_messages import ReadMessages
+from debatemeet.round.chat.infrastructure.postgres import PostgresMessages
+from debatemeet.round.contract.snapshot import snapshot_of
+from debatemeet.round.domain.ids import ParticipantId, RoundId
+from debatemeet.round.domain.room import Room
+from debatemeet.round.domain.round import Round
+from debatemeet.round.domain.timer import TimerKind
+from debatemeet.round.infrastructure.postgres import PostgresRounds
+from debatemeet.shared.api.errors import install_error_handlers
+from debatemeet.shared.infrastructure.persistence import PostgresRateLimiter
+
+stage = "imports"
+
+
+def assert_only_a(source):
+    for name, module in tuple(sys.modules.items()):
+        if name == "debatemeet" or name.startswith("debatemeet."):
+            assert Path(module.__file__).resolve().is_relative_to(source), name
+    assert not hasattr(Round, "draw"), "B4 domain leaked into A4 subprocess"
+
+
+class Clock:
+    def __init__(self, now):
+        self.value = now
+
+    def now(self):
+        return self.value
+
+
+class UnusedMedia:
+    url = "ws://unused.invalid"
+
+    async def observe(self, round_id):
+        raise AssertionError("ordinary A4 writes must not use media")
+
+    async def open_media_room(self, round_id):
+        raise AssertionError("ordinary A4 writes must not open media")
+
+    def token(self, round_id, participant_id, name):
+        raise AssertionError("ordinary A4 writes must not issue a token")
+
+
+async def run(request, source):
+    global stage
+    assert_only_a(source)
+    engine = create_async_engine(request["database_url"], pool_size=1, max_overflow=0)
+    try:
+        round_id = RoundId(request["round_id"])
+        alice = Credentials(ParticipantId(request["alice"]), request["alice_secret"])
+        bob = Credentials(ParticipantId(request["bob"]), request["bob_secret"])
+        clock = Clock(datetime.fromisoformat(request["now"]))
+        rounds = PostgresRounds(engine, PostgresMediaOutbox)
+        commands = ExecuteRoundCommand(
+            rounds, UnusedMedia(), rounds, clock, PostgresRateLimiter(engine)
+        )
+        stage = "ordinary-writes"
+        await commands(round_id, bob, request["enter_key"], Enter(Room.OO))
+        await commands(round_id, alice, request["timer_key"], PauseTimer(TimerKind.PREP))
+        stage = "authenticated-snapshot"
+        committed = await ReadSnapshot(rounds)(round_id, alice)
+        assert committed is not None
+        snapshot = snapshot_of(
+            committed.round,
+            epoch=committed.epoch,
+            committed_at=committed.committed_at,
+            app_version="compat-expand-a4",
+        ).model_dump(mode="json", by_alias=True)
+
+        stage = "authenticated-history-and-http"
+        messages = PostgresMessages(engine)
+        app = FastAPI()
+        install_error_handlers(app)
+        app.include_router(message_router(ReadMessages(messages, rounds)))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://compat.test"
+        ) as client:
+            route = f"/api/rounds/{round_id}/messages"
+            headers = {"Authorization": f"Bearer {alice.participant_id}.{alice.secret}"}
+            denied = await client.get(route)
+            assert denied.status_code == 401
+            initial = await client.get(route, headers=headers)
+            changes = await client.get(route, params={"after": "0"}, headers=headers)
+            assert initial.status_code == changes.status_code == 200
+            assert (
+                initial.headers["cache-control"] == changes.headers["cache-control"] == "no-store"
+            )
+            unsupported = await client.post(
+                route,
+                headers={**headers, "Idempotency-Key": request["unsupported_key"]},
+                json={"text": "pending B4 intent"},
+            )
+            assert unsupported.status_code == 405
+            assert "GET" in unsupported.headers["allow"]
+
+        stage = "typed-outbox-and-current-packets"
+        store = PostgresMediaStore(engine)
+        [removal] = await store.pending_effects(clock.now())
+        [head] = await store.packet_heads(clock.now())
+        assert isinstance(removal, RemovalEffect)
+        assert removal.participant_id == bob.participant_id
+        assert isinstance(head, PacketEffect)
+        assert isinstance(head.payload, bytes)
+        async with engine.connect() as connection:
+            rows = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT topic, payload FROM media_outbox WHERE operation = 'publish_packet' ORDER BY id"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        packets = []
+        for row in rows:
+            resolved = await messages.current_packet(round_id, row["topic"], bytes(row["payload"]))
+            packets.append(
+                {
+                    "topic": row["topic"],
+                    "packet": json.loads(resolved) if resolved is not None else None,
+                }
+            )
+        assert any(item["packet"] is None for item in packets)
+        assert any(
+            item["topic"] == "chat_deleted" and item["packet"] is not None for item in packets
+        )
+        stage = "exclusive-a4-imports"
+        assert_only_a(source)
+        return {
+            "snapshot": snapshot,
+            "history": {"initial": initial.json(), "after": changes.json()},
+            "packets": packets,
+            "unsupported_status": unsupported.status_code,
+            "removal_shape": {
+                "roundId": removal.round_id,
+                "participantId": removal.participant_id,
+                "attempts": removal.attempts,
+                "revision": removal.revision,
+            },
+            "packet_shape": {
+                "roundId": head.round_id,
+                "topic": head.topic,
+                "attempts": head.attempts,
+                "revision": head.revision,
+            },
+        }
+    finally:
+        await engine.dispose()
+
+
+if __name__ == "__main__":
+    try:
+        request = json.load(sys.stdin)
+        result = asyncio.run(run(request, Path(sys.argv[1]).resolve()))
+        json.dump(result, sys.stdout, ensure_ascii=False)
+    except Exception as error:
+        # Never echo exception text: database drivers can include credentials or statements.
+        sys.stderr.write(f"A4_FAILURE:{stage}:{type(error).__name__}\n")
+        raise SystemExit(1) from None

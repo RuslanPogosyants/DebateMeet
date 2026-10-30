@@ -26,15 +26,29 @@ class MediaRuntime:
             self._task = asyncio.create_task(self._run(), name="media-publisher")
 
     async def _run(self) -> None:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(self._recover(), name="media-recovery")
+            tasks.create_task(self._reconcile_deleted(), name="media-deleted-rounds")
+            tasks.create_task(self._publisher.run(), name="media-publisher")
+
+    async def _recover(self) -> None:
         while True:
             try:
-                await self._handler.reconcile_startup()
-                await self._publisher.run()
+                pending = await self._handler.reconcile_startup()
+                break
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.warning("media_recovery_retrying")
                 await asyncio.sleep(1)
+        while pending:
+            await asyncio.sleep(1)
+            try:
+                pending = await self._handler.reconcile_pending(pending)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.warning("media_recovery_retrying")
 
     async def close(self) -> None:
         if self._task is not None:
@@ -43,3 +57,14 @@ class MediaRuntime:
                 await self._task
             self._task = None
         await self._api.aclose()
+
+    async def _reconcile_deleted(self) -> None:
+        while True:
+            try:
+                async with asyncio.timeout(5):
+                    await self._handler.reconcile_deleted()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.warning("deleted_room_reconciliation_retrying")
+            await asyncio.sleep(30)

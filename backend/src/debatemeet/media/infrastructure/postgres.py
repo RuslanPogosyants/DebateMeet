@@ -1,20 +1,175 @@
 """Media delivery progress and the publisher lease belong to Media's database adapter."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta
 from typing import Protocol, cast, runtime_checkable
 
-from sqlalchemy import text
+import structlog
+from pydantic import ValidationError
+from sqlalchemy import RowMapping, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from debatemeet.media.application.ports import DeliveryState
-from debatemeet.round.application.ports import RoundId
+from debatemeet.media.application.ports import (
+    CONTROL_LIFETIME,
+    ControlEffect,
+    DeleteRoomEffect,
+    DeliveryState,
+    MediaEffect,
+    PacketEffect,
+    RemovalDeliveryEffect,
+    RemovalEffect,
+)
+from debatemeet.round.application.ports import (
+    MicrophoneOperation,
+    PacketTopic,
+    ParticipantId,
+    RoundId,
+    SessionId,
+)
+from debatemeet.round.contract.microphone import MAX_CONTROL_BYTES, MicrophonePayload
+from debatemeet.shared.application.errors import UnreadableRoundError
+from debatemeet.shared.infrastructure.database import command_transaction
+from debatemeet.shared.infrastructure.lifecycle import acquire_round_lifecycle
 
 # A session lock on a dedicated connection, never the transaction of a round command.
 PUBLISHER_LOCK = 1145917525
 CHANNEL = "round_changed"
+log = structlog.get_logger(__name__)
+
+
+async def _rearm_deleted(
+    connection: AsyncConnection, round_ids: Sequence[RoundId], now: datetime | None
+) -> int:
+    if not round_ids:
+        return 0
+    rows = await connection.execute(
+        text("""INSERT INTO media_outbox(round_id,operation,created_at,available_at)
+            SELECT round_id,'delete_room',
+                COALESCE(CAST(:now AS timestamptz),CURRENT_TIMESTAMP),
+                COALESCE(CAST(:now AS timestamptz),CURRENT_TIMESTAMP)
+            FROM deleted_rounds WHERE round_id=ANY(CAST(:ids AS text[]))
+            ON CONFLICT(round_id) WHERE operation='delete_room' AND delivered_at IS NULL
+            DO UPDATE SET revision=media_outbox.revision+1,
+                available_at=EXCLUDED.available_at,attempts=0 RETURNING round_id"""),
+        {"ids": list(round_ids), "now": now},
+    )
+    queued = [str(row[0]) for row in rows]
+    for round_id in queued:
+        await connection.execute(text("SELECT pg_notify('round_changed',:id)"), {"id": round_id})
+    return len(queued)
+
+
+def _control(row: RowMapping) -> ControlEffect:
+    try:
+        payload = MicrophonePayload.model_validate_json(bytes(row["payload"]))
+        if payload.round_id != row["round_id"] or row["operation"] not in {
+            "mute",
+            "request_unmute",
+        }:
+            raise ValueError("Invalid microphone destination")
+    except (ValidationError, ValueError, TypeError) as error:
+        raise UnreadableRoundError from error
+    return ControlEffect(
+        id=int(row["id"]),
+        round_id=RoundId(payload.round_id),
+        operation=cast(MicrophoneOperation, row["operation"]),
+        target_id=ParticipantId(payload.target_id),
+        target_sid=SessionId(payload.target_sid),
+        epoch=payload.epoch,
+        created_at=cast(datetime, row["created_at"]),
+        attempts=int(row["attempts"]),
+        revision=int(row["revision"]),
+        dispatched_at=cast(datetime | None, row["mute_dispatched_at"]),
+        track_sid=cast(str | None, row["mute_track_sid"]),
+        confirmed_at=cast(datetime | None, row["mute_confirmed_at"]),
+    )
+
+
+class PostgresMediaOutbox:
+    """Enqueue on the caller's transaction; the adapter never owns or commits it."""
+
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def delete_room(self, round_id: RoundId, now: datetime) -> None:
+        if not await _rearm_deleted(self._connection, [round_id], now):
+            raise ValueError("Room deletion requires a terminal round receipt")
+
+    async def control_microphone(
+        self,
+        round_id: RoundId,
+        participant_id: ParticipantId,
+        target_sid: SessionId,
+        operation: MicrophoneOperation,
+        now: datetime,
+    ) -> None:
+        if operation not in {"mute", "request_unmute"}:
+            raise ValueError("Invalid microphone operation")
+        epoch = await self._connection.execute(text("SELECT epoch FROM system WHERE singleton"))
+        payload = (
+            MicrophonePayload(
+                round_id=round_id,
+                epoch=int(epoch.scalar_one()),
+                target_id=participant_id,
+                target_sid=target_sid,
+            )
+            .model_dump_json(by_alias=True)
+            .encode()
+        )
+        if len(payload) > MAX_CONTROL_BYTES:
+            raise ValueError("Microphone destination exceeds its byte limit")
+        await self._connection.execute(
+            text("""INSERT INTO media_outbox
+                (round_id, operation, payload, created_at, available_at)
+                VALUES (:round_id, :operation, :payload, :now, :now)"""),
+            {"round_id": round_id, "operation": operation, "payload": payload, "now": now},
+        )
+        await self._connection.execute(
+            text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
+        )
+
+    async def remove_participant(
+        self, round_id: RoundId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        await self._connection.execute(
+            text("""
+                INSERT INTO media_outbox
+                    (round_id, operation, participant_id, created_at, available_at)
+                VALUES (:round_id, 'remove_participant', :participant_id, :now, :now)
+                ON CONFLICT (round_id, participant_id) WHERE delivered_at IS NULL
+                DO UPDATE SET revision = media_outbox.revision + 1,
+                    available_at = EXCLUDED.available_at, attempts = 0
+            """),
+            {"round_id": round_id, "participant_id": participant_id, "now": now},
+        )
+        await self._connection.execute(
+            text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
+        )
+
+    async def publish_packet(
+        self, round_id: RoundId, topic: PacketTopic, payload: bytes, now: datetime
+    ) -> None:
+        if topic not in {"chat", "chat_deleted"} or not 0 < len(payload) <= 15 * 1024:
+            raise ValueError("Invalid server packet")
+        value = json.loads(payload.decode("utf-8"))
+        if (
+            not isinstance(value, dict)
+            or value.get("topic") != topic
+            or value.get("roundId") != round_id
+        ):
+            raise ValueError("Server packet does not match its destination")
+        await self._connection.execute(
+            text("""INSERT INTO media_outbox
+                (round_id, operation, topic, payload, created_at, available_at)
+                VALUES (:round_id, 'publish_packet', :topic, :payload, :now, :now)"""),
+            {"round_id": round_id, "topic": topic, "payload": payload, "now": now},
+        )
+        await self._connection.execute(
+            text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
+        )
 
 
 @runtime_checkable
@@ -38,8 +193,19 @@ class PostgresMediaStore:
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
 
-    async def started(self, round_id: RoundId, room_sid: str) -> None:
-        async with self._engine.begin() as connection:
+    async def started(self, round_id: RoundId, room_sid: str, now: datetime | None = None) -> bool:
+        async with command_transaction(self._engine) as connection:
+            # Share deletion's order before KEY SHARE: a late start must not hold
+            # an FK lock while waiting on an outbox row being purged by DELETE.
+            await acquire_round_lifecycle(connection, round_id)
+            # KEY SHARE conflicts only with deletion/id changes, not ordinary round
+            # writers. An SDK create has already finished, outside this transaction.
+            existing = await connection.scalar(
+                text("SELECT id FROM rounds WHERE id=:id FOR KEY SHARE"), {"id": round_id}
+            )
+            if existing is None:
+                await _rearm_deleted(connection, [round_id], now)
+                return False
             await connection.execute(
                 text("""
                     INSERT INTO media_rooms (round_id, room_sid)
@@ -51,6 +217,54 @@ class PostgresMediaStore:
                 """),
                 {"id": round_id, "sid": room_sid},
             )
+            # A successful join can confirm that an existing MediaRoom recovered too.
+            # Wake independently of SID changes, without resetting snapshot progress.
+            # The revision also fences late SDK acknowledgements/failures before this wake.
+            await connection.execute(
+                text("""UPDATE media_outbox SET revision = revision + 1,
+                        available_at = created_at, attempts = 0
+                    WHERE id = (SELECT min(id) FROM media_outbox
+                        WHERE round_id = :id AND operation = 'publish_packet'
+                            AND delivered_at IS NULL)
+                      AND EXISTS (SELECT 1 FROM media_rooms
+                          WHERE round_id = :id AND room_sid = :sid)"""),
+                {"id": round_id, "sid": room_sid},
+            )
+            await connection.execute(
+                text("""UPDATE media_outbox SET revision = revision + 1,
+                        available_at = created_at, attempts = 0
+                    WHERE id = (SELECT min(id) FROM media_outbox
+                        WHERE round_id = :id AND operation IN ('mute', 'request_unmute')
+                            AND delivered_at IS NULL)
+                      AND (operation = 'request_unmute' OR mute_confirmed_at IS NOT NULL)
+                      AND EXISTS (SELECT 1 FROM media_rooms
+                          WHERE round_id = :id AND room_sid = :sid)"""),
+                {"id": round_id, "sid": room_sid},
+            )
+            await connection.execute(
+                text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
+            )
+            return True
+
+    async def deleted_rounds(
+        self, after_round: RoundId | None, limit: int = 100
+    ) -> Sequence[RoundId]:
+        if not 1 <= limit <= 100:
+            raise ValueError("Invalid deletion page size")
+        async with self._engine.connect() as connection:
+            rows = await connection.execute(
+                text("""SELECT round_id FROM deleted_rounds
+                    WHERE CAST(:after AS text) IS NULL OR round_id>:after
+                    ORDER BY round_id LIMIT :limit"""),
+                {"after": after_round, "limit": limit},
+            )
+            return [RoundId(row[0]) for row in rows]
+
+    async def rearm_deleted(
+        self, round_ids: Sequence[RoundId], now: datetime | None = None
+    ) -> None:
+        async with self._engine.begin() as connection:
+            await _rearm_deleted(connection, round_ids, now)
 
     async def finished(self, round_id: RoundId, room_sid: str) -> None:
         async with self._engine.begin() as connection:
@@ -103,13 +317,200 @@ class PostgresMediaStore:
                 {"id": state.round_id, "sid": state.room_sid, "version": version, "at": at},
             )
 
+    async def pending_effects(self, now: datetime) -> Sequence[RemovalEffect]:
+        async with self._engine.connect() as connection:
+            rows = await connection.execute(
+                text("""
+                    SELECT id, round_id, participant_id, attempts, revision FROM media_outbox
+                    WHERE operation = 'remove_participant'
+                        AND delivered_at IS NULL AND available_at <= :now
+                    ORDER BY available_at, id LIMIT 100
+                """),
+                {"now": now},
+            )
+            return [
+                RemovalEffect(
+                    int(row["id"]),
+                    RoundId(row["round_id"]),
+                    ParticipantId(row["participant_id"]),
+                    int(row["attempts"]),
+                    int(row["revision"]),
+                )
+                for row in rows.mappings()
+            ]
+
+    async def next_removal(
+        self, now: datetime, after_round: RoundId | None
+    ) -> RemovalDeliveryEffect | None:
+        async with self._engine.connect() as connection:
+            for cursor in (after_round, None) if after_round is not None else (None,):
+                rows = await connection.execute(
+                    text("""SELECT id,round_id,operation,participant_id,attempts,revision
+                        FROM media_outbox
+                        WHERE operation IN ('remove_participant','delete_room')
+                            AND delivered_at IS NULL AND available_at<=:now
+                            AND (CAST(:after AS text) IS NULL OR round_id>:after)
+                            AND (operation!='delete_room' OR EXISTS
+                                (SELECT 1 FROM deleted_rounds
+                                    WHERE deleted_rounds.round_id=media_outbox.round_id))
+                        ORDER BY round_id,available_at,id LIMIT 1"""),
+                    {"now": now, "after": cursor},
+                )
+                row = rows.mappings().one_or_none()
+                if row is not None:
+                    if row["operation"] == "delete_room":
+                        return DeleteRoomEffect(
+                            int(row["id"]),
+                            RoundId(row["round_id"]),
+                            int(row["attempts"]),
+                            int(row["revision"]),
+                        )
+                    return RemovalEffect(
+                        int(row["id"]),
+                        RoundId(row["round_id"]),
+                        ParticipantId(row["participant_id"]),
+                        int(row["attempts"]),
+                        int(row["revision"]),
+                    )
+            return None
+
+    async def packet_heads(self, now: datetime) -> Sequence[PacketEffect]:
+        async with self._engine.connect() as connection:
+            rows = await connection.execute(
+                text("""SELECT * FROM (
+                    SELECT DISTINCT ON (round_id)
+                        id, round_id, topic, payload, attempts, revision, available_at
+                    FROM media_outbox
+                    WHERE operation = 'publish_packet' AND delivered_at IS NULL
+                    ORDER BY round_id, id
+                ) AS heads WHERE available_at <= :now ORDER BY round_id"""),
+                {"now": now},
+            )
+            return [
+                PacketEffect(
+                    int(row["id"]),
+                    RoundId(row["round_id"]),
+                    cast(PacketTopic, row["topic"]),
+                    bytes(row["payload"]),
+                    int(row["attempts"]),
+                    int(row["revision"]),
+                )
+                for row in rows.mappings()
+            ]
+
+    async def control_heads(self, now: datetime) -> Sequence[ControlEffect]:
+        while True:
+            async with self._engine.connect() as connection:
+                rows = await connection.execute(
+                    text("""SELECT DISTINCT ON (round_id) *,
+                        (SELECT epoch FROM system WHERE singleton) AS current_epoch
+                        FROM media_outbox
+                        WHERE operation IN ('mute', 'request_unmute') AND delivered_at IS NULL
+                        ORDER BY round_id, id"""),
+                )
+                heads = list(rows.mappings())
+            stale: list[ControlEffect] = []
+            eligible: list[ControlEffect] = []
+            for row in heads:
+                try:
+                    effect = _control(row)
+                except UnreadableRoundError:
+                    # Keep this round's damaged FIFO head pending for investigation.
+                    # No ack or successor skip; other rounds and delivery lanes proceed.
+                    log.error("microphone_control_unreadable")
+                    continue
+                if effect.epoch != int(row["current_epoch"]):
+                    stale.append(effect)
+                elif row["available_at"] <= now or effect.expires_at <= now:
+                    eligible.append(effect)
+            if not stale:
+                return eligible
+            for effect in stale:
+                await self.effect_delivered(effect, now)
+            # Retiring an old-epoch head must expose its successor in this same pass,
+            # including when that obsolete head had a retry scheduled far in the future.
+
+    async def control_dispatched(
+        self, effect: ControlEffect, track_sid: str, at: datetime
+    ) -> ControlEffect | None:
+        if not 1 <= len(track_sid) <= 128:
+            raise ValueError("Invalid microphone track SID")
+        async with self._engine.begin() as connection:
+            # Serialize the durable dispatch decision with epoch changes, not with SDK I/O.
+            epoch = await connection.execute(
+                text("SELECT epoch FROM system WHERE singleton FOR SHARE")
+            )
+            if int(epoch.scalar_one()) != effect.epoch:
+                return None
+            rows = await connection.execute(
+                text("""UPDATE media_outbox
+                    SET mute_dispatched_at = :at, mute_track_sid = :track_sid
+                    WHERE id = :id AND revision = :revision AND delivered_at IS NULL
+                        AND operation = 'mute' AND mute_dispatched_at IS NULL
+                        AND created_at > :expired
+                        AND (SELECT epoch FROM system WHERE singleton) = :epoch
+                    RETURNING *"""),
+                {
+                    "id": effect.id,
+                    "revision": effect.revision,
+                    "at": at,
+                    "track_sid": track_sid,
+                    "expired": at - CONTROL_LIFETIME,
+                    "epoch": effect.epoch,
+                },
+            )
+            row = rows.mappings().one_or_none()
+            return _control(row) if row is not None else None
+
+    async def control_confirmed(self, effect: ControlEffect, at: datetime) -> ControlEffect | None:
+        async with self._engine.begin() as connection:
+            rows = await connection.execute(
+                text("""UPDATE media_outbox SET mute_confirmed_at = :at
+                    WHERE id = :id AND revision = :revision AND delivered_at IS NULL
+                        AND operation = 'mute' AND mute_dispatched_at IS NOT NULL
+                        AND mute_track_sid = :track_sid AND mute_confirmed_at IS NULL
+                        AND (SELECT epoch FROM system WHERE singleton) = :epoch
+                    RETURNING *"""),
+                {
+                    "id": effect.id,
+                    "revision": effect.revision,
+                    "at": at,
+                    "track_sid": effect.track_sid,
+                    "epoch": effect.epoch,
+                },
+            )
+            row = rows.mappings().one_or_none()
+            return _control(row) if row is not None else None
+
+    async def effect_delivered(self, effect: MediaEffect, at: datetime) -> None:
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                # A newer connect can enqueue while the SDK removal is in flight. Its
+                # revision must survive the acknowledgement of the previous connection.
+                text("""UPDATE media_outbox SET delivered_at = :at
+                    WHERE id = :id AND revision = :revision AND delivered_at IS NULL"""),
+                {"id": effect.id, "revision": effect.revision, "at": at},
+            )
+
+    async def effect_failed(self, effect: MediaEffect, at: datetime) -> None:
+        # Keep pending effects indefinitely; the capped delay prevents a failing identity
+        # from monopolizing every tick while healthy rounds continue to be delivered.
+        retry_at = at + timedelta(seconds=min(2 ** min(effect.attempts, 6), 60))
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                text("""UPDATE media_outbox SET attempts = attempts + 1, available_at = :retry_at
+                    WHERE id = :id AND revision = :revision AND delivered_at IS NULL"""),
+                {"id": effect.id, "revision": effect.revision, "retry_at": retry_at},
+            )
+
     async def maintain(self, now: datetime) -> None:
         # Every current limit window is at most an hour; a day never removes a live window.
         before = now - timedelta(days=1)
         async with self._engine.begin() as connection:
             for statement in (
-                "DELETE FROM command_keys WHERE created_at < :before",
+                "DELETE FROM command_keys WHERE NOT retained AND created_at < :before",
                 "DELETE FROM rate_limits WHERE window_start < :before",
+                "DELETE FROM media_outbox WHERE delivered_at < :before",
             ):
                 await connection.execute(text(statement), {"before": before})
 
@@ -122,9 +523,12 @@ class PostgresWakeup:
     def notified(self, _: ListenerConnection, _pid: int, _channel: str, _payload: str) -> None:
         self._changed.set()
 
-    async def assert_alive(self) -> None:
+    def _assert_open(self) -> None:
         if self._connection.is_closed():
             raise ConnectionError("publisher connection closed")
+
+    async def assert_alive(self) -> None:
+        self._assert_open()
         try:
             async with asyncio.timeout(1):
                 await self._connection.execute("SELECT 1")
@@ -132,11 +536,13 @@ class PostgresWakeup:
             raise ConnectionError("publisher connection lost") from error
 
     async def wait(self) -> None:
-        await self.assert_alive()
+        # The coordinator also wakes on SDK completion and alone owns lease SQL.
+        # This notification wait may therefore run beside SDK tasks, without queries.
+        self._assert_open()
         with suppress(TimeoutError):
             await asyncio.wait_for(self._changed.wait(), 1)
         self._changed.clear()
-        await self.assert_alive()
+        self._assert_open()
 
 
 class PostgresPublisherLease:
