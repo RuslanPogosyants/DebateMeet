@@ -228,7 +228,7 @@ describe('responsive meeting navigation', () => {
     )
     const { api } = await meeting(value)
     const commands = vi.spyOn(api, 'command')
-    const queue = screen.getByRole('button', { name: 'Очередь рук (9)' })
+    const queue = screen.getByRole('button', { name: 'Очередь рук: 9' })
     expect(screen.queryByRole('region', { name: 'Очередь рук' })).not.toBeInTheDocument()
     await userEvent.click(queue)
     const queueRoster = screen.getByRole('dialog', { name: 'Очередь рук' })

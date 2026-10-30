@@ -37,7 +37,7 @@ export async function blockDevLiveKitUdp(): Promise<UdpBlock> {
     labels['com.docker.compose.project'] !== 'debatemeet' ||
     !('com.docker.compose.service' in labels) ||
     labels['com.docker.compose.service'] !== 'livekit' ||
-    image !== 'livekit/livekit-server:v1.13.7' ||
+    image !== 'livekit/livekit-server:v1.13.10' ||
     !Array.isArray(mounts) ||
     !mounts.some(
       (mount: unknown) =>

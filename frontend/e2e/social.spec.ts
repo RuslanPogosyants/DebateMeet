@@ -51,7 +51,7 @@ test('hands travel with their room and only an explicit owner action unmutes a j
     await source.getByRole('button', { name: 'Микрофон выключен', exact: true }).click()
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
     await source.getByRole('button', { name: 'Поднять руку', exact: true }).click()
-    await expect(page.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук (1)')
+    await expect(page.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 1')
     await page.getByTestId('hand-queue').click()
     let queueDialog = page.getByRole('dialog', { name: 'Очередь рук', exact: true })
     await expect(queueDialog).toContainText('Спикер')
@@ -60,12 +60,12 @@ test('hands travel with their room and only an explicit owner action unmutes a j
     if (!before) throw new Error('The source participant is unavailable')
     await enter(source, 'OG')
     await enter(listener, 'OG')
-    await expect(listener.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук (1)')
+    await expect(listener.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 1')
     await listener.getByTestId('hand-queue').click()
     queueDialog = listener.getByRole('dialog', { name: 'Очередь рук', exact: true })
     await expect(queueDialog).toContainText('Спикер')
     await queueDialog.getByRole('button', { name: 'Закрыть', exact: true }).click()
-    await expect(page.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук (0)')
+    await expect(page.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 0')
     await expect(page.getByTestId('hand-queue')).toBeEnabled()
     expect(
       (await snapshot(source)).participants.find((person) => person.id === before.id)?.handRaisedAt,
@@ -79,7 +79,7 @@ test('hands travel with their room and only an explicit owner action unmutes a j
     await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await source.getByRole('button', { name: 'Поднять руку', exact: true }).click()
     await listener.getByRole('button', { name: 'Поднять руку', exact: true }).click()
-    await expect(listener.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук (2)')
+    await expect(listener.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 2')
     await listener.getByTestId('hand-queue').click()
     queueDialog = listener.getByRole('dialog', { name: 'Очередь рук', exact: true })
     const queue = queueDialog.locator('li')
@@ -342,7 +342,8 @@ test('personal volume changes real output and survives publications and reconnec
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeLessThan(0.001)
     await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await startOutputRecording(page, [440, 660])
-    await command(page, 'timers/speech/set', { remainingMs: 2500 })
+    // Cross the start of the final protected minute; reaching zero has no cue.
+    await command(page, 'timers/speech/set', { remainingMs: 62500 })
     await command(page, 'timers/speech/start')
     await expect
       .poll(

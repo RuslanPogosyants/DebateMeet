@@ -104,9 +104,18 @@ test('one editable countdown persists across reload and logical rooms', async ({
     await page.getByRole('button', { name: 'Пауза таймера', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Запустить таймер', exact: true })).toBeEnabled()
     await expect(other.getByRole('timer', { name: 'Таймер', exact: true })).toHaveText(/6:1[23]/u)
+    const originalId = (await snapshot(page)).participants.find(
+      (person) => person.name === 'Судья',
+    )?.id
+    expect(originalId).toBeDefined()
     await page.reload()
     await join(page, 'Судья')
-    expect((await snapshot(page)).timers.prep.status).toBe('paused')
+    const restored = await snapshot(page)
+    expect(restored.participants.find((person) => person.name === 'Судья')?.id).toBe(originalId)
+    expect(restored.timers.prep.status).toBe('paused')
+    // A disconnect releases the flag; identity restoration does not reclaim it automatically.
+    if (restored.judgeFlag.holder === null) await claimJudge(page)
+    expect((await snapshot(page)).judgeFlag.holder).toBe(originalId)
     await page.getByRole('button', { name: 'Сбросить таймер', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Сбросить таймер?', exact: true })).toHaveCount(0)
     await expect(other.getByRole('timer', { name: 'Таймер', exact: true })).toHaveText('7:00')
