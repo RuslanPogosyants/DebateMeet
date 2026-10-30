@@ -140,8 +140,8 @@ jobs:
           persist-credentials: false
       # compose.yaml rather than a service container: services start before the checkout and
       # cannot see deploy/dev/livekit.yaml (docs/architecture.md, section 9).
-      - name: Start LiveKit
-        run: docker compose up -d livekit
+      - name: Start Postgres and LiveKit
+        run: docker compose up -d --wait postgres livekit
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 0.11.25
@@ -152,9 +152,9 @@ jobs:
       # The tests serve the webhook endpoint on port 8000, where LiveKit sends its webhooks.
       - name: pytest (LiveKit)
         run: uv run --no-sync pytest -m livekit
-      - name: LiveKit logs
+      - name: Media services logs
         if: failure()
-        run: docker compose logs livekit
+        run: docker compose logs postgres livekit
 
   frontend:
     name: Frontend
