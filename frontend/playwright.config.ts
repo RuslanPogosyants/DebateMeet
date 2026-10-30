@@ -48,8 +48,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
     launchOptions: {
       args: [
-        // Keep Web Audio measurable without playing synthetic tones on the host.
-        '--disable-audio-output',
+        // Playwright already mutes the host output; keep its Web Audio clock active.
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
         `--use-file-for-fake-audio-capture=${tone}`,
