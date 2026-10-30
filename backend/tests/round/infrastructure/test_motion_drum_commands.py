@@ -1,7 +1,7 @@
 """Position draws and chat share one transaction without blocking unrelated round commands."""
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from uuid import uuid4
 
@@ -12,6 +12,7 @@ from debatemeet.media.infrastructure.postgres import PostgresMediaOutbox
 from debatemeet.round.application.ports import ArchivedParticipant, RoundId
 from debatemeet.round.application.room_commands import (
     ClaimJudge,
+    ConfigureDrum,
     Draw,
     ExecuteRoundCommand,
     StartTimer,
@@ -24,6 +25,7 @@ from debatemeet.round.chat.infrastructure.transactions import (
     PostgresMessageRepository,
     PostgresSystemMessages,
 )
+from debatemeet.round.domain.position import SPEAKER_POSITIONS
 from debatemeet.round.domain.timer import TimerKind, TimerStatus
 from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
 from debatemeet.shared.infrastructure.lifecycle import ROUND_LIFECYCLE_NAMESPACE
@@ -173,3 +175,48 @@ async def test_draw_waits_for_chat_guard_before_round_lock_while_timer_progresse
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_eight_speaker_draws_and_system_messages_commit_once_per_key(world: World) -> None:
+    round_id = await world.create(IP)
+    credentials = credentials_of(await connected_person(world, round_id, "Judge"))
+    await world.command(round_id, credentials, str(uuid4()), ClaimJudge())
+    configure_key = str(uuid4())
+    configured = await world.command(
+        round_id,
+        credentials,
+        configure_key,
+        ConfigureDrum(tuple(reversed(SPEAKER_POSITIONS)), True),
+    )
+    repeated = await world.command(
+        round_id, credentials, configure_key, ConfigureDrum(SPEAKER_POSITIONS, True)
+    )
+    assert repeated.round.version == configured.round.version
+    assert configured.round.drum.enabled == SPEAKER_POSITIONS
+    drawn = []
+    for _ in SPEAKER_POSITIONS:
+        world.clock.moment += timedelta(seconds=1)
+        key = str(uuid4())
+        result = await world.command(round_id, credentials, key, Draw())
+        repeated = await world.command(round_id, credentials, key, Draw())
+        assert repeated.round.drum == result.round.drum
+        assert result.round.drum.last is not None
+        drawn.append(result.round.drum.last.position)
+    assert set(drawn) == set(SPEAKER_POSITIONS)
+    assert len(drawn) == 8
+    restored = await world.admin.show(round_id)
+    assert restored.round.drum == result.round.drum
+    assert await world.number("SELECT count(*) FROM messages WHERE kind='system'") == 8
+    assert (
+        await world.number("SELECT count(*) FROM media_outbox WHERE operation='publish_packet'")
+        == 8
+    )
+    async with world.engine.connect() as connection:
+        messages: list[str] = list(
+            (
+                await connection.execute(
+                    text("SELECT text FROM messages WHERE kind='system' ORDER BY id")
+                )
+            ).scalars()
+        )
+    assert messages == [f"жребий: {position.value.upper()}" for position in drawn]

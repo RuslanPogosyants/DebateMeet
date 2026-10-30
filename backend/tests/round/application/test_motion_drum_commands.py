@@ -14,7 +14,7 @@ from debatemeet.round.application.room_commands import (
 from debatemeet.round.domain.events import PositionDrawn
 from debatemeet.round.domain.ids import RoundId, SessionId
 from debatemeet.round.domain.motion import Motion
-from debatemeet.round.domain.position import Position
+from debatemeet.round.domain.position import TEAM_POSITIONS, Position
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Round
 from debatemeet.shared.application.errors import RequestConflictError
@@ -137,7 +137,7 @@ async def test_noops_do_not_change_version_and_normal_commands_do_not_acquire_ch
     commands: tuple[RoundCommand, ...] = (
         SetMotion(" \r\n", "\t"),
         ResetDrum(),
-        ConfigureDrum(tuple(Position), True),
+        ConfigureDrum(TEAM_POSITIONS, True),
     )
     for key, command in enumerate(commands):
         result = await world.execute(round_id, credentials, str(key), command)

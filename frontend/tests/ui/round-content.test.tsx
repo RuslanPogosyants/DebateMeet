@@ -38,20 +38,53 @@ const message: Message = {
 }
 
 describe('shared motion and judge drawing', () => {
-  it('renders motion and independent infoslide as plain text and restores focus after closing', async () => {
+  it('opens motion and infoslide together as plain text and restores focus after closing', async () => {
     const { controller, value } = await setup(false)
     value.motion = { text: '<script>Motion</script>', infoslide: 'Only a slide' }
     act(() => controller.store.setState({ snapshot: value }))
     const { container } = render(<MotionDisplay controller={controller} editable />)
-    expect(screen.getByTestId('motion-text')).toHaveTextContent('«<script>Motion</script>»')
+    expect(screen.getByTestId('motion-text')).toHaveTextContent(
+      'Резолюция: <script>Motion</script>',
+    )
     expect(container.querySelector('script')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Изменить резолюцию' })).not.toBeInTheDocument()
-    const open = screen.getByRole('button', { name: 'Инфослайд' })
+    expect(screen.queryByRole('button', { name: 'Инфослайд' })).not.toBeInTheDocument()
+    const open = screen.getByRole('button', { name: 'Полностью' })
     await userEvent.click(open)
-    const dialog = screen.getByRole('dialog', { name: 'Инфослайд' })
+    const dialog = screen.getByRole('dialog', { name: 'Резолюция' })
+    expect(within(dialog).getByText('<script>Motion</script>')).toBeVisible()
+    expect(within(dialog).getByRole('heading', { name: 'Инфослайд' })).toBeVisible()
     expect(within(dialog).getByText('Only a slide')).toBeVisible()
+    expect(dialog.querySelector('script')).toBeNull()
     fireEvent(dialog, new Event('cancel', { cancelable: true }))
     expect(open).toHaveFocus()
+  })
+
+  it.each([
+    ['A motion', ''],
+    ['', 'Slide without a motion'],
+  ])('handles motion %s and infoslide %s through one entry point', async (text, infoslide) => {
+    const { controller, value } = await setup(false)
+    value.motion = { text, infoslide }
+    act(() => controller.store.setState({ snapshot: value }))
+    render(<MotionDisplay controller={controller} editable={false} />)
+    expect(screen.queryByRole('button', { name: 'Инфослайд' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Полностью' }))
+    const dialog = screen.getByRole('dialog', { name: 'Резолюция' })
+    expect(within(dialog).getByText(text || 'Резолюция не задана')).toBeVisible()
+    expect(within(dialog).queryAllByRole('heading', { name: 'Инфослайд' })).toHaveLength(
+      infoslide ? 1 : 0,
+    )
+    expect(
+      Array.from(dialog.querySelectorAll('.plain-text'), (paragraph) => paragraph.textContent),
+    ).toEqual([text || 'Резолюция не задана', ...(infoslide ? [infoslide] : [])])
+  })
+
+  it('does not open an empty motion and infoslide', async () => {
+    const { controller } = await setup(false)
+    render(<MotionDisplay controller={controller} editable={false} />)
+    expect(screen.queryByRole('button', { name: 'Полностью' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Инфослайд' })).not.toBeInTheDocument()
   })
 
   it('validates UTF-8 limits and saves both normalized fields through the existing command', async () => {
@@ -98,6 +131,85 @@ describe('shared motion and judge drawing', () => {
     expect(controller.store.getState().snapshot?.drum.drawn).toEqual([
       { position: 'og', drawNo: 2 },
     ])
+  })
+
+  it('switches to eight speaker slots with one click and saves only the selected preset', async () => {
+    const { controller, api } = await setup()
+    render(<DrumPanel controller={controller} />)
+    await userEvent.click(screen.getByText('Меню жребия'))
+    await userEvent.click(screen.getByRole('button', { name: 'Настроить жребий' }))
+    const dialog = screen.getByRole('dialog', { name: 'Настроить жребий' })
+    expect(within(dialog).getByRole('button', { name: '4 команды' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: '8 спикеров' }))
+    expect(within(dialog).getByText('Включено 8 из 8')).toBeVisible()
+    expect(within(dialog).getAllByRole('checkbox')).toHaveLength(9)
+    for (const position of ['OG1', 'OG2', 'OO1', 'OO2', 'CG1', 'CG2', 'CO1', 'CO2']) {
+      expect(within(dialog).getByRole('checkbox', { name: position })).toBeChecked()
+    }
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'OG2' }))
+    expect(within(dialog).getByText('Включено 7 из 8')).toBeVisible()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+    expect(api.commands.map((command) => command.intent)).toEqual([
+      {
+        type: 'drum/configure',
+        enabled: ['og1', 'oo1', 'oo2', 'cg1', 'cg2', 'co1', 'co2'],
+        removeDrawn: true,
+      },
+    ])
+  })
+
+  it('restores the speaker preset from shared state and leaves history intact on cancellation', async () => {
+    const { controller, api, value } = await setup()
+    value.drum = {
+      enabled: ['og1', 'co2'],
+      drawn: [{ position: 'og1', drawNo: 4 }],
+      removeDrawn: true,
+      last: { position: 'og1', drawNo: 4, at: 1000 },
+      drawCount: 4,
+    }
+    act(() => controller.store.setState({ snapshot: value }))
+    render(<DrumPanel controller={controller} />)
+    expect(screen.getByText('выпала №4')).toBeVisible()
+    expect(screen.getAllByText('выкл.')).toHaveLength(6)
+    await userEvent.click(screen.getByText('Меню жребия'))
+    await userEvent.click(screen.getByRole('button', { name: 'Настроить жребий' }))
+    const dialog = screen.getByRole('dialog', { name: 'Настроить жребий' })
+    expect(within(dialog).getByRole('button', { name: '8 спикеров' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(within(dialog).getByText('Включено 2 из 8')).toBeVisible()
+    await userEvent.click(within(dialog).getByRole('button', { name: '4 команды' }))
+    expect(within(dialog).getByText('Включено 4 из 4')).toBeVisible()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Отмена' }))
+    expect(api.commands).toHaveLength(0)
+    expect(controller.store.getState().snapshot?.drum).toEqual(value.drum)
+  })
+
+  it('retries an uncertain speaker preset with the same command and waits for server state', async () => {
+    const { controller, api, value } = await setup()
+    const enabled = ['og1', 'og2', 'oo1', 'oo2', 'cg1', 'cg2', 'co1', 'co2'] as const
+    const accepted = { ...value, version: 2, drum: { ...value.drum, enabled: [...enabled] } }
+    const command = vi
+      .spyOn(api, 'command')
+      .mockRejectedValueOnce(new ClientError('network'))
+      .mockResolvedValueOnce(accepted)
+    render(<DrumPanel controller={controller} />)
+    await userEvent.click(screen.getByText('Меню жребия'))
+    await userEvent.click(screen.getByRole('button', { name: 'Настроить жребий' }))
+    await userEvent.click(screen.getByRole('button', { name: '8 спикеров' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    expect(controller.store.getState().commandUncertain).toBe(true)
+    expect(controller.store.getState().snapshot?.drum.enabled).toEqual(['og', 'oo', 'cg', 'co'])
+    expect(screen.getByRole('button', { name: 'Тянуть' })).toBeDisabled()
+    await act(() => controller.retryCommand())
+    expect(command.mock.calls[1]?.[2]).toEqual(command.mock.calls[0]?.[2])
+    expect(command.mock.calls[1]?.[3]).toBe(command.mock.calls[0]?.[3])
+    expect(controller.store.getState().snapshot?.drum.enabled).toEqual(enabled)
+    expect(screen.getAllByText('в барабане')).toHaveLength(8)
   })
 
   it('confirms reset safely and does not reset on Escape', async () => {

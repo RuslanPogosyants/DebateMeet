@@ -6,7 +6,20 @@ export type Participant = Snapshot['participants'][number]
 const rooms = new Set(['base', 'og', 'oo', 'cg', 'co', 'judges'])
 const statuses = new Set(['pending', 'connected', 'disconnected'])
 const reasons = new Set(['by_holder', 'holder_disconnected', 'admin'])
-const positions = new Set(['og', 'oo', 'cg', 'co'])
+const positions = new Set([
+  'og',
+  'oo',
+  'cg',
+  'co',
+  'og1',
+  'og2',
+  'oo1',
+  'oo2',
+  'cg1',
+  'cg2',
+  'co1',
+  'co2',
+])
 // Python str.strip() whitespace after forbidden C0/C1 controls have been rejected.
 // JavaScript trim() also strips U+FEFF, which is valid and preserved by the server.
 const untrimmedText =
@@ -139,7 +152,7 @@ function motionAndDrum(value: Record<string, unknown>): boolean {
     !drum.enabled.every(position) ||
     new Set(drum.enabled).size !== drum.enabled.length ||
     !Array.isArray(drum.drawn) ||
-    drum.drawn.length > 4 ||
+    drum.drawn.length > positions.size ||
     typeof drum.removeDrawn !== 'boolean' ||
     !integer(drum.drawCount)
   )

@@ -47,14 +47,14 @@ export class BrowserPreferences implements Preferences {
     const raw = this.get(`debatemeet.volume.${roundId}.${participantId}`)
     if (raw === null || raw.trim() === '') return 1
     const value = Number(raw)
-    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1
+    return Number.isFinite(value) ? Math.max(0, Math.min(2, value)) : 1
   }
 
   setVolume(roundId: string, participantId: string, value: number): void {
     if (Number.isFinite(value))
       this.set(
         `debatemeet.volume.${roundId}.${participantId}`,
-        String(Math.max(0, Math.min(1, value))),
+        String(Math.max(0, Math.min(2, value))),
       )
   }
 

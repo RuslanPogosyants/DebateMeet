@@ -22,6 +22,7 @@ import {
   type RoundCommand,
   type SessionOwnership,
   type LogicalRoom,
+  type VideoSource,
 } from './ports'
 
 export type RoundState = {
@@ -42,9 +43,10 @@ export type RoundState = {
   motionChanged: boolean
   cameraIntent: boolean | null
   microphoneIntent: boolean | null
+  screenIntent: boolean | null
 }
 
-type ToggleKind = 'camera' | 'microphone'
+type ToggleKind = 'camera' | 'microphone' | 'screen'
 type ToggleOperation = {
   revision: number
   enabled: boolean
@@ -80,6 +82,7 @@ export class RoundController {
     motionChanged: false,
     cameraIntent: null,
     microphoneIntent: null,
+    screenIntent: null,
   }))
   private session: MediaSession | null = null
   private readonly ownership: SessionOwnership
@@ -95,6 +98,7 @@ export class RoundController {
   private readonly toggles: Record<ToggleKind, ToggleState> = {
     camera: { revision: 0, pending: new Set(), latest: null },
     microphone: { revision: 0, pending: new Set(), latest: null },
+    screen: { revision: 0, pending: new Set(), latest: null },
   }
   private toggleErrorRevision = 0
   private timer: ReturnType<typeof setInterval> | null = null
@@ -112,7 +116,12 @@ export class RoundController {
   private pendingIntent: { intent: RoundCommand; key: string } | null = null
   private readonly videos = new Map<
     string,
-    { element: HTMLVideoElement; detach: (() => void) | undefined }
+    {
+      identity: string
+      source: VideoSource
+      element: HTMLVideoElement
+      detach: (() => void) | undefined
+    }
   >()
 
   readonly roundId: string
@@ -360,6 +369,9 @@ export class RoundController {
     this.stopAlone()
     this.subscriptions.cancel()
     this.pendingIntent = null
+    // A displaced tab must stop capture without sending leave for the new owner.
+    const session = this.session
+    void session?.disconnect().catch(() => {})
     this.session = null
     this.detachVideos()
     this.store.setState({
@@ -400,9 +412,9 @@ export class RoundController {
         session.volume(person.id, this.social.volume(person.id))
       await session.apply(this.subscriptions.latest ?? joined.snapshot, joined.participantId)
       // A tile can survive a full media reconnect without mounting again.
-      for (const [identity, video] of this.videos) {
+      for (const video of this.videos.values()) {
         video.detach?.()
-        video.detach = session.attachVideo(identity, video.element)
+        video.detach = session.attachVideo(video.identity, video.element, video.source)
       }
       let connected = false
       try {
@@ -713,12 +725,13 @@ export class RoundController {
       toggle.pending.clear()
       toggle.latest = null
     }
-    this.store.setState({ cameraIntent: null, microphoneIntent: null })
+    this.store.setState({ cameraIntent: null, microphoneIntent: null, screenIntent: null })
     return ++this.generation
   }
   private setToggleIntent(kind: ToggleKind, value: boolean | null): void {
     if (kind === 'camera') this.store.setState({ cameraIntent: value })
-    else this.store.setState({ microphoneIntent: value })
+    else if (kind === 'microphone') this.store.setState({ microphoneIntent: value })
+    else this.store.setState({ screenIntent: value })
   }
   private async toggle(kind: ToggleKind, enabled: boolean): Promise<void> {
     const generation = this.generation
@@ -740,7 +753,8 @@ export class RoundController {
     if (kind === 'camera' && !enabled) this.camera = false
     try {
       if (kind === 'camera') await session.camera(enabled)
-      else await session.microphone(enabled)
+      else if (kind === 'microphone') await session.microphone(enabled)
+      else await session.screen(enabled)
     } catch (deviceError) {
       operation.error = deviceError ?? new ClientError('media_unavailable')
     }
@@ -795,8 +809,18 @@ export class RoundController {
     this.session?.volume(identity, this.social.volume(identity))
   }
 
+  toggleParticipantAudio(identity: string): void {
+    this.social.toggleMuted(identity)
+    this.session?.volume(identity, this.social.volume(identity))
+  }
+
   cameraEnabled(enabled: boolean): Promise<void> {
     return this.toggle('camera', enabled)
+  }
+
+  screenEnabled(enabled: boolean): Promise<void> {
+    if (enabled && this.store.getState().stage !== 'connected') return Promise.resolve()
+    return this.toggle('screen', enabled)
   }
 
   async startAudio(): Promise<void> {
@@ -859,14 +883,24 @@ export class RoundController {
       )
   }
 
-  attachVideo(identity: string, element: HTMLVideoElement): () => void {
-    this.videos.get(identity)?.detach?.()
-    const video = { element, detach: this.session?.attachVideo(identity, element) }
-    this.videos.set(identity, video)
+  attachVideo(
+    identity: string,
+    element: HTMLVideoElement,
+    source: VideoSource = 'camera',
+  ): () => void {
+    const key = `${source}:${identity}`
+    this.videos.get(key)?.detach?.()
+    const video = {
+      identity,
+      source,
+      element,
+      detach: this.session?.attachVideo(identity, element, source),
+    }
+    this.videos.set(key, video)
     return () => {
-      if (this.videos.get(identity) !== video) return
+      if (this.videos.get(key) !== video) return
       video.detach?.()
-      this.videos.delete(identity)
+      this.videos.delete(key)
     }
   }
 

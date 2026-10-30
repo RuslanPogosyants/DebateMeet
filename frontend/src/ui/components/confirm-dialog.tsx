@@ -37,6 +37,7 @@ export function ConfirmDialog({
       aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault()
+        event.stopPropagation()
         onCancel()
       }}
     >

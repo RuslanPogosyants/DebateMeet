@@ -91,9 +91,11 @@ export type MediaPerson = {
   id: string
   microphone: boolean
   camera: boolean
+  screen?: boolean
   speaking: boolean
   quality?: import('@/domain/diagnostics').MediaRecord['quality']
 }
+export type VideoSource = 'camera' | 'screen'
 export type DeviceKind = 'audioinput' | 'videoinput' | 'audiooutput'
 export type DeviceSelection = { cameraId?: string; microphoneId?: string; outputId?: string }
 export type MediaDeviceState = {
@@ -131,9 +133,10 @@ export interface MediaSession {
   apply(snapshot: Snapshot, self: string): Promise<void>
   microphone(enabled: boolean): Promise<void>
   camera(enabled: boolean): Promise<void>
+  screen(enabled: boolean): Promise<void>
   startAudio(): Promise<void>
   volume(identity: string, value: number): void
-  attachVideo(identity: string, element: HTMLVideoElement): () => void
+  attachVideo(identity: string, element: HTMLVideoElement, source?: VideoSource): () => void
   readDevices(): Promise<MediaDeviceState>
   selectDevice(kind: DeviceKind, id: string): Promise<MediaDeviceState>
   subscribedVideoIds(): readonly string[]

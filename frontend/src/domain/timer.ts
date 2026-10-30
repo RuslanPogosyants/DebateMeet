@@ -24,8 +24,8 @@ export function speechState(timer: TimerView, serverNow: number): SpeechState {
 }
 
 export function speechMilestones(durationMs: number): number[] {
-  return [...new Set([60000, durationMs - 60000, durationMs, durationMs + GRACE_MS])]
-    .filter((value) => value > 0)
+  return [...new Set([60000, durationMs - 60000])]
+    .filter((value) => value > 0 && value < durationMs)
     .toSorted((left, right) => left - right)
 }
 
@@ -33,13 +33,13 @@ export function futureSpeechCues(
   snapshot: Snapshot,
   serverNow: number,
 ): { id: string; delayMs: number }[] {
-  const speech = snapshot.timers.speech
-  if (speech.status !== 'running' || speech.endsAt === null) return []
-  const startedAt = speech.endsAt - speech.durationMs
-  return speechMilestones(speech.durationMs)
-    .map((milestone) => ({
-      id: `${snapshot.epoch}:${snapshot.speechNo}:${speech.durationMs}:${speech.endsAt}:${milestone}`,
-      delayMs: startedAt + milestone - serverNow,
+  const timer = snapshot.timers.speech
+  if (timer.status !== 'running' || timer.endsAt === null) return []
+  const startedAt = timer.endsAt - timer.durationMs
+  return speechMilestones(timer.durationMs)
+    .map((mark) => ({
+      id: `${snapshot.epoch}:speech:${timer.durationMs}:${timer.endsAt}:${mark}`,
+      delayMs: startedAt + mark - serverNow,
     }))
     .filter((cue) => cue.delayMs > 0)
 }

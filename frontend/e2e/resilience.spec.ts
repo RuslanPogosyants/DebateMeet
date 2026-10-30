@@ -8,7 +8,7 @@ import {
   startOutputRecording,
   stopOutputRecording,
 } from './media'
-import { claimJudge, createRound, join, sendServerPacket, snapshot } from './round'
+import { claimJudge, command, createRound, join, sendServerPacket, snapshot } from './round'
 
 async function accessible(page: Page, info: TestInfo, label: string) {
   const result = await new AxeBuilder({ page }).analyze()
@@ -140,12 +140,10 @@ test('failed telemetry leaves audio and timer cues alive while safe reports pers
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
     await expect.poll(() => rejected, { timeout: 40000 }).toBeGreaterThan(0)
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
-    await page.getByRole('button', { name: 'Выставить время речи', exact: true }).click()
-    const timer = page.getByRole('dialog', { name: 'Выставить время речи', exact: true })
-    await timer.getByLabel('Прошедшее время, мм:сс').fill('0:58')
-    await timer.getByRole('button', { name: 'Выставить', exact: true }).click()
+    await command(page, 'timers/speech/set', { remainingMs: 362000 })
+    await page.getByRole('button', { name: 'Речь', exact: true }).click()
     await startOutputRecording(page, [440, 660])
-    await page.getByRole('button', { name: 'Запустить речь', exact: true }).click()
+    await page.getByRole('button', { name: 'Запустить таймер', exact: true }).click()
     await expect
       .poll(
         async () =>
@@ -168,6 +166,7 @@ test('failed telemetry leaves audio and timer cues alive while safe reports pers
         ),
       sentinel,
     )
+    await page.getByRole('button', { name: 'Ещё', exact: true }).click()
     await page.getByRole('button', { name: 'Сообщить о проблеме', exact: true }).click()
     const report = page.getByRole('dialog', { name: 'Сообщить о проблеме', exact: true })
     const accepted = page.waitForResponse(

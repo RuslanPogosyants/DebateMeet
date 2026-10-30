@@ -552,3 +552,36 @@ describe('installed ESM participant capture lifecycle', () => {
     },
   )
 })
+
+it('captures the screen without audio while retaining a separately published webcam', async () => {
+  const fixture = setup()
+  await fixture.toggle('video', true)
+  const camera = fixture.participant.getTrackPublication(Track.Source.Camera)?.track
+  if (camera === undefined) throw new Error('Missing published camera')
+  const display = barrier<MediaStream>()
+  const getDisplayMedia = vi.fn<(options: DisplayMediaStreamOptions) => Promise<MediaStream>>(
+    () => display.promise,
+  )
+  Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
+    configurable: true,
+    value: getDisplayMedia,
+  })
+  const capturing = fixture.participant.createScreenTracks({ audio: false })
+  expect(getDisplayMedia).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ audio: false }))
+  const screen = raw('video')
+  tracks.add(screen)
+  display.release(new MediaStream([screen]))
+  const captured = await capturing
+  expect(captured).toHaveLength(1)
+  const track = captured[0]
+  if (track === undefined) throw new Error('Missing captured screen')
+  expect(track.source).toBe(Track.Source.ScreenShare)
+  await fixture.participant.publishTrack(track)
+  expect(fixture.participant.isCameraEnabled).toBe(true)
+  expect(fixture.participant.isScreenShareEnabled).toBe(true)
+  expect(fixture.participant.getTrackPublication(Track.Source.Camera)?.track).toBe(camera)
+  screen.dispatchEvent(new Event('ended'))
+  await vi.waitFor(() => expect(fixture.participant.isScreenShareEnabled).toBe(false))
+  expect(camera.mediaStreamTrack.readyState).toBe('live')
+  expect(fixture.participant.isCameraEnabled).toBe(true)
+})

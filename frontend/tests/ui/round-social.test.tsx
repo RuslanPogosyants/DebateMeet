@@ -11,6 +11,7 @@ import {
   ParticipantActions,
   ReactionControls,
   ReactionDisplay,
+  ReactionPreference,
   SocialNotices,
   SoundControls,
 } from '@/ui/components/round-social'
@@ -103,7 +104,11 @@ describe('hands in the scene and room roster', () => {
         participant(`p${String(index).padStart(11, '0')}`, 'base', 1000 + index),
       ),
     )
-    value.participants.push(participant(BOB, 'og', 1))
+    value.participants.push(
+      participant(BOB, 'og', 1),
+      participant('e'.repeat(12), 'og', 2),
+      participant('f'.repeat(12), 'og', 3),
+    )
     value.participants.push({
       ...participant('d'.repeat(12), 'base', 0),
       presence: { status: 'disconnected', since: 1000 },
@@ -121,25 +126,136 @@ describe('hands in the scene and room roster', () => {
     expect(within(queue).queryByText('Борис')).not.toBeInTheDocument()
     expect(within(queue).queryByText('d'.repeat(12))).not.toBeInTheDocument()
     const map = screen.getByRole('complementary', { name: 'Комнаты' })
+    const og = within(map).getByRole('region', { name: 'OG' })
+    expect(within(og).queryByTestId('hand-badge')).not.toBeInTheDocument()
+    await userEvent.click(within(og).getByRole('button', { name: 'Все 3' }))
+    const ogRoster = screen.getByRole('dialog', { name: 'OG · участники' })
     expect(
-      within(within(map).getByRole('region', { name: 'OG' })).getByLabelText('Рука — 1'),
-    ).toBeVisible()
+      within(ogRoster)
+        .getAllByTestId('hand-badge')
+        .map((badge) => badge.getAttribute('aria-label')),
+    ).toEqual(['Рука — 1', 'Рука — 2', 'Рука — 3'])
+    expect(within(ogRoster).getByText('Борис')).toBeVisible()
+    await userEvent.click(within(ogRoster).getByRole('button', { name: 'Закрыть' }))
+    const base = within(map).getByRole('region', { name: 'База' })
+    expect(within(base).getAllByRole('listitem')).toHaveLength(2)
+    const all = within(base).getByRole('button', { name: 'Все 26' })
+    await userEvent.click(all)
+    const roster = screen.getByRole('dialog', { name: 'База · участники' })
+    expect(within(roster).getAllByRole('listitem')).toHaveLength(8)
+    expect(within(roster).getByLabelText('Рука — 1')).toBeVisible()
+    const seen: string[] = []
+    const next = within(roster).getByRole('button', { name: 'Следующая страница участников' })
+    for (;;) {
+      seen.push(
+        ...within(roster)
+          .getAllByRole('button', { name: /^Действия — /u })
+          .map((button) => button.getAttribute('aria-label') ?? ''),
+      )
+      if (next.hasAttribute('disabled')) break
+      await userEvent.click(next)
+    }
+    expect(seen).toHaveLength(26)
+    expect(new Set(seen).size).toBe(26)
+    expect(within(roster).getByLabelText('Рука — 24')).toBeVisible()
+    expect(within(roster).getByText('d'.repeat(12))).toBeVisible()
+    expect(within(roster).queryByText('Борис')).not.toBeInTheDocument()
+    await userEvent.click(within(roster).getByRole('button', { name: 'Закрыть' }))
+    expect(all).toHaveFocus()
+  })
+
+  it('retains the same compact queue trigger as hands arrive and leave without an inline queue', async () => {
+    const { controller, value, media } = await setup(false)
+    const { rerender } = render(<HandQueue controller={controller} compact />)
+    const trigger = screen.getByRole('button', { name: 'Очередь рук (0)' })
+    expect(trigger).toBeEnabled()
+    expect(screen.queryByRole('region', { name: 'Очередь рук' })).not.toBeInTheDocument()
+    await userEvent.click(trigger)
+    let roster = screen.getByRole('dialog', { name: 'Очередь рук' })
+    expect(within(roster).getByText('Поднятых рук пока нет')).toBeVisible()
+    await userEvent.click(within(roster).getByRole('button', { name: 'Закрыть' }))
+    expect(trigger).toHaveFocus()
+    await act(async () => {
+      media[0]?.events?.snapshot({
+        ...value,
+        version: 2,
+        participants: [...value.participants, participant()],
+      })
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('button', { name: 'Очередь рук (1)' })).toBe(trigger)
+    expect(trigger).toBeEnabled()
+    expect(screen.queryByRole('region', { name: 'Очередь рук' })).not.toBeInTheDocument()
+    await userEvent.click(trigger)
+    roster = screen.getByRole('dialog', { name: 'Очередь рук' })
+    expect(within(roster).getByText('Борис')).toBeVisible()
+    await act(async () => {
+      media[0]?.events?.snapshot({ ...value, version: 3 })
+      await Promise.resolve()
+    })
+    expect(within(roster).getByText('Поднятых рук пока нет')).toBeVisible()
+    expect(within(roster).queryByText('Борис')).not.toBeInTheDocument()
+    await userEvent.click(within(roster).getByRole('button', { name: 'Закрыть' }))
+    expect(trigger).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Очередь рук (0)' })).toBe(trigger)
+    expect(trigger).toBeEnabled()
+    rerender(<HandQueue controller={controller} />)
+    expect(screen.getByText('Поднятых рук пока нет')).toBeVisible()
+  })
+
+  it('keeps a long compact queue bounded and exposes every hand in order without round commands', async () => {
+    const value = snapshot()
+    value.participants.push(
+      ...Array.from({ length: 11 }, (_, index) =>
+        participant(`p${String(index).padStart(11, '0')}`, 'base', 1000 + index),
+      ),
+    )
+    value.participants.push(participant(BOB, 'og', 1))
+    const { controller, api } = await setup(false, value)
+    const commands = vi.spyOn(api, 'command')
+    render(<HandQueue controller={controller} compact />)
+    const trigger = screen.getByRole('button', { name: 'Очередь рук (11)' })
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    await userEvent.click(trigger)
+    const roster = screen.getByRole('dialog', { name: 'Очередь рук' })
     expect(
-      within(within(map).getByRole('region', { name: 'База' })).getAllByTestId('hand-badge'),
-    ).toHaveLength(24)
+      within(roster)
+        .getAllByTestId('hand-badge')
+        .map((badge) => badge.getAttribute('aria-label')),
+    ).toEqual(Array.from({ length: 8 }, (_, index) => `Рука — ${index + 1}`))
+    expect(within(roster).queryByText('Борис')).not.toBeInTheDocument()
+    await userEvent.click(
+      within(roster).getByRole('button', { name: 'Следующая страница участников' }),
+    )
+    expect(
+      within(roster)
+        .getAllByTestId('hand-badge')
+        .map((badge) => badge.getAttribute('aria-label')),
+    ).toEqual(['Рука — 9', 'Рука — 10', 'Рука — 11'])
+    expect(
+      within(roster).getByRole('button', { name: 'Следующая страница участников' }),
+    ).toBeDisabled()
+    await userEvent.click(
+      within(roster).getByRole('button', { name: 'Предыдущая страница участников' }),
+    )
+    expect(within(roster).getByLabelText('Рука — 1')).toBeVisible()
+    await userEvent.click(within(roster).getByRole('button', { name: 'Закрыть' }))
+    expect(trigger).toHaveFocus()
+    expect(commands).not.toHaveBeenCalled()
   })
 
   it('lets the judge lower a disconnected hand and all rooms without offering a microphone command to the disconnected target', async () => {
     const value = snapshot()
-    value.participants.push({
+    const remote = {
       ...participant(BOB, 'og'),
-      presence: { status: 'disconnected', since: 1000 },
-    })
+      presence: { status: 'disconnected' as const, since: 1000 },
+    }
+    value.participants.push(remote)
     const { controller, api } = await setup(true, value)
     render(
       <>
         <HandQueue controller={controller} />
-        <RoomMap controller={controller} />
+        <ParticipantActions controller={controller} participant={remote} />
       </>,
     )
     await userEvent.click(screen.getByRole('button', { name: 'Действия — Борис' }))
@@ -158,7 +274,8 @@ describe('hands in the scene and room roster', () => {
 describe('microphone controls and per-person volume', () => {
   it('sends judge mute/request intents to another room and never announces an unconfirmed mute or changes the local microphone', async () => {
     const value = snapshot()
-    value.participants.push(participant(BOB, 'og', null))
+    const remote = participant(BOB, 'og', null)
+    value.participants.push(remote)
     const { controller, api, media } = await setup(true, value)
     act(() =>
       media[0]?.events?.people([
@@ -168,7 +285,7 @@ describe('microphone controls and per-person volume', () => {
     )
     render(
       <>
-        <RoomMap controller={controller} />
+        <ParticipantActions controller={controller} participant={remote} />
         <SocialNotices controller={controller} />
       </>,
     )
@@ -233,7 +350,7 @@ describe('microphone controls and per-person volume', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('limits a remote volume slider to 0–100%, persists the public value, and restores focus after closing', async () => {
+  it('limits a remote volume slider to 0–200%, persists the public value, and restores focus after closing', async () => {
     const value = snapshot()
     const remote = participant()
     value.participants.push(remote)
@@ -256,8 +373,8 @@ describe('microphone controls and per-person volume', () => {
     await userEvent.click(trigger)
     const slider = screen.getByRole('slider', { name: 'Громкость — Борис' })
     expect(slider).toHaveAttribute('min', '0')
-    expect(slider).toHaveAttribute('max', '100')
-    for (const percent of [50, 0, 100]) {
+    expect(slider).toHaveAttribute('max', '200')
+    for (const percent of [50, 0, 100, 170, 200]) {
       fireEvent.change(slider, { target: { value: String(percent) } })
       expect(slider).toHaveAttribute('aria-valuetext', `${percent}%`)
       expect(media[0]?.volumes.get(BOB)).toBe(percent / 100)
@@ -274,7 +391,8 @@ describe('ephemeral reactions and sound controls', () => {
     const { controller, api, media, preferences } = await setup(false)
     render(
       <>
-        <ReactionControls controller={controller} expanded />
+        <ReactionControls controller={controller} />
+        <ReactionPreference controller={controller} />
         <ReactionDisplay controller={controller} />
       </>,
     )
@@ -309,7 +427,8 @@ describe('ephemeral reactions and sound controls', () => {
     const { controller, api } = await setup(false)
     render(
       <>
-        <ReactionControls controller={controller} expanded />
+        <ReactionControls controller={controller} />
+        <ReactionPreference controller={controller} />
         <SocialNotices controller={controller} />
       </>,
     )

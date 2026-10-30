@@ -32,7 +32,7 @@ class SetMotionBody(EmptyCommandBody):
 
 
 class ConfigureDrumBody(EmptyCommandBody):
-    enabled: Annotated[list[Position], Field(max_length=4)]
+    enabled: Annotated[list[Position], Field(max_length=12)]
     remove_drawn: Annotated[bool, Field(strict=True)]
 
     @model_validator(mode="after")

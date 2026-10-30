@@ -197,3 +197,55 @@ describe('ephemeral reactions', () => {
     session.close()
   })
 })
+
+describe('personal audio settings', () => {
+  it('preserves amplification up to 200 percent and rejects non-finite settings', () => {
+    const { session, preferences } = setup()
+    session.setVolume(BOB, 1.5)
+    expect(session.volume(BOB)).toBe(1.5)
+    expect(preferences.volume(ROUND_ID, BOB)).toBe(1.5)
+    session.setVolume(BOB, 9)
+    expect(session.volume(BOB)).toBe(2)
+    for (const value of [NaN, Infinity, -Infinity]) session.setVolume(BOB, value)
+    expect(session.volume(BOB)).toBe(2)
+    session.setVolume(BOB, -1)
+    expect(session.volume(BOB)).toBe(0)
+    session.close()
+  })
+
+  it('restores the last nonzero volume after mute across snapshots and reconnect', () => {
+    const { session, value } = setup()
+    session.setVolume(BOB, 0.5)
+    session.toggleMuted(BOB)
+    expect(session.volume(BOB)).toBe(0)
+    session.acceptSnapshot({ ...value, version: 11 })
+    session.suspend()
+    session.start(SELF, 'PA_second')
+    session.toggleMuted(BOB)
+    expect(session.volume(BOB)).toBe(0.5)
+    session.setVolume(BOB, 1.75)
+    session.setVolume(BOB, 0)
+    session.toggleMuted(BOB)
+    expect(session.volume(BOB)).toBe(1.75)
+    session.toggleMuted(BOB)
+    session.setVolume(BOB, 0.25)
+    session.toggleMuted(BOB)
+    session.toggleMuted(BOB)
+    expect(session.volume(BOB)).toBe(0.25)
+    session.close()
+  })
+
+  it('restores the original volume when a stored mute has no remembered nonzero setting', () => {
+    const preferences = new MemoryPreferences()
+    preferences.setVolume(ROUND_ID, BOB, 0)
+    const session = new SocialSession(
+      ROUND_ID,
+      preferences,
+      { now: () => 0, wallNow: () => 0 },
+      () => 0,
+    )
+    session.toggleMuted(BOB)
+    expect(session.volume(BOB)).toBe(1)
+    session.close()
+  })
+})

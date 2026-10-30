@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 // Rule 1 of docs/design.md: one red, «слово сейчас»; every other color of the theme is a
 // toned neutral. The theme clears Tailwind's palette, so these tokens are all there is.
 const WORD = '#e6472e'
+const PROTECTED = '#d6be67'
 // Vitest runs from the frontend root; under jsdom, import.meta.url is not a file URL.
 const styles = readFileSync('src/ui/styles.css', 'utf8')
 
@@ -13,11 +14,11 @@ function chroma(hex: string): number {
 }
 
 describe('theme', () => {
-  it('has exactly one chromatic color, the red of the word', () => {
+  it('limits chromatic colors to the word and author-approved protected/speaker yellow', () => {
     const colors = new Set(styles.match(/#[0-9a-f]{6}\b/giu)?.map((hex) => hex.toLowerCase()))
 
     expect(colors.size).toBeGreaterThan(1)
-    expect([...colors].filter((hex) => chroma(hex) > 24)).toEqual([WORD])
+    expect([...colors].filter((hex) => chroma(hex) > 24)).toEqual([WORD, PROTECTED])
   })
 
   it('writes every color as a hex token', () => {

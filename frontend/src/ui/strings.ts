@@ -72,6 +72,7 @@ export const strings = {
     backToBase: '← В базу',
     noConnection: 'нет связи',
     noJudge: 'Судьи нет',
+    flagAvailable: 'Флаг свободен',
     judge: 'Судья',
     becomeJudge: 'Стать судьёй',
     reclaimJudge: 'Взять флаг снова',
@@ -252,6 +253,7 @@ export const contentStrings = {
   none: 'нет',
   chat: 'Общий чат',
   chatButton: 'Чат',
+  collapseChat: 'Свернуть чат',
   message: 'Сообщение в общий чат',
   send: 'Отправить',
   retrySend: 'Повторить отправку',
@@ -348,6 +350,13 @@ export function roomChangeText(
     ? `${names[0]} теперь в ${destination}.`
     : `${roomNames[from]}: ${names.length} участников теперь в ${destination}.`
 }
+export const personalMediaStrings = {
+  startScreen: 'Демонстрировать экран',
+  stopScreen: 'Остановить демонстрацию',
+  cancelScreen: 'Отменить демонстрацию',
+  screenUnavailable: 'В этом браузере демонстрация экрана недоступна',
+} as const
+
 export const resilienceStrings = {
   quality: 'Связь',
   qualityShortNames: {
@@ -371,6 +380,7 @@ export const resilienceStrings = {
   cancelCameraDisable: 'Отменить выключение камеры',
   cancelMicrophoneEnable: 'Отменить включение микрофона',
   cancelMicrophoneDisable: 'Отменить выключение микрофона',
+  settings: 'Настройки',
   diagnostics: 'Диагностика',
   diagnosticsHint:
     'Технические данные без имён, ссылки и содержимого раунда. Открыть с клавиатуры: Ctrl + Shift + D.',

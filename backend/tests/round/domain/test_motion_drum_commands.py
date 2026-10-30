@@ -10,7 +10,7 @@ from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
 from debatemeet.round.domain.events import DrumConfigured, DrumReset, MotionSet, PositionDrawn
 from debatemeet.round.domain.ids import ParticipantId
 from debatemeet.round.domain.motion import Motion
-from debatemeet.round.domain.position import Position
+from debatemeet.round.domain.position import TEAM_POSITIONS, Position
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Round
 from debatemeet.round.domain.timer import JS_MAX_SAFE_INTEGER, TimerKind
@@ -42,7 +42,7 @@ def test_motion_normalizes_independent_fields_and_records_no_private_text() -> N
 
 def test_without_replacement_exhaustion_requires_explicit_reset_and_keeps_numbering() -> None:
     round_ = judged_round()
-    for number, position in enumerate(Position, 1):
+    for number, position in enumerate(TEAM_POSITIONS, 1):
         assert position in round_.draw_candidates(ALICE, at(number))
         round_.draw(ALICE, position, at(number))
         assert round_.drum.last == DrawResult(position, number, at(number))
@@ -88,7 +88,7 @@ def test_configuration_preserves_draws_and_replacement_does_not_accumulate_them(
 
 def test_all_disabled_is_valid_and_equivalent_configuration_is_a_noop() -> None:
     round_ = judged_round()
-    round_.configure_drum(ALICE, tuple(reversed(tuple(Position))), True, at(1))
+    round_.configure_drum(ALICE, tuple(reversed(TEAM_POSITIONS)), True, at(1))
     assert round_.pull_events() == []
     round_.configure_drum(ALICE, (), False, at(2))
     assert round_.pull_events() == [DrumConfigured(at=at(2), enabled=(), remove_drawn=False)]

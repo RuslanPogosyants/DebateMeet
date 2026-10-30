@@ -4045,7 +4045,7 @@
               "$ref": "#/components/schemas/Position"
             },
             "type": "array",
-            "maxItems": 4,
+            "maxItems": 12,
             "title": "Enabled"
           },
           "removeDrawn": {
@@ -4940,7 +4940,15 @@
           "og",
           "oo",
           "cg",
-          "co"
+          "co",
+          "og1",
+          "og2",
+          "oo1",
+          "oo2",
+          "cg1",
+          "cg2",
+          "co1",
+          "co2"
         ],
         "title": "Position"
       },

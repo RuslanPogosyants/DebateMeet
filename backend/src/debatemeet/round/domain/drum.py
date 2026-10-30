@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from debatemeet.round.domain.position import Position
+from debatemeet.round.domain.position import TEAM_POSITIONS, Position
 from debatemeet.round.domain.timer import JS_MAX_SAFE_INTEGER
 from debatemeet.shared.domain.errors import DomainError
 
@@ -49,7 +49,7 @@ class DrawResult:
 
 @dataclass(frozen=True, slots=True)
 class Drum:
-    enabled: tuple[Position, ...] = tuple(Position)
+    enabled: tuple[Position, ...] = TEAM_POSITIONS
     drawn: tuple[DrawnPosition, ...] = ()
     remove_drawn: bool = True
     last: DrawResult | None = None
@@ -62,7 +62,7 @@ class Drum:
             or any(not isinstance(position, Position) for position in self.enabled)
             or len(set(self.enabled)) != len(self.enabled)
             or not isinstance(self.drawn, tuple)
-            or len(self.drawn) > 4
+            or len(self.drawn) > len(Position)
             or any(not isinstance(drawn, DrawnPosition) for drawn in self.drawn)
             or type(self.remove_drawn) is not bool
         ):

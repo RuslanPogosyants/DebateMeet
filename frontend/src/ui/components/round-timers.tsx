@@ -1,7 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import { useStore } from 'zustand'
 import type { RoundController } from '@/application/round-controller'
-import type { RoundCommand } from '@/application/ports'
 import {
   elapsedMs,
   GRACE_MS,
@@ -10,23 +9,344 @@ import {
   type TimerKind,
   type TimerView,
 } from '@/domain/timer'
-import { ConfirmDialog } from './confirm-dialog'
+import { ControlIcon } from './control-icon'
 import { formatTimerTime, parseTimerTime } from '@/ui/timer-time'
 import { useServerTime } from '@/ui/use-server-time'
 import type { MeetingLayout } from '@/ui/use-meeting-layout'
-import { strings, timerAction, timerHeading, undoSpeechLabel } from '@/ui/strings'
+import { strings } from '@/ui/strings'
+
+export type TimerDirection = 'countdown' | 'stopwatch'
+
+interface DurationActions {
+  commit(): Promise<boolean>
+  cancel(): void
+}
+
+function isTimerSwitch(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-timer-switch]') !== null
+}
+
+const text = {
+  timer: 'Таймер',
+  input: 'Время, мм:сс',
+  start: 'Запустить таймер',
+  pause: 'Пауза таймера',
+  reset: 'Сбросить таймер',
+  expired: 'Время вышло',
+  paused: 'Пауза',
+  invalid: 'Введите время от 1:00 до 30:00 в формате мм:сс.',
+  editHint: 'Выделите цифры и введите время. Enter — применить, Esc — отменить.',
+} as const
+
+export function TimerReadouts({
+  controller,
+  updateTitle = false,
+  kind = 'prep',
+  direction = kind === 'prep' ? 'countdown' : 'stopwatch',
+}: {
+  controller: RoundController
+  updateTitle?: boolean
+  kind?: TimerKind
+  direction?: TimerDirection
+}) {
+  const editable = useStore(
+    controller.store,
+    (state) =>
+      state.stage === 'connected' &&
+      state.self !== null &&
+      state.snapshot?.judgeFlag.holder === state.self,
+  )
+  return (
+    <TimerFace
+      key={`${kind}:${direction}:${editable ? 'editable' : 'readonly'}`}
+      kind={kind}
+      direction={direction}
+      controller={controller}
+      updateTitle={updateTitle}
+    />
+  )
+}
+
+/** Direction changes the local readout; both views use the same server deadline. */
+function TimerFace({
+  controller,
+  updateTitle = false,
+  kind,
+  direction,
+}: {
+  controller: RoundController
+  updateTitle?: boolean
+  kind: TimerKind
+  direction: TimerDirection
+}) {
+  const snapshot = useStore(controller.timers.store, (state) => state.snapshot)
+  const state = useStore(controller.store)
+  const timer = snapshot?.timers[kind]
+  const running = timer?.status === 'running'
+  const now = useServerTime(controller.timers, running)
+  const remaining = timer ? remainingMs(timer, now) : 0
+  const display = formatTimerTime(
+    direction === 'stopwatch' && timer
+      ? elapsedMs(timer, now)
+      : Math.max(0, Math.ceil(remaining / 1000) * 1000),
+  )
+  const judge = state.self !== null && state.snapshot?.judgeFlag.holder === state.self
+  const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
+  const [draft, setDraft] = useState<string | null>(null)
+  const draftRef = useRef<string | null>(null)
+  const original = useRef<string | null>(null)
+  const [invalid, setInvalid] = useState(false)
+  const hint = useId()
+  const previousTitle = useRef(document.title)
+  const durationActions = useRef<DurationActions>(null)
+
+  function clearDraft() {
+    draftRef.current = null
+    setDraft(null)
+    setInvalid(false)
+  }
+  async function commit(): Promise<boolean> {
+    const input = draftRef.current
+    if (input === null) return true
+    const current = controller.store.getState()
+    if (
+      current.stage !== 'connected' ||
+      current.commandPending ||
+      current.commandUncertain ||
+      current.self === null ||
+      current.snapshot?.judgeFlag.holder !== current.self
+    ) {
+      clearDraft()
+      return false
+    }
+    if (input === original.current) {
+      clearDraft()
+      return true
+    }
+    const milliseconds = parseTimerTime(input)
+    if (
+      milliseconds === null ||
+      milliseconds < (kind === 'prep' && direction === 'countdown' ? 60000 : 0) ||
+      milliseconds > 1800000
+    ) {
+      setInvalid(true)
+      return false
+    }
+    // Clear synchronously before Enter causes blur; one edit must produce one command.
+    clearDraft()
+    await controller.command(
+      direction === 'stopwatch'
+        ? {
+            type: `timers/${kind}/set`,
+            remainingMs: current.snapshot.timers[kind].durationMs - milliseconds,
+          }
+        : kind === 'speech'
+          ? { type: 'timers/speech/set', remainingMs: milliseconds }
+          : current.snapshot.timers.prep.status === 'running'
+            ? { type: 'timers/prep/set', remainingMs: milliseconds }
+            : { type: 'timers/prep/configure', durationMs: milliseconds },
+    )
+    const result = controller.store.getState()
+    return result.stage === 'connected' && result.error === null && !result.commandUncertain
+  }
+  useEffect(() => {
+    if (updateTitle)
+      document.title = running ? `${display} — ${strings.appName}` : strings.timers.roundTitle
+  }, [display, running, updateTitle])
+  useEffect(() => {
+    const title = previousTitle.current
+    return () => {
+      if (updateTitle) document.title = title
+    }
+  }, [updateTitle])
+  if (!timer) return null
+  const progress = Math.max(0, Math.min(100, (1 - remaining / timer.durationMs) * 100))
+  return (
+    <div className="countdown" data-running={running || undefined}>
+      <div className="countdown-row">
+        <span className="countdown-digits" role="timer" aria-label={text.timer} aria-live="off">
+          {judge && state.stage === 'connected' ? (
+            <input
+              className="countdown-input"
+              aria-label={text.input}
+              value={draft ?? display}
+              aria-invalid={invalid}
+              aria-describedby={invalid ? `${hint}-error` : hint}
+              disabled={busy}
+              spellCheck={false}
+              autoComplete="off"
+              maxLength={8}
+              onFocus={(event) => {
+                if (draftRef.current === null) {
+                  original.current = display
+                  draftRef.current = display
+                  setDraft(display)
+                }
+                event.currentTarget.select()
+              }}
+              onChange={(event) => {
+                draftRef.current = event.target.value
+                setDraft(event.target.value)
+                setInvalid(false)
+              }}
+              onBlur={(event) => {
+                if (isTimerSwitch(event.relatedTarget)) clearDraft()
+                else void commit()
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  void commit()
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  clearDraft()
+                  event.currentTarget.blur()
+                }
+              }}
+            />
+          ) : (
+            display
+          )}
+        </span>
+        {judge && state.stage === 'connected' && (
+          <div className="countdown-actions" role="group" aria-label={strings.timers.controls}>
+            <button
+              className="action-primary icon-control"
+              type="button"
+              aria-label={running ? text.pause : text.start}
+              title={running ? text.pause : text.start}
+              disabled={
+                busy || (kind === 'prep' && direction === 'countdown' && !running && remaining <= 0)
+              }
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                void (async () => {
+                  if (durationActions.current !== null && !(await durationActions.current.commit()))
+                    return
+                  if (!(await commit())) return
+                  const current = controller.store.getState()
+                  if (
+                    current.stage !== 'connected' ||
+                    current.commandPending ||
+                    current.commandUncertain ||
+                    current.self === null ||
+                    current.snapshot?.judgeFlag.holder !== current.self
+                  )
+                    return
+                  const currentTimer = current.snapshot.timers[kind]
+                  if (
+                    kind === 'prep' &&
+                    direction === 'countdown' &&
+                    currentTimer.status !== 'running' &&
+                    remainingMs(currentTimer, controller.timers.serverNow()) <= 0
+                  )
+                    return
+                  await controller.command({
+                    type:
+                      currentTimer.status === 'running'
+                        ? `timers/${kind}/pause`
+                        : `timers/${kind}/start`,
+                  })
+                })()
+              }}
+            >
+              <ControlIcon kind={running ? 'pause' : 'play'} />
+            </button>
+            <button
+              className="action icon-control"
+              type="button"
+              aria-label={text.reset}
+              title={text.reset}
+              disabled={busy}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                clearDraft()
+                durationActions.current?.cancel()
+                event.currentTarget.focus()
+                void controller.command({ type: `timers/${kind}/reset` })
+              }}
+            >
+              <ControlIcon kind="reset" />
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="timer-scale-slot">
+        {kind === 'speech' ? (
+          <SpeechScale timer={timer} now={now} />
+        ) : (
+          <div className="countdown-scale" aria-hidden="true">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        )}
+      </div>
+      <div className="timer-meta">
+        <div className="speech-duration timer-duration">
+          <span>Длительность</span>{' '}
+          {judge ? (
+            <DurationEditor
+              controller={controller}
+              timer={timer}
+              kind={kind}
+              busy={busy}
+              actionsRef={durationActions}
+            />
+          ) : (
+            <span>{formatTimerTime(timer.durationMs)}</span>
+          )}
+        </div>
+        {direction === 'stopwatch' && elapsedMs(timer, now) < 0 ? (
+          <p className="countdown-status">До отметки 0:00</p>
+        ) : kind === 'speech' ? (
+          <p
+            className={`countdown-status speech-status${speechState(timer, now) === 'protected' ? ' speech-protected-status' : ''}`}
+          >
+            {speechState(timer, now) === 'protected'
+              ? 'Вопросы нельзя'
+              : speechState(timer, now) === 'poi'
+                ? 'Вопросы можно'
+                : speechState(timer, now) === 'grace'
+                  ? `Грейс: ${formatTimerTime(Math.ceil((remaining + GRACE_MS) / 1000) * 1000)}`
+                  : `Сверх времени +${formatTimerTime(-remaining - GRACE_MS)}`}
+          </p>
+        ) : (
+          <p className="countdown-status">
+            {direction === 'countdown' && remaining <= 0
+              ? text.expired
+              : timer.status === 'paused'
+                ? text.paused
+                : direction === 'stopwatch'
+                  ? 'Прошло времени'
+                  : 'Обратный отсчет'}
+          </p>
+        )}
+      </div>
+      {judge && (
+        <p id={hint} className="sr-only">
+          {text.editHint}
+        </p>
+      )}
+      {invalid && (
+        <p id={`${hint}-error`} className="text-caption" role="alert">
+          {direction === 'stopwatch'
+            ? 'Введите прошедшее время от 0:00 до 30:00, мм:сс.'
+            : kind === 'speech'
+              ? 'Введите остаток от 0:00 до 30:00, мм:сс.'
+              : text.invalid}
+        </p>
+      )}
+    </div>
+  )
+}
 
 function SpeechScale({ timer, now }: { timer: TimerView; now: number }) {
   const total = timer.durationMs + GRACE_MS
   const percent = (value: number) => `${Math.max(0, Math.min(100, (value / total) * 100))}%`
-  const elapsed = elapsedMs(timer, now)
-  const first = Math.min(60_000, timer.durationMs)
-  const last = Math.max(first, timer.durationMs - 60_000)
+  const first = Math.min(60000, timer.durationMs)
+  const last = Math.max(first, timer.durationMs - 60000)
   return (
-    <div
-      className={`speech-scale${elapsed >= total ? ' speech-scale-overtime' : ''}`}
-      aria-hidden="true"
-    >
+    <div className="speech-scale" aria-hidden="true">
       <span className="speech-scale-protected" style={{ width: percent(first) }} />
       <span
         className="speech-scale-protected"
@@ -36,123 +356,112 @@ function SpeechScale({ timer, now }: { timer: TimerView; now: number }) {
         className="speech-scale-grace"
         style={{ left: percent(timer.durationMs), width: percent(GRACE_MS) }}
       />
-      <span className="speech-scale-elapsed" style={{ width: percent(elapsed) }} />
-      {[...new Set([60_000, timer.durationMs - 60_000, timer.durationMs])]
-        .filter((value) => value > 0 && value <= timer.durationMs)
-        .map((value) => (
-          <span key={value} className="speech-scale-tick" style={{ left: percent(value) }} />
-        ))}
-      <span className="speech-scale-now" style={{ left: percent(elapsed) }} />
+      <span className="speech-scale-elapsed" style={{ width: percent(elapsedMs(timer, now)) }} />
+      <span className="speech-scale-now" style={{ left: percent(elapsedMs(timer, now)) }} />
     </div>
   )
 }
 
-function speechDescription(timer: TimerView, now: number): string {
-  const state = speechState(timer, now)
-  if (state === 'grace')
-    return `${strings.timers.grace} ${formatTimerTime(Math.ceil((remainingMs(timer, now) + GRACE_MS) / 1000) * 1000)}`
-  if (state === 'overtime')
-    return `${strings.timers.overtime} +${formatTimerTime(Math.max(0, -remainingMs(timer, now) - GRACE_MS))}`
-  return state === 'protected' ? strings.timers.protected : strings.timers.poi
-}
-
-export function TimerReadouts({
+function DurationEditor({
   controller,
-  updateTitle = false,
+  timer,
+  kind,
+  busy,
+  actionsRef,
 }: {
   controller: RoundController
-  updateTitle?: boolean
+  timer: TimerView
+  kind: TimerKind
+  busy: boolean
+  actionsRef: Ref<DurationActions>
 }) {
-  const snapshot = useStore(controller.timers.store, (state) => state.snapshot)
-  const running =
-    snapshot?.timers.prep.status === 'running' || snapshot?.timers.speech.status === 'running'
-  const now = useServerTime(controller.timers, running)
-  const prominent: TimerKind | null =
-    snapshot?.timers.speech.status === 'running'
-      ? 'speech'
-      : snapshot?.timers.prep.status === 'running'
-        ? 'prep'
-        : null
-  const previousTitle = useRef(document.title)
-  useEffect(() => {
-    if (!updateTitle || snapshot === null) return
-    const time =
-      prominent === null
-        ? ''
-        : formatTimerTime(
-            prominent === 'speech'
-              ? elapsedMs(snapshot.timers.speech, now)
-              : remainingMs(snapshot.timers.prep, now),
-          )
-    const title =
-      prominent === null
-        ? strings.timers.roundTitle
-        : `${time} · ${prominent === 'speech' ? timerHeading('speech', snapshot.speechNo) : strings.timers.prep} — ${strings.appName}`
-    if (document.title !== title) document.title = title
-  }, [now, prominent, snapshot, updateTitle])
-  useEffect(() => {
-    const title = previousTitle.current
-    return () => {
-      if (updateTitle) document.title = title
+  const [draft, setDraft] = useState<string | null>(null)
+  const draftRef = useRef<string | null>(null)
+  const [invalid, setInvalid] = useState(false)
+  const hint = useId()
+  function clearDraft() {
+    draftRef.current = null
+    setDraft(null)
+    setInvalid(false)
+  }
+  const label = kind === 'speech' ? 'Длительность речи' : 'Длительность подготовки'
+  const maximum = kind === 'speech' ? 900000 : 1800000
+  async function commit(): Promise<boolean> {
+    const input = draftRef.current
+    if (input === null) return true
+    const value = parseTimerTime(input)
+    const current = controller.store.getState()
+    if (
+      current.stage !== 'connected' ||
+      current.commandPending ||
+      current.commandUncertain ||
+      current.self === null ||
+      current.snapshot?.judgeFlag.holder !== current.self ||
+      current.snapshot.timers[kind].status === 'running'
+    ) {
+      draftRef.current = null
+      setDraft(null)
+      return false
     }
-  }, [updateTitle])
-  if (snapshot === null) return null
+    if (value === null || value < 60000 || value > maximum) {
+      setInvalid(true)
+      return false
+    }
+    draftRef.current = null
+    setDraft(null)
+    setInvalid(false)
+    if (value !== current.snapshot.timers[kind].durationMs)
+      await controller.command({ type: `timers/${kind}/configure`, durationMs: value })
+    const result = controller.store.getState()
+    return result.stage === 'connected' && result.error === null && !result.commandUncertain
+  }
+  useImperativeHandle(actionsRef, () => ({ commit, cancel: clearDraft }))
   return (
-    <div className={`timer-readouts${prominent === null ? ' timer-readouts-idle' : ''}`}>
-      {(['speech', 'prep'] as const).map((kind) => {
-        const timer = snapshot.timers[kind]
-        const large = prominent === kind
-        const value = kind === 'speech' ? elapsedMs(timer, now) : remainingMs(timer, now)
-        const description =
-          kind === 'speech'
-            ? speechDescription(timer, now)
-            : remainingMs(timer, now) < 0
-              ? strings.timers.prepOvertime
-              : strings.timers.remaining
-        return (
-          <section
-            key={kind}
-            className={`timer-readout${large ? ' timer-prominent' : ''}`}
-            data-testid={`${kind}-timer`}
-            data-prominent={large}
-          >
-            <p className="timer-caption">
-              {timerHeading(kind, snapshot.speechNo)}{' '}
-              <span>
-                ·{' '}
-                {timer.status === 'running'
-                  ? strings.timers.running
-                  : timer.status === 'paused'
-                    ? strings.timers.paused
-                    : strings.timers.stopped}
-              </span>
-            </p>
-            <div className="timer-value-row">
-              <span
-                role="timer"
-                aria-label={
-                  kind === 'speech' ? strings.timers.speechTimer : strings.timers.prepTimer
-                }
-                aria-live="off"
-                data-testid={`${kind}-timer-readout`}
-                className="timer-digits"
-              >
-                {formatTimerTime(value)}
-              </span>
-              <p className="timer-description">
-                {kind === 'speech' && (
-                  <span>
-                    {strings.timers.of} {formatTimerTime(timer.durationMs)} ·{' '}
-                  </span>
-                )}
-                {description}
-              </p>
-            </div>
-            {kind === 'speech' && <SpeechScale timer={timer} now={now} />}
-          </section>
-        )
-      })}
-    </div>
+    <>
+      <input
+        className="speech-duration-input"
+        aria-label={`${label}, мм:сс`}
+        title={
+          timer.status === 'running'
+            ? 'Поставьте на паузу, чтобы изменить длительность'
+            : `${label}: нажмите и введите мм:сс; отсчет сбросится`
+        }
+        disabled={busy || timer.status === 'running'}
+        value={draft ?? formatTimerTime(timer.durationMs)}
+        aria-invalid={invalid}
+        aria-describedby={hint}
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => {
+          draftRef.current = event.target.value
+          setDraft(event.target.value)
+          setInvalid(false)
+        }}
+        onBlur={(event) => {
+          if (isTimerSwitch(event.relatedTarget)) clearDraft()
+          else void commit()
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            void commit()
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            clearDraft()
+            event.currentTarget.blur()
+          }
+        }}
+      />
+      <span id={hint} className="sr-only">
+        Длительность можно изменить на паузе. Выделите цифры и введите мм:сс. Изменение сбросит
+        отсчет.
+      </span>
+      {invalid && (
+        <span className="duration-error" role="alert">
+          От 1:00 до {kind === 'speech' ? '15:00' : '30:00'}, мм:сс.
+        </span>
+      )}
+    </>
   )
 }
 
@@ -162,7 +471,7 @@ export function TimerHealth({ controller }: { controller: RoundController }) {
   const approximate = !clock.synchronized || clock.degraded || (clock.uncertaintyMs ?? 0) > 250
   return (
     <div className="timer-health">
-      {(approximate || clock.syncing) && (
+      {approximate && (
         <div className="timer-clock-status" role="status">
           <span>
             {!clock.synchronized
@@ -203,240 +512,6 @@ export function TimerHealth({ controller }: { controller: RoundController }) {
   )
 }
 
-type TimerDialog = { kind: TimerKind; action: 'reset' | 'set' | 'configure' }
-
-function TimeEditor({
-  controller,
-  kind,
-  action,
-  busy,
-  onClose,
-}: {
-  controller: RoundController
-  kind: TimerKind
-  action: 'set' | 'configure'
-  busy: boolean
-  onClose: () => void
-}) {
-  const snapshot = useStore(controller.timers.store, (state) => state.snapshot)
-  const timer = snapshot?.timers[kind]
-  const [input, setInput] = useState(() =>
-    timer === undefined
-      ? ''
-      : formatTimerTime(
-          action === 'configure'
-            ? timer.durationMs
-            : kind === 'speech'
-              ? elapsedMs(timer, controller.timers.serverNow())
-              : remainingMs(timer, controller.timers.serverNow()),
-        ),
-  )
-  const id = useId()
-  const parsed = parseTimerTime(input)
-  const maximum = kind === 'prep' ? 1_800_000 : 900_000
-  const wire =
-    parsed === null || timer === undefined
-      ? null
-      : action === 'set' && kind === 'speech'
-        ? timer.durationMs - parsed
-        : parsed
-  const valid =
-    wire !== null &&
-    Number.isSafeInteger(wire) &&
-    (action !== 'configure' || (wire >= 60_000 && wire <= maximum))
-  return (
-    <ConfirmDialog
-      title={timerAction(action, kind)}
-      confirm={action === 'configure' ? strings.timers.configureConfirm : strings.timers.setConfirm}
-      onCancel={onClose}
-      disabled={busy || !valid}
-      onConfirm={() => {
-        if (!valid || wire === null) return
-        const intent: RoundCommand =
-          action === 'configure'
-            ? { type: `timers/${kind}/configure`, durationMs: wire }
-            : { type: `timers/${kind}/set`, remainingMs: wire }
-        onClose()
-        void controller.command(intent)
-      }}
-    >
-      {action === 'configure' && <p>{strings.timers.configureWarning}</p>}
-      <label htmlFor={id}>
-        {action === 'configure'
-          ? strings.timers.durationInput
-          : kind === 'speech'
-            ? strings.timers.elapsedInput
-            : strings.timers.remainingInput}
-      </label>
-      <input
-        id={id}
-        className="timer-input"
-        value={input}
-        spellCheck={false}
-        autoComplete="off"
-        maxLength={22}
-        aria-invalid={!valid}
-        aria-describedby={`${id}-hint`}
-        onChange={(event) => setInput(event.target.value)}
-      />
-      <p id={`${id}-hint`} className="text-caption">
-        {action === 'configure'
-          ? kind === 'prep'
-            ? strings.timers.prepBounds
-            : strings.timers.speechBounds
-          : strings.timers.signedHint}
-      </p>
-    </ConfirmDialog>
-  )
-}
-
-function SpeechNavigation({ controller, busy }: { controller: RoundController; busy: boolean }) {
-  const snapshot = useStore(controller.timers.store, (state) => state.snapshot)
-  const undo = snapshot?.speechUndo
-  const now = useServerTime(controller.timers, undo?.timer.status === 'running')
-  const [cooldown, setCooldown] = useState(false)
-  const cooling = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const active = useRef(true)
-  useEffect(() => {
-    active.current = true
-    return () => {
-      active.current = false
-      if (cooling.current !== null) clearTimeout(cooling.current)
-    }
-  }, [])
-  return (
-    <div className="speech-navigation">
-      <button
-        className="judge-secondary"
-        type="button"
-        disabled={busy || cooldown}
-        onClick={() => {
-          const before = controller.timers.store.getState().snapshot?.speechNo
-          void controller.command({ type: 'speech/next' }).then(() => {
-            if (!active.current) return
-            const state = controller.store.getState()
-            if (
-              state.error !== null ||
-              state.commandUncertain ||
-              controller.timers.store.getState().snapshot?.speechNo === before
-            )
-              return
-            setCooldown(true)
-            cooling.current = setTimeout(() => setCooldown(false), 2000)
-          })
-        }}
-      >
-        {strings.timers.next}
-      </button>
-      {undo && (
-        <button
-          className="text-link speech-undo"
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            void controller.command({ type: 'speech/undo' })
-          }}
-        >
-          {undoSpeechLabel(undo.speechNo, formatTimerTime(elapsedMs(undo.timer, now)))}
-        </button>
-      )}
-    </div>
-  )
-}
-
-export function TimerControls({ controller }: { controller: RoundController }) {
-  const state = useStore(controller.store)
-  const snapshot = useStore(controller.timers.store, (value) => value.snapshot)
-  const [dialog, setDialog] = useState<TimerDialog | null>(null)
-  const judge = state.self !== null && state.snapshot?.judgeFlag.holder === state.self
-  const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
-  if (!judge || snapshot === null) return null
-  return (
-    <div className="timer-controls" aria-label={strings.timers.controls}>
-      <div className="timer-command-groups">
-        {(['prep', 'speech'] as const).map((kind) => {
-          const timer = snapshot.timers[kind]
-          const action = timer.status === 'running' ? 'pause' : 'start'
-          return (
-            <div className="timer-command-group" key={kind}>
-              <p className="text-caption">
-                {kind === 'prep' ? strings.timers.prep : timerHeading(kind, snapshot.speechNo)}
-              </p>
-              <button
-                className="action-primary"
-                type="button"
-                aria-label={timerAction(action, kind)}
-                disabled={busy}
-                onClick={() => {
-                  void controller.command({ type: `timers/${kind}/${action}` })
-                }}
-              >
-                {action === 'start' ? strings.timers.start : strings.timers.pause}
-              </button>
-              <button
-                className="judge-secondary"
-                type="button"
-                aria-label={timerAction('reset', kind)}
-                disabled={busy}
-                onClick={() => {
-                  if (timer.status !== 'stopped' || timer.remainingMs !== timer.durationMs)
-                    setDialog({ kind, action: 'reset' })
-                  else void controller.command({ type: `timers/${kind}/reset` })
-                }}
-              >
-                {strings.timers.reset}
-              </button>
-              <button
-                className="text-link"
-                type="button"
-                disabled={busy}
-                aria-label={timerAction('set', kind)}
-                onClick={() => setDialog({ kind, action: 'set' })}
-              >
-                {strings.timers.set}
-              </button>
-              <button
-                className="text-link"
-                type="button"
-                disabled={busy}
-                aria-label={timerAction('configure', kind)}
-                onClick={() => setDialog({ kind, action: 'configure' })}
-              >
-                {strings.timers.configure}
-              </button>
-            </div>
-          )
-        })}
-      </div>
-      <SpeechNavigation controller={controller} busy={busy} />
-      {dialog?.action === 'reset' && (
-        <ConfirmDialog
-          title={timerAction('resetConfirm', dialog.kind)}
-          confirm={strings.timers.reset}
-          onCancel={() => setDialog(null)}
-          disabled={busy}
-          onConfirm={() => {
-            setDialog(null)
-            void controller.command({ type: `timers/${dialog.kind}/reset` })
-          }}
-        >
-          <p>{strings.timers.resetWarning}</p>
-        </ConfirmDialog>
-      )}
-      {dialog !== null && dialog.action !== 'reset' && (
-        <TimeEditor
-          key={`${dialog.kind}/${dialog.action}`}
-          controller={controller}
-          kind={dialog.kind}
-          action={dialog.action}
-          busy={busy}
-          onClose={() => setDialog(null)}
-        />
-      )}
-    </div>
-  )
-}
-
 export function RoundTimers({
   controller,
   layout,
@@ -444,10 +519,45 @@ export function RoundTimers({
   controller: RoundController
   layout: MeetingLayout
 }) {
+  const snapshot = useStore(controller.timers.store, (state) => state.snapshot)
+  const [selected, setSelected] = useState<TimerKind | null>(null)
+  const [directions, setDirections] = useState<Record<TimerKind, TimerDirection>>({
+    prep: 'countdown',
+    speech: 'stopwatch',
+  })
+  const kind = selected ?? (snapshot?.timers.speech.status === 'running' ? 'speech' : 'prep')
   return (
     <section className={`round-timers round-timers-${layout}`} aria-label={strings.timers.heading}>
-      <TimerReadouts controller={controller} updateTitle />
-      {layout !== 'narrow' && <TimerControls controller={controller} />}
+      <div className="timer-toolbar">
+        <div className="timer-modes" role="group" aria-label="Вид таймера">
+          {(['prep', 'speech'] as const).map((mode) => (
+            <button
+              type="button"
+              key={mode}
+              data-timer-switch
+              aria-label={mode === 'prep' ? 'Подготовка' : 'Речь'}
+              aria-pressed={kind === mode}
+              onClick={() => setSelected(mode)}
+            >
+              {mode === 'prep' ? 'Подготовка' : 'Речь'}
+            </button>
+          ))}
+        </div>
+        <select
+          className="timer-direction"
+          aria-label="Направление отсчета"
+          data-timer-switch
+          value={directions[kind]}
+          onChange={(event) => {
+            const direction = event.target.value === 'stopwatch' ? 'stopwatch' : 'countdown'
+            setDirections((previous) => ({ ...previous, [kind]: direction }))
+          }}
+        >
+          <option value="countdown">Таймер</option>
+          <option value="stopwatch">Секундомер</option>
+        </select>
+      </div>
+      <TimerReadouts controller={controller} kind={kind} direction={directions[kind]} updateTitle />
     </section>
   )
 }

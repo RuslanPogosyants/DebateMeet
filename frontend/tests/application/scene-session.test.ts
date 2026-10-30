@@ -129,3 +129,96 @@ describe('scene selection', () => {
     expect(scene.store.getState().videoIds).toEqual([])
   })
 })
+
+describe('personal camera and presentation selection', () => {
+  it('hides only a remote camera locally and preserves its speaker eligibility without a subscription', async () => {
+    const { scene, value, people } = setup()
+    const next = people[2]
+    if (!next) throw new Error('No speaker')
+    scene.setCameraHidden(next.id, true)
+    scene.setCameraHidden(SELF, true)
+    scene.setCameraHidden('unknown', true)
+    expect(scene.store.getState().hiddenCameraIds).toEqual([next.id])
+    expect(next.camera).toBe(true)
+    next.speaking = true
+    scene.update(value, SELF, people, [])
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(scene.store.getState().primaryId).toBe(next.id)
+    scene.setCameraHidden(next.id, false)
+    expect(scene.store.getState().hiddenCameraIds).toEqual([])
+    expect(next.camera).toBe(true)
+  })
+
+  it('keeps camera hiding bounded by current participants and clears it on close', () => {
+    const { scene, value, people, update } = setup()
+    scene.setCameraHidden(BOB, true)
+    expect(scene.store.getState().hiddenCameraIds).toEqual([BOB])
+    value.participants = value.participants.filter((person) => person.id !== BOB)
+    update()
+    expect(scene.store.getState().hiddenCameraIds).toEqual([])
+    const remote = people[2]
+    if (!remote) throw new Error('No remote')
+    scene.setCameraHidden(remote.id, true)
+    scene.close()
+    expect(scene.store.getState().hiddenCameraIds).toEqual([])
+  })
+
+  it('reserves one of twelve video slots for the selected screen while retaining an explicit camera pin', () => {
+    const { scene, people, update } = setup(15)
+    const presenter = people[1]
+    const pinned = people.at(-1)
+    if (!presenter || !pinned) throw new Error('No presenter')
+    scene.pin(pinned.id)
+    presenter.screen = true
+    update()
+    expect(scene.store.getState().screenIds).toEqual([presenter.id])
+    expect(scene.store.getState().screenId).toBe(presenter.id)
+    expect(scene.store.getState().videoIds).toHaveLength(11)
+    expect(scene.store.getState().videoIds).toContain(pinned.id)
+    expect(scene.store.getState().pinnedId).toBe(pinned.id)
+    expect(scene.store.getState().primaryId).toBe(pinned.id)
+    presenter.screen = false
+    update()
+    expect(scene.store.getState().screenId).toBeNull()
+    expect(scene.store.getState().videoIds).toHaveLength(12)
+  })
+
+  it('keeps own screen visible when self view is hidden and selects only screens in the current room', () => {
+    const { scene, value, people, update } = setup()
+    const ownMedia = people[0]
+    const otherMedia = people[1]
+    const outsideMedia = people[2]
+    const outside = value.participants[2]
+    const own = value.participants[0]
+    if (!ownMedia || !otherMedia || !outsideMedia || !outside || !own)
+      throw new Error('No participant')
+    ownMedia.screen = true
+    otherMedia.screen = true
+    outsideMedia.screen = true
+    outside.room = 'og'
+    scene.setSelfVisible(false)
+    update()
+    expect(scene.store.getState().screenIds).toEqual([SELF, BOB])
+    expect(scene.store.getState().screenId).toBe(SELF)
+    expect(scene.store.getState().videoIds).not.toContain(SELF)
+    scene.selectScreen(BOB)
+    expect(scene.store.getState().screenId).toBe(BOB)
+    scene.selectScreen(outside.id)
+    expect(scene.store.getState().screenId).toBe(BOB)
+    scene.setLayout('grid')
+    update()
+    expect(scene.store.getState().screenId).toBe(BOB)
+    otherMedia.screen = false
+    update()
+    expect(scene.store.getState().screenId).toBe(SELF)
+    scene.pin(BOB)
+    own.room = 'og'
+    update()
+    expect(scene.store.getState().screenIds).toEqual([SELF, outside.id])
+    expect(scene.store.getState().screenId).toBe(SELF)
+    expect(scene.store.getState().pinnedId).toBeNull()
+    scene.close()
+    expect(scene.store.getState().screenIds).toEqual([])
+    expect(scene.store.getState().screenId).toBeNull()
+  })
+})

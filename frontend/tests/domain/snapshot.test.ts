@@ -546,7 +546,20 @@ describe('motion and drum extension compatibility boundary A4', () => {
   })
 })
 
-const positionStates = fc.constantFrom('og', 'oo', 'cg', 'co')
+const positionStates = fc.constantFrom(
+  'og',
+  'oo',
+  'cg',
+  'co',
+  'og1',
+  'og2',
+  'oo1',
+  'oo2',
+  'cg1',
+  'cg2',
+  'co1',
+  'co2',
+)
 const textStates = (maximum: number) =>
   fc
     .array(fc.constantFrom('a', 'я', '界', '😀', '\uFEFF', '\t', '\n', '<', '>'), {
@@ -561,11 +574,11 @@ describe('valid transported motion and drum state properties', () => {
         textStates(100),
         textStates(500),
         fc.record({
-          enabled: fc.uniqueArray(positionStates, { maxLength: 4 }),
-          drawn: fc.uniqueArray(positionStates, { maxLength: 4 }),
+          enabled: fc.uniqueArray(positionStates, { maxLength: 12 }),
+          drawn: fc.uniqueArray(positionStates, { maxLength: 12 }),
           numbers: fc.uniqueArray(fc.integer({ min: 1, max: 1000000 }), {
-            minLength: 4,
-            maxLength: 4,
+            minLength: 12,
+            maxLength: 12,
           }),
           removeDrawn: fc.boolean(),
           extra: fc.integer({ min: 0, max: 1000000 }),
@@ -606,5 +619,40 @@ describe('valid transported motion and drum state properties', () => {
         },
       ),
     )
+  })
+})
+
+describe('speaker draw snapshot boundary', () => {
+  const positions = ['og', 'oo', 'cg', 'co', 'og1', 'og2', 'oo1', 'oo2', 'cg1', 'cg2', 'co1', 'co2']
+  it('preserves all speaker slots and the bounded four-team plus eight-speaker history', () => {
+    const value = {
+      ...snapshot(),
+      drum: {
+        enabled: positions.slice(4),
+        drawn: positions.map((position, index) => ({ position, drawNo: index + 1 })),
+        removeDrawn: true,
+        last: { position: 'co2', drawNo: 12, at: 1000 },
+        drawCount: 12,
+      },
+    }
+    expect(readSnapshot(JSON.parse(JSON.stringify(value)), ROUND_ID)).toEqual(value)
+    for (const drum of [
+      { ...value.drum, enabled: ['og1', 'og1'] },
+      { ...value.drum, enabled: ['og3'] },
+      {
+        ...value.drum,
+        drawn: [...value.drum.drawn, { position: 'og1', drawNo: 13 }],
+        drawCount: 13,
+        last: { position: 'og1', drawNo: 13, at: 1000 },
+      },
+      {
+        ...value.drum,
+        drawn: [
+          { position: 'co2', drawNo: 2 },
+          { position: 'og1', drawNo: 2 },
+        ],
+      },
+    ])
+      expect(readSnapshot({ ...value, drum }, ROUND_ID)).toBeNull()
   })
 })

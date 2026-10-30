@@ -129,7 +129,13 @@ for (const kind of ['audio', 'video'] as const) {
         await expect(page.getByRole('button', { name: cancel, exact: true })).toBeEnabled()
         if (supersede === 'off')
           await page.getByRole('button', { name: cancel, exact: true }).click()
-        else await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+        else {
+          await page.getByRole('button', { name: 'Ещё', exact: true }).click()
+          await page
+            .getByRole('dialog', { name: 'Ещё', exact: true })
+            .getByRole('button', { name: 'Выйти', exact: true })
+            .click()
+        }
         await page.evaluate(() => window.debatemeetCaptureProbe.release?.())
         await expect
           .poll(() =>

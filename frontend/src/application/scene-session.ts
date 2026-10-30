@@ -8,6 +8,9 @@ export type SceneState = {
   pinnedId: string | null
   primaryId: string | null
   videoIds: readonly string[]
+  hiddenCameraIds: readonly string[]
+  screenIds: readonly string[]
+  screenId: string | null
 }
 export class SceneSession {
   readonly store
@@ -34,6 +37,9 @@ export class SceneSession {
       pinnedId: null,
       primaryId: null,
       videoIds: [],
+      hiddenCameraIds: [],
+      screenIds: [],
+      screenId: null,
     }))
   }
   update(
@@ -58,6 +64,25 @@ export class SceneSession {
     if (id !== null && !this.eligible().includes(id)) return
     this.store.setState({ pinnedId: id })
     this.candidate = null
+    this.reconcile()
+  }
+  setCameraHidden(id: string, hidden: boolean): void {
+    if (
+      this.input === null ||
+      id === this.input.self ||
+      !this.input.snapshot.participants.some((person) => person.id === id)
+    )
+      return
+    const previous = this.store.getState().hiddenCameraIds
+    if (previous.includes(id) === hidden) return
+    this.store.setState({
+      hiddenCameraIds: hidden ? [...previous, id] : previous.filter((identity) => identity !== id),
+    })
+    this.reconcile()
+  }
+  selectScreen(id: string): void {
+    if (!this.store.getState().screenIds.includes(id)) return
+    this.store.setState({ screenId: id })
     this.reconcile()
   }
   private eligible(): string[] {
@@ -85,14 +110,32 @@ export class SceneSession {
     const eligible = this.eligible()
     const changedRoom = room !== this.room
     this.room = room
+    const hiddenCameraIds = previous.hiddenCameraIds.filter((id) =>
+      input.snapshot.participants.some((person) => person.id === id && id !== input.self),
+    )
+    const screenIds = input.snapshot.participants
+      .filter(
+        (person) =>
+          person.room === room &&
+          input.people.some((media) => media.id === person.id && media.screen),
+      )
+      .map((person) => person.id)
+    const screenId =
+      !changedRoom && previous.screenId !== null && screenIds.includes(previous.screenId)
+        ? previous.screenId
+        : (screenIds[0] ?? null)
+    const cameraBudget = screenId === null ? 12 : 11
     const pinnedId =
       !changedRoom && previous.pinnedId !== null && eligible.includes(previous.pinnedId)
         ? previous.pinnedId
         : null
     const retained = changedRoom ? [] : previous.videoIds.filter((id) => eligible.includes(id))
-    const videoIds = [...retained, ...eligible.filter((id) => !retained.includes(id))].slice(0, 12)
+    const videoIds = [...retained, ...eligible.filter((id) => !retained.includes(id))].slice(
+      0,
+      cameraBudget,
+    )
     if (pinnedId !== null && !videoIds.includes(pinnedId)) {
-      if (videoIds.length === 12) videoIds.pop()
+      if (videoIds.length === cameraBudget) videoIds.pop()
       videoIds.push(pinnedId)
     }
     let primaryId =
@@ -115,7 +158,9 @@ export class SceneSession {
             person.id !== input.self &&
             videoIds.includes(person.id) &&
             person.speaking &&
-            (!person.camera || input.subscribed.includes(person.id)),
+            (!person.camera ||
+              hiddenCameraIds.includes(person.id) ||
+              input.subscribed.includes(person.id)),
         )?.id ?? null
       if (next === null || next === primaryId) this.candidate = null
       else {
@@ -134,10 +179,13 @@ export class SceneSession {
     if (
       pinnedId !== previous.pinnedId ||
       primaryId !== previous.primaryId ||
-      videoIds.join() !== previous.videoIds.join()
+      videoIds.join() !== previous.videoIds.join() ||
+      hiddenCameraIds.join() !== previous.hiddenCameraIds.join() ||
+      screenIds.join() !== previous.screenIds.join() ||
+      screenId !== previous.screenId
     ) {
       if (primaryId !== previous.primaryId) this.primarySince = now
-      this.store.setState({ pinnedId, primaryId, videoIds })
+      this.store.setState({ pinnedId, primaryId, videoIds, hiddenCameraIds, screenIds, screenId })
     }
   }
   close(): void {
@@ -146,6 +194,13 @@ export class SceneSession {
     this.input = null
     this.room = null
     this.candidate = null
-    this.store.setState({ pinnedId: null, primaryId: null, videoIds: [] })
+    this.store.setState({
+      pinnedId: null,
+      primaryId: null,
+      videoIds: [],
+      hiddenCameraIds: [],
+      screenIds: [],
+      screenId: null,
+    })
   }
 }

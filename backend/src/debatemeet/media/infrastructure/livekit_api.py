@@ -213,7 +213,7 @@ class LiveKitApiAdapter:
                     room=round_id,
                     can_publish=True,
                     can_subscribe=True,
-                    can_publish_sources=["camera", "microphone"],
+                    can_publish_sources=["camera", "microphone", "screen_share"],
                     can_publish_data=False,
                     can_update_own_metadata=False,
                 )

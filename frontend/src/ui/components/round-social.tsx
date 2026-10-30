@@ -1,25 +1,22 @@
-import { useId, useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useStore } from 'zustand'
 import type { RoundController } from '@/application/round-controller'
-import type { Participant } from '@/domain/snapshot'
 import { handQueue, type ReactionCode } from '@/domain/social'
 import { useServices } from '@/ui/services'
 import {
   deviceErrorText,
   errorText,
-  handPosition,
-  lowerHandOf,
-  microphoneAction,
-  participantActions,
-  participantVolume,
   reactionLabel,
   roomNames,
   socialStrings,
   strings,
 } from '@/ui/strings'
+import { ControlIcon } from './control-icon'
 import { Sheet } from './sheet'
+import { ParticipantRoster } from './participant-roster'
+import { HandBadge, ParticipantActions } from './participant-actions'
+export { HandBadge, ParticipantActions } from './participant-actions'
 import { RuntimeDevices } from './round-resilience'
-import { resilienceStrings } from '@/ui/strings'
 
 const reactions: readonly [ReactionCode, string][] = [
   ['clap', '👏'],
@@ -30,12 +27,20 @@ const reactions: readonly [ReactionCode, string][] = [
 ]
 const emoji = Object.fromEntries(reactions)
 
-export function HandBadge({ position }: { position: number }) {
-  return position > 0 ? (
-    <span className="hand-badge" data-testid="hand-badge" aria-label={handPosition(position)}>
-      <span aria-hidden="true">✋</span> {position}
-    </span>
-  ) : null
+function reactionMotion(
+  identity: string,
+  nonce: string,
+): CSSProperties & {
+  '--reaction-lane': number
+  '--reaction-sway': string
+} {
+  let seed = 0
+  const key = `${identity}.${nonce}`
+  for (let index = 0; index < key.length; index++) seed = (seed * 31 + key.charCodeAt(index)) >>> 0
+  return {
+    '--reaction-lane': seed % 4,
+    '--reaction-sway': `${seed % 2 === 0 ? 12 : -12}px`,
+  }
 }
 
 export function HandButton({ controller }: { controller: RoundController }) {
@@ -44,7 +49,8 @@ export function HandButton({ controller }: { controller: RoundController }) {
   const raised = own?.handRaisedAt !== null && own?.handRaisedAt !== undefined
   return (
     <button
-      className="action hand-toggle"
+      className="action icon-control hand-toggle"
+      title={raised ? socialStrings.lower : socialStrings.raise}
       type="button"
       aria-pressed={raised}
       aria-label={raised ? socialStrings.lower : socialStrings.raise}
@@ -59,23 +65,55 @@ export function HandButton({ controller }: { controller: RoundController }) {
         void controller.command({ type: raised ? 'hands/lower' : 'hands/raise' })
       }}
     >
-      <span className="control-label-full">
-        {raised ? socialStrings.lower : socialStrings.raise}
-      </span>
-      <span className="control-label-short" aria-hidden="true">
-        {raised ? socialStrings.lowerShort : socialStrings.raiseShort}
-      </span>
+      <ControlIcon kind="hand" />
     </button>
   )
 }
 
-export function HandQueue({ controller }: { controller: RoundController }) {
+export function HandQueue({
+  controller,
+  compact = false,
+}: {
+  controller: RoundController
+  compact?: boolean
+}) {
+  const [rosterOpen, setRosterOpen] = useState(false)
   const state = useStore(controller.store)
   const room = state.snapshot?.participants.find((person) => person.id === state.self)?.room
   const queue = state.snapshot && room ? handQueue(state.snapshot, room) : []
+  if (compact)
+    return (
+      <>
+        <button
+          className="action icon-control hand-queue-trigger"
+          type="button"
+          aria-label={`${socialStrings.queue} (${queue.length})`}
+          title={`${socialStrings.queue} (${queue.length})`}
+          aria-haspopup="dialog"
+          aria-expanded={rosterOpen}
+          data-has-hands={queue.length > 0}
+          data-testid="hand-queue"
+          onClick={() => setRosterOpen(true)}
+        >
+          <ControlIcon kind="hand" />
+          <span className="hand-queue-count" aria-hidden="true">
+            {queue.length}
+          </span>
+        </button>
+        {rosterOpen && (
+          <ParticipantRoster
+            controller={controller}
+            participants={queue}
+            title={socialStrings.queue}
+            emptyText={socialStrings.queueEmpty}
+            onClose={() => setRosterOpen(false)}
+          />
+        )}
+      </>
+    )
   return (
     <section
-      className="hand-queue"
+      className={`hand-queue${queue.length === 0 ? ' hand-queue-empty' : ''}`}
       aria-label={socialStrings.queue}
       data-testid="hand-queue"
       // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- A long queue must be scrollable with the keyboard.
@@ -97,105 +135,6 @@ export function HandQueue({ controller }: { controller: RoundController }) {
         </ol>
       )}
     </section>
-  )
-}
-
-export function ParticipantActions({
-  controller,
-  participant,
-}: {
-  controller: RoundController
-  participant: Participant
-}) {
-  const state = useStore(controller.store)
-  const volumes = useStore(controller.social.store, (social) => social.volumes)
-  const pinned = useStore(controller.scene.store, (scene) => scene.pinnedId)
-  const [open, setOpen] = useState(false)
-  const volumeId = useId()
-  const own = state.snapshot?.participants.find((person) => person.id === state.self)
-  const judge =
-    state.snapshot?.judgeFlag.holder === state.self && own?.presence.status === 'connected'
-  const self = participant.id === state.self
-  const media = state.people.find((person) => person.id === participant.id)
-  const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
-  const volume = Math.round(
-    (volumes[participant.id] ?? controller.social.volume(participant.id)) * 100,
-  )
-  return (
-    <>
-      <button
-        className="participant-actions-trigger"
-        type="button"
-        aria-label={participantActions(participant.name)}
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-      >
-        ···
-      </button>
-      {open && (
-        <Sheet title={participantActions(participant.name)} onClose={() => setOpen(false)}>
-          <div className="participant-actions-content">
-            {own?.room === participant.room && (
-              <button
-                className="action"
-                type="button"
-                onClick={() => {
-                  controller.scene.pin(pinned === participant.id ? null : participant.id)
-                  setOpen(false)
-                }}
-              >
-                {pinned === participant.id ? resilienceStrings.unpin : resilienceStrings.pin}
-              </button>
-            )}
-            {!self && (
-              <div className="participant-volume">
-                <label htmlFor={volumeId}>{participantVolume(participant.name)}</label>
-                <input
-                  id={volumeId}
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={volume}
-                  aria-valuetext={`${volume}%`}
-                  onChange={(event) =>
-                    controller.setVolume(participant.id, Number(event.target.value) / 100)
-                  }
-                />
-                <output htmlFor={volumeId}>{volume}%</output>
-              </div>
-            )}
-            {judge && participant.handRaisedAt !== null && (
-              <button
-                className="action-primary"
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  void controller.command({ type: 'hands/lower-of', participantId: participant.id })
-                }}
-              >
-                {lowerHandOf(participant.name)}
-              </button>
-            )}
-            {judge && !self && (
-              <button
-                className="action-primary"
-                type="button"
-                disabled={busy || participant.presence.status !== 'connected' || !media}
-                onClick={() => {
-                  void controller.command({
-                    type: media?.microphone ? 'mute' : 'request-unmute',
-                    participantId: participant.id,
-                  })
-                }}
-              >
-                {microphoneAction(participant.name, media?.microphone ?? false)}
-              </button>
-            )}
-          </div>
-        </Sheet>
-      )}
-    </>
   )
 }
 
@@ -306,12 +245,17 @@ export function ReactionDisplay({ controller }: { controller: RoundController })
     >
       {!social.hidden &&
         social.reactions.map((reaction) => (
-          <li key={`${reaction.participantId}.${reaction.nonce}`} data-testid="reaction-item">
+          <li
+            key={`${reaction.participantId}.${reaction.nonce}`}
+            data-testid="reaction-item"
+            style={reactionMotion(reaction.participantId, reaction.nonce)}
+          >
             <span className="reaction-emoji" aria-hidden="true">
               {emoji[reaction.reaction]}
             </span>
-            <span>
-              {reaction.name}: <span className="sr-only">{emoji[reaction.reaction]}</span>
+            <span className="reaction-author" title={reaction.name}>
+              {reaction.name}
+              <span className="sr-only">: {emoji[reaction.reaction]}</span>
             </span>
           </li>
         ))}
@@ -319,71 +263,66 @@ export function ReactionDisplay({ controller }: { controller: RoundController })
   )
 }
 
-export function ReactionControls({
-  controller,
-  expanded = false,
-}: {
-  controller: RoundController
-  expanded?: boolean
-}) {
+export function ReactionControls({ controller }: { controller: RoundController }) {
   const state = useStore(controller.store)
-  const hidden = useStore(controller.social.store, (social) => social.hidden)
-  const contents = (
-    <div className="reaction-picker">
-      <div className="reaction-buttons">
-        {reactions.map(([reaction, symbol]) => (
-          <button
-            key={reaction}
-            className="action"
-            type="button"
-            aria-label={reactionLabel(symbol)}
-            disabled={state.stage !== 'connected' || !controller.social.canReact()}
-            onClick={() => {
-              void controller.react(reaction)
-            }}
-          >
-            {symbol}
-          </button>
-        ))}
-      </div>
-      <label className="reaction-preference">
-        <input
-          type="checkbox"
-          checked={hidden}
-          onChange={(event) => controller.social.setHidden(event.target.checked)}
-        />
-        {socialStrings.hideReactions}
-      </label>
+  return (
+    <div className="reaction-buttons" role="group" aria-label={socialStrings.reactions}>
+      {reactions.map(([reaction, symbol]) => (
+        <button
+          key={reaction}
+          className="reaction-button"
+          type="button"
+          aria-label={reactionLabel(symbol)}
+          title={reactionLabel(symbol)}
+          disabled={state.stage !== 'connected' || !controller.social.canReact()}
+          onClick={() => {
+            void controller.react(reaction)
+          }}
+        >
+          <span aria-hidden="true">{symbol}</span>
+        </button>
+      ))}
     </div>
-  )
-  return expanded ? (
-    <section aria-label={socialStrings.reactions}>
-      <h2 className="text-title font-medium">{socialStrings.reactions}</h2>
-      {contents}
-    </section>
-  ) : (
-    <details className="reaction-controls">
-      <summary className="action">{socialStrings.reactions}</summary>
-      {contents}
-    </details>
   )
 }
 
-export function SoundControls({ controller }: { controller: RoundController }) {
+export function ReactionPreference({ controller }: { controller: RoundController }) {
+  const hidden = useStore(controller.social.store, (social) => social.hidden)
+  return (
+    <label className="reaction-preference">
+      <input
+        type="checkbox"
+        checked={hidden}
+        onChange={(event) => controller.social.setHidden(event.target.checked)}
+      />
+      {socialStrings.hideReactions}
+    </label>
+  )
+}
+
+export function SoundControls({
+  controller,
+  iconOnly = false,
+}: {
+  controller: RoundController
+  iconOnly?: boolean
+}) {
   const { devices } = useServices()
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<unknown>(null)
   return (
     <>
       <button
-        className="action"
+        className={iconOnly ? 'action icon-control' : 'action'}
+        aria-label={strings.round.devices}
+        title={strings.round.devices}
         type="button"
         onClick={() => {
           setOpen(true)
           void controller.devices.refresh()
         }}
       >
-        {strings.round.devices}
+        {iconOnly ? <ControlIcon kind="more" /> : strings.round.devices}
       </button>
       {open && (
         <Sheet title={strings.round.devices} onClose={() => setOpen(false)}>

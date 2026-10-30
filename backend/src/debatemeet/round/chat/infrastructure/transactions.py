@@ -261,7 +261,8 @@ class PostgresSystemMessages:
         if round_id not in self._prepared:
             raise RuntimeError("system messages require the chat guard before the Round lock")
         if (
-            position not in {"og", "oo", "cg", "co"}
+            position
+            not in {"og", "oo", "cg", "co", "og1", "og2", "oo1", "oo2", "cg1", "cg2", "co1", "co2"}
             or type(draw_no) is not int
             or not 1 <= draw_no <= 9007199254740991
         ):

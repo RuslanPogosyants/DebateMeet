@@ -21,6 +21,8 @@ import type {
   DeviceKind,
   DeviceSelection,
   MediaDeviceState,
+  MediaPerson,
+  VideoSource,
 } from '@/application/ports'
 import type { MessagePage, PostedMessage } from '@/domain/chat'
 
@@ -183,6 +185,8 @@ export class FakeMedia implements MediaSession {
   stopped = 0
   microphoneChanges: boolean[] = []
   cameraChanges: boolean[] = []
+  screenChanges: boolean[] = []
+  private people: MediaPerson[] = []
   videos = new Map<string, HTMLVideoElement>()
   volumes = new Map<string, number>()
   selected: DeviceSelection = {}
@@ -196,7 +200,7 @@ export class FakeMedia implements MediaSession {
     return this.readDevices()
   }
   subscribedVideoIds(): readonly string[] {
-    return [...this.videos.keys()]
+    return [...this.videos.keys()].filter((key) => !key.startsWith('screen:'))
   }
   measureAudio(): void {}
   volume(identity: string, value: number) {
@@ -204,8 +208,14 @@ export class FakeMedia implements MediaSession {
   }
   connect(_: string, __: string, camera: boolean, events: MediaEvents) {
     this.connections += 1
-    this.events = events
-    events.people([{ id: SELF, microphone: false, camera, speaking: false }])
+    this.events = {
+      ...events,
+      people: (value) => {
+        this.people = value
+        events.people(value)
+      },
+    }
+    this.events.people([{ id: SELF, microphone: false, camera, speaking: false }])
     return Promise.resolve()
   }
   disconnect() {
@@ -224,14 +234,22 @@ export class FakeMedia implements MediaSession {
     this.cameraChanges.push(value)
     return Promise.resolve()
   }
+  screen(value: boolean) {
+    this.screenChanges.push(value)
+    this.events?.people(
+      this.people.map((person) => (person.id === SELF ? { ...person, screen: value } : person)),
+    )
+    return Promise.resolve()
+  }
   startAudio() {
     this.events?.playback(false)
     return Promise.resolve()
   }
-  attachVideo(identity: string, element: HTMLVideoElement) {
-    this.videos.set(identity, element)
+  attachVideo(identity: string, element: HTMLVideoElement, source: VideoSource = 'camera') {
+    const key = source === 'camera' ? identity : `screen:${identity}`
+    this.videos.set(key, element)
     return () => {
-      if (this.videos.get(identity) === element) this.videos.delete(identity)
+      if (this.videos.get(key) === element) this.videos.delete(key)
     }
   }
 }

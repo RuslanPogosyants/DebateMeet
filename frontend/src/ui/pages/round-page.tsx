@@ -1,40 +1,43 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { SubmitEvent } from 'react'
 import { Link, useParams } from 'react-router'
 import { useStore } from 'zustand'
 import { RoundController } from '@/application/round-controller'
-import type { DeviceSelection, MediaPerson } from '@/application/ports'
-import type { Participant } from '@/domain/snapshot'
-import { handQueue } from '@/domain/social'
+import type { DeviceSelection } from '@/application/ports'
 import { RoomMap, RoomNavigation, JudgeControl } from '@/ui/components/round-tools'
 import {
-  HandBadge,
   HandButton,
   HandQueue,
-  ParticipantActions,
   ReactionControls,
-  ReactionDisplay,
+  ReactionPreference,
   SocialNotices,
   SoundControls,
 } from '@/ui/components/round-social'
+import { ControlIcon } from '@/ui/components/control-icon'
 import { useMeetingLayout } from '@/ui/use-meeting-layout'
 import { ConfirmDialog } from '@/ui/components/confirm-dialog'
 import { DevicePreview } from '@/ui/components/device-preview'
 import { RoundTimers, TimerHealth } from '@/ui/components/round-timers'
 import { MotionDisplay } from '@/ui/components/round-motion'
 import { RoundSidebar } from '@/ui/components/round-sidebar'
+import { RoundStage } from '@/ui/components/round-stage'
+import { RoomRosterButton } from '@/ui/components/participant-roster'
 import { Sheet } from '@/ui/components/sheet'
 import {
   ConnectionNotice,
   DiagnosticsPanel,
   ProblemReport,
-  QualityMark,
   RoundViewBoundary,
   RoundFailureActions,
   SceneControls,
   VersionNotice,
 } from '@/ui/components/round-resilience'
-import { contentStrings, socialStrings, resilienceStrings } from '@/ui/strings'
+import {
+  contentStrings,
+  socialStrings,
+  resilienceStrings,
+  personalMediaStrings,
+} from '@/ui/strings'
 import { useServices } from '@/ui/services'
 import {
   deviceErrorText,
@@ -55,7 +58,7 @@ function supportedBrowser(): boolean {
   return safari === null || Number(safari[1]) >= 17
 }
 
-function CopyLink() {
+function CopyLink({ labeled = false }: { labeled?: boolean }) {
   const [copied, setCopied] = useState(false)
   const [failed, setFailed] = useState(false)
   async function copy() {
@@ -69,13 +72,16 @@ function CopyLink() {
   return (
     <div>
       <button
-        className="action"
+        className={labeled ? 'action copy-link-labeled' : 'action icon-control share-link'}
+        aria-label={copied ? strings.round.copied : strings.round.copy}
+        title={copied ? strings.round.copied : 'Поделиться ссылкой'}
         type="button"
         onClick={() => {
           void copy()
         }}
       >
-        {copied ? strings.round.copied : strings.round.copy}
+        <ControlIcon kind="share" />
+        {labeled && <span>{copied ? strings.round.copied : strings.round.copy}</span>}
       </button>
       {failed && (
         <p role="alert" className="text-caption">
@@ -175,80 +181,31 @@ function Prejoin({ controller }: { controller: RoundController }) {
   )
 }
 
-function ParticipantTile({
-  participant,
-  media,
-  self,
-  controller,
-  hand,
-  primary,
-  pinned,
-}: {
-  participant: Participant
-  media: MediaPerson | undefined
-  self: boolean
-  controller: RoundController
-  hand: number
-  primary: boolean
-  pinned: boolean
-}) {
-  const video = useRef<HTMLVideoElement>(null)
-  useEffect(() => {
-    return video.current === null ? () => {} : controller.attachVideo(participant.id, video.current)
-  }, [controller, participant.id])
-  return (
-    <article
-      className={`participant-tile${self ? ' own-tile' : ''}${primary ? ' primary-tile' : ''}`}
-      data-primary={primary || undefined}
-      aria-label={participant.name}
-    >
-      <div className="tile-actions">
-        <HandBadge position={hand} />
-        <ParticipantActions controller={controller} participant={participant} />
-      </div>
-      <video
-        ref={video}
-        autoPlay
-        muted
-        playsInline
-        className={media?.camera ? '' : 'video-hidden'}
-      />
-      {!media?.camera && <p className="tile-placeholder">{participant.name}</p>}
-      <div className="tile-caption">
-        <p>
-          {media?.speaking && (
-            <span className="speaker-dash" aria-label="говорит">
-              —{' '}
-            </span>
-          )}
-          {participant.name}
-          {self && <span className="tile-secondary"> · {strings.round.you}</span>}
-        </p>
-        <p className="text-caption tile-secondary">
-          {media?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
-        </p>
-        <QualityMark quality={media?.quality ?? 'unknown'} />
-        {pinned && <span className="text-caption">{resilienceStrings.pinned}</span>}
-      </div>
-    </article>
-  )
-}
-
 function Meeting({ controller }: { controller: RoundController }) {
   const layout = useMeetingLayout()
   const state = useStore(controller.store)
-  const scene = useStore(controller.scene.store)
   const [judgeLeave, setJudgeLeave] = useState(false)
   const [transferAndLeave, setTransferAndLeave] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const chatButton = useRef<HTMLButtonElement>(null)
   const [moreOpen, setMoreOpen] = useState(false)
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
-  const [reportOpen, setReportOpen] = useState(false)
+  const [utilityPanel, setUtilityPanel] = useState<'diagnostics' | 'report' | null>(null)
+  const moreButton = useRef<HTMLButtonElement>(null)
+  function openUtility(panel: 'diagnostics' | 'report') {
+    setMoreOpen(false)
+    setUtilityPanel(panel)
+  }
+  function closeUtility() {
+    setUtilityPanel(null)
+    moreButton.current?.focus()
+  }
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
         event.preventDefault()
-        setDiagnosticsOpen(true)
+        setMoreOpen(false)
+        setUtilityPanel('diagnostics')
       }
     }
     window.addEventListener('keydown', shortcut)
@@ -260,6 +217,15 @@ function Meeting({ controller }: { controller: RoundController }) {
   const self = state.people.find((person) => person.id === state.self)
   const microphoneEnabled = state.microphoneIntent ?? self?.microphone ?? false
   const cameraEnabled = state.cameraIntent ?? self?.camera ?? false
+  const screenHint = useId()
+  const screenEnabled = state.screenIntent ?? self?.screen ?? false
+  const screenSupported = typeof navigator.mediaDevices?.getDisplayMedia === 'function'
+  const screenLabel =
+    state.screenIntent === true && !self?.screen
+      ? personalMediaStrings.cancelScreen
+      : screenEnabled
+        ? personalMediaStrings.stopScreen
+        : personalMediaStrings.startScreen
   const microphoneLabel =
     state.microphoneIntent === true && !self?.microphone
       ? resilienceStrings.cancelMicrophoneEnable
@@ -278,48 +244,95 @@ function Meeting({ controller }: { controller: RoundController }) {
           : strings.round.cameraOff
   const room =
     state.snapshot?.participants.find((person) => person.id === state.self)?.room ?? 'base'
-  const visible =
-    state.snapshot?.participants.filter(
-      (person) =>
-        person.room === room &&
-        (person.id === state.self || state.people.some((media) => media.id === person.id)),
-    ) ?? []
-  const queue = state.snapshot ? handQueue(state.snapshot, room) : []
-  const videoIds = new Set(scene.videoIds)
-  const omitted = visible.filter(
-    (person) => !videoIds.has(person.id) && (scene.showSelf || person.id !== state.self),
-  )
   function leave() {
     setMoreOpen(false)
     if (state.snapshot?.judgeFlag.holder === state.self) setJudgeLeave(true)
     else void controller.leave()
   }
+  const callControls = (
+    <footer className="meeting-controls">
+      <div className="meeting-control-group">
+        <button
+          className="action media-toggle"
+          type="button"
+          title={microphoneLabel}
+          aria-pressed={microphoneEnabled}
+          aria-label={microphoneLabel}
+          aria-busy={state.microphoneIntent !== null}
+          onClick={() => {
+            void controller.microphone(!microphoneEnabled)
+          }}
+        >
+          <ControlIcon kind="microphone" off={!microphoneEnabled} />
+        </button>
+        <button
+          className="action media-toggle"
+          type="button"
+          title={cameraLabel}
+          aria-pressed={cameraEnabled}
+          aria-label={cameraLabel}
+          aria-busy={state.cameraIntent !== null}
+          onClick={() => {
+            void controller.cameraEnabled(!cameraEnabled)
+          }}
+        >
+          <ControlIcon kind="camera" off={!cameraEnabled} />
+        </button>
+        <button
+          className="action icon-control screen-share-toggle"
+          type="button"
+          title={screenSupported ? screenLabel : personalMediaStrings.screenUnavailable}
+          aria-label={screenLabel}
+          aria-describedby={screenSupported ? undefined : screenHint}
+          aria-pressed={screenEnabled}
+          aria-busy={state.screenIntent !== null}
+          disabled={!screenSupported && !screenEnabled}
+          onClick={() => {
+            void controller.screenEnabled(!screenEnabled)
+          }}
+        >
+          <ControlIcon kind="screen" off={screenEnabled} />
+        </button>
+        {!screenSupported && (
+          <span id={screenHint} className="sr-only">
+            {personalMediaStrings.screenUnavailable}
+          </span>
+        )}
+        <HandButton controller={controller} />
+        <ReactionControls controller={controller} />
+        <RoomRosterButton controller={controller} />
+        <button
+          ref={chatButton}
+          className="action icon-control chat-toggle"
+          type="button"
+          title={chatLabel}
+          aria-label={chatLabel}
+          aria-expanded={layout === 'narrow' ? chatOpen : sidebarOpen}
+          onClick={() => (layout === 'narrow' ? setChatOpen(true) : setSidebarOpen(!sidebarOpen))}
+        >
+          <ControlIcon kind="chat" />
+          {unread > 0 && (
+            <span className="unread-badge" aria-hidden="true">
+              {unread}
+            </span>
+          )}
+        </button>
+        <button
+          ref={moreButton}
+          className="action icon-control more-trigger"
+          aria-label={socialStrings.more}
+          title={socialStrings.more}
+          type="button"
+          aria-expanded={moreOpen || utilityPanel !== null}
+          onClick={() => setMoreOpen(true)}
+        >
+          <ControlIcon kind="more" />
+        </button>
+      </div>
+    </footer>
+  )
   return (
     <main className="meeting-shell">
-      <header className="meeting-heading">
-        <div>
-          <p className="meeting-brand text-caption text-muted-foreground">{strings.appName}</p>
-          <MotionDisplay controller={controller} editable={layout !== 'narrow'} />
-        </div>
-        <JudgeControl controller={controller} panel={layout === 'narrow'} />
-        <div className="meeting-header-actions">
-          <div className="desktop-diagnostics-actions">
-            <button
-              className="text-link"
-              type="button"
-              aria-keyshortcuts="Control+Shift+D"
-              onClick={() => setDiagnosticsOpen(true)}
-            >
-              {resilienceStrings.diagnostics}
-            </button>
-            <button className="text-link" type="button" onClick={() => setReportOpen(true)}>
-              {resilienceStrings.report}
-            </button>
-          </div>
-          <CopyLink />
-        </div>
-      </header>
-      <TimerHealth controller={controller} />
       <div className="meeting-notices">
         <VersionNotice controller={controller} />
         <ConnectionNotice controller={controller} />
@@ -394,143 +407,88 @@ function Meeting({ controller }: { controller: RoundController }) {
       {layout !== 'full' && (
         <div className="meeting-navigation">
           <RoomNavigation controller={controller} layout={layout} />
-          {layout === 'narrow' && (
-            <button
-              className="action chat-trigger-narrow"
-              type="button"
-              onClick={() => setChatOpen(true)}
-            >
-              {chatLabel}
-            </button>
-          )}
         </div>
       )}
-      <RoundTimers controller={controller} layout={layout} />
-      <div className={`meeting-workspace${layout !== 'full' ? ' meeting-workspace-compact' : ''}`}>
+      <div
+        className={`meeting-workspace${layout !== 'full' ? ' meeting-workspace-compact' : ''}${layout !== 'narrow' && !sidebarOpen ? ' meeting-workspace-sidebar-closed' : ''}`}
+      >
         {layout === 'full' && <RoomMap controller={controller} />}
-        <div className="meeting-scene">
-          <div className="scene-heading">
-            <h1 className="font-display text-title font-bold" data-testid="current-room-heading">
-              {roomNames[room]}
-            </h1>
-            <p>{strings.round.hearing}</p>
+        <div className="meeting-center">
+          <TimerHealth controller={controller} />
+          <div className="scene-round-header">
+            <MotionDisplay controller={controller} editable={layout !== 'narrow'} />
+            <RoundTimers controller={controller} layout={layout} />
           </div>
-          {room !== 'base' && (
-            <button
-              className="text-link back-to-base"
-              type="button"
-              disabled={state.commandPending || state.commandUncertain}
-              onClick={() => {
-                void controller.command({ type: 'enter', room: 'base' })
-              }}
-            >
-              {strings.round.backToBase}
-            </button>
-          )}
-          <HandQueue controller={controller} />
-          <SceneControls controller={controller} />
-          <section className="meeting-stage" aria-label={strings.round.people}>
-            <ReactionDisplay controller={controller} />
-            <div
-              className={`participant-grid${scene.layout === 'speaker' ? ' speaker-layout' : ''}`}
-              data-layout={scene.layout}
-            >
-              {visible
-                .filter((person) => videoIds.has(person.id))
-                .map((participant) => (
-                  <ParticipantTile
-                    key={participant.id}
-                    participant={participant}
-                    media={state.people.find((person) => person.id === participant.id)}
-                    self={participant.id === state.self}
-                    controller={controller}
-                    hand={queue.findIndex((person) => person.id === participant.id) + 1}
-                    primary={scene.layout === 'speaker' && scene.primaryId === participant.id}
-                    pinned={scene.pinnedId === participant.id}
-                  />
-                ))}
+          <div className="meeting-scene">
+            <div className="scene-toolbar">
+              <div className="scene-heading">
+                <h1
+                  className="font-display text-title font-bold"
+                  data-testid="current-room-heading"
+                >
+                  {roomNames[room]}
+                </h1>
+                <HandQueue controller={controller} compact />
+                <JudgeControl controller={controller} panel compact />
+                <p>{strings.round.hearing}</p>
+                {room !== 'base' && (
+                  <button
+                    className="text-link back-to-base"
+                    type="button"
+                    disabled={state.commandPending || state.commandUncertain}
+                    onClick={() => {
+                      void controller.command({ type: 'enter', room: 'base' })
+                    }}
+                  >
+                    {strings.round.backToBase}
+                  </button>
+                )}
+              </div>
+              <SceneControls controller={controller} />
             </div>
-            {visible.length === 1 && <p className="alone-message">{strings.round.alone}</p>}
-            {omitted.length > 0 && (
-              <p className="more-people">
-                {strings.round.morePeople}: {omitted.map((person) => person.name).join(', ')}
-              </p>
-            )}
-          </section>
+            <div className="meeting-call-area">
+              <RoundStage key={room} controller={controller} layout={layout} />
+              {callControls}
+            </div>
+          </div>
         </div>
-        {layout !== 'narrow' && (
-          <RoundSidebar controller={controller} tabs={layout === 'compact'} />
+        {layout !== 'narrow' && sidebarOpen && (
+          <RoundSidebar
+            controller={controller}
+            tabs
+            onClose={() => {
+              setSidebarOpen(false)
+              chatButton.current?.focus()
+            }}
+          />
         )}
       </div>
-      <footer className="meeting-controls">
-        <button
-          className="action"
-          type="button"
-          aria-pressed={microphoneEnabled}
-          aria-label={microphoneLabel}
-          aria-busy={state.microphoneIntent !== null}
-          onClick={() => {
-            void controller.microphone(!microphoneEnabled)
-          }}
-        >
-          <span className="control-label-full">{microphoneLabel}</span>
-          <span className="control-label-short" aria-hidden="true">
-            {strings.round.microphone}
-          </span>
-        </button>
-        <button
-          className="action"
-          type="button"
-          aria-pressed={cameraEnabled}
-          aria-label={cameraLabel}
-          aria-busy={state.cameraIntent !== null}
-          onClick={() => {
-            void controller.cameraEnabled(!cameraEnabled)
-          }}
-        >
-          <span className="control-label-full">{cameraLabel}</span>
-          <span className="control-label-short" aria-hidden="true">
-            {strings.round.camera}
-          </span>
-        </button>
-        <HandButton controller={controller} />
-        <div className="desktop-social-controls">
-          <ReactionControls controller={controller} />
-          <SoundControls controller={controller} />
-        </div>
-        {layout === 'narrow' && (
-          <button
-            className="action phone-chat-button"
-            type="button"
-            onClick={() => setChatOpen(true)}
-          >
-            {chatLabel}
-          </button>
-        )}
-        <button
-          className="action phone-more-button"
-          type="button"
-          aria-expanded={moreOpen}
-          onClick={() => setMoreOpen(true)}
-        >
-          {socialStrings.more}
-        </button>
-        <button className="action leave-action desktop-leave" type="button" onClick={leave}>
-          {strings.round.leave}
-        </button>
-      </footer>
+
       {moreOpen && (
-        <Sheet title={socialStrings.more} onClose={() => setMoreOpen(false)}>
+        <Sheet
+          title={socialStrings.more}
+          className="meeting-more-sheet"
+          onClose={() => setMoreOpen(false)}
+        >
           <div className="more-controls">
-            <ReactionControls controller={controller} expanded />
-            <SoundControls controller={controller} />
-            <button className="action" type="button" onClick={() => setDiagnosticsOpen(true)}>
-              {resilienceStrings.diagnostics}
-            </button>
-            <button className="action" type="button" onClick={() => setReportOpen(true)}>
-              {resilienceStrings.report}
-            </button>
-            <button className="action" type="button" onClick={leave}>
+            <div className="utility-actions">
+              <CopyLink labeled />
+              <SoundControls controller={controller} />
+              <button
+                className="action"
+                type="button"
+                aria-keyshortcuts="Control+Shift+D"
+                onClick={() => openUtility('diagnostics')}
+              >
+                {resilienceStrings.diagnostics}
+              </button>
+              <button className="action" type="button" onClick={() => openUtility('report')}>
+                {resilienceStrings.report}
+              </button>
+            </div>
+            <ReactionPreference controller={controller} />
+            <button className="action menu-leave" type="button" onClick={leave}>
+              <ControlIcon kind="leave-call" />
               {strings.round.leave}
             </button>
           </div>
@@ -545,10 +503,12 @@ function Meeting({ controller }: { controller: RoundController }) {
           <RoundSidebar controller={controller} tabs controls={false} />
         </Sheet>
       )}
-      {diagnosticsOpen && (
-        <DiagnosticsPanel controller={controller} onClose={() => setDiagnosticsOpen(false)} />
+      {utilityPanel === 'diagnostics' && (
+        <DiagnosticsPanel controller={controller} onClose={closeUtility} />
       )}
-      {reportOpen && <ProblemReport controller={controller} onClose={() => setReportOpen(false)} />}
+      {utilityPanel === 'report' && (
+        <ProblemReport controller={controller} onClose={closeUtility} />
+      )}
       {judgeLeave && (
         <ConfirmDialog
           title={strings.round.judgeLeave}

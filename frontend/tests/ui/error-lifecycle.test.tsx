@@ -47,6 +47,7 @@ it('StrictMode keeps one mounted error subscriber, reports its error and release
     await userEvent.click(screen.getByRole('button', { name: 'Войти' }))
     await screen.findByRole('heading', { name: 'База' })
     act(() => fakes.services.errors.capture(new Error('PRIVATE_ERROR_MESSAGE'), 'unexpected_error'))
+    await userEvent.click(screen.getByRole('button', { name: 'Ещё' }))
     await userEvent.click(screen.getByRole('button', { name: 'Сообщить о проблеме' }))
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить отчёт' }))
     await waitFor(() => expect(report).toHaveBeenCalled())

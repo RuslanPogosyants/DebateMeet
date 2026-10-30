@@ -80,28 +80,32 @@ export function MotionDisplay({
   editable: boolean
 }) {
   const motion = useStore(controller.store, (state) => state.snapshot?.motion)
-  const [view, setView] = useState<'motion' | 'info' | null>(null)
+  const fullMotion = motion?.text ?? ''
+  const [open, setOpen] = useState(false)
   return (
     <section className="motion-heading" aria-label={s.motion}>
       <p className="motion-text font-display text-title font-medium" data-testid="motion-text">
-        {motion?.text ? `«${motion.text}»` : s.motionEmpty}
+        {motion?.text ? `${s.motion}: ${motion.text}` : s.motionEmpty}
       </p>
       <div className="motion-actions">
-        {motion?.text && (
-          <button className="text-link motion-full" type="button" onClick={() => setView('motion')}>
+        {(Boolean(motion?.text) || Boolean(motion?.infoslide)) && (
+          <button className="text-link motion-full" type="button" onClick={() => setOpen(true)}>
             {s.fullMotion}
-          </button>
-        )}
-        {motion?.infoslide && (
-          <button className="text-link" type="button" onClick={() => setView('info')}>
-            {s.infoslide}
           </button>
         )}
         {editable && <MotionEditorButton controller={controller} />}
       </div>
-      {view !== null && (
-        <Sheet title={view === 'motion' ? s.motion : s.infoslide} onClose={() => setView(null)}>
-          <p className="plain-text">{view === 'motion' ? motion?.text : motion?.infoslide}</p>
+      {open && (
+        <Sheet title={s.motion} onClose={() => setOpen(false)}>
+          <div className="motion-full-content">
+            <p className="plain-text">{fullMotion.length > 0 ? fullMotion : s.motionEmpty}</p>
+            {motion?.infoslide && (
+              <section>
+                <h3 className="text-caption font-medium">{s.infoslide}</h3>
+                <p className="plain-text">{motion.infoslide}</p>
+              </section>
+            )}
+          </div>
         </Sheet>
       )}
     </section>

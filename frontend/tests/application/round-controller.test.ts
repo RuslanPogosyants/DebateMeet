@@ -465,7 +465,7 @@ it('applies accepted timer state before a delayed room subscription transition',
     expect(controller.timers.store.getState().snapshot?.version).toBe(2)
   })
   expect(controller.store.getState().snapshot?.version).toBe(1)
-  expect(timerAudio[0]?.plans.at(-1)).toHaveLength(4)
+  expect(timerAudio[0]?.plans.at(-1)).toHaveLength(2)
   await controller.leave()
   pending.resolve?.()
   await sending

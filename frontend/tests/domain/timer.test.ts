@@ -43,9 +43,9 @@ describe('timer projection', () => {
   )
 
   it('deduplicates coincident signals and omits zero milestones', () => {
-    expect(speechMilestones(60000)).toEqual([60000, 75000])
-    expect(speechMilestones(120000)).toEqual([60000, 120000, 135000])
-    expect(speechMilestones(420000)).toEqual([60000, 360000, 420000, 435000])
+    expect(speechMilestones(60000)).toEqual([])
+    expect(speechMilestones(120000)).toEqual([60000])
+    expect(speechMilestones(420000)).toEqual([60000, 360000])
   })
 
   it('has no preparation cues or retroactive speech cues after joining or setting time', () => {
@@ -53,7 +53,7 @@ describe('timer projection', () => {
     value.timers.prep = running(900000)
     expect(futureSpeechCues(value, 100000)).toEqual([])
     value.timers.speech = running()
-    expect(futureSpeechCues(value, 460000).map((cue) => cue.delayMs)).toEqual([60000, 75000])
+    expect(futureSpeechCues(value, 460000).map((cue) => cue.delayMs)).toEqual([])
     const ids = futureSpeechCues(value, 100000).map((cue) => cue.id)
     expect(futureSpeechCues({ ...value, version: 999 }, 100000).map((cue) => cue.id)).toEqual(ids)
     expect(
@@ -73,6 +73,33 @@ describe('timer projection', () => {
           expect(remainingMs(timer, 100000 + elapsed)).toBe(duration - elapsed)
         },
       ),
+    )
+  })
+})
+
+describe('shared countdown signals', () => {
+  it('signals after the first minute and with one minute remaining, never at zero', () => {
+    const value = snapshot()
+    value.timers.speech = running()
+    expect(futureSpeechCues(value, 100000).map((cue) => cue.delayMs)).toEqual([60000, 360000])
+    expect(futureSpeechCues(value, 460000)).toEqual([])
+    expect(futureSpeechCues(value, 520000)).toEqual([])
+  })
+  it('deduplicates coincident marks and skips zero or end marks on a short timer', () => {
+    const value = snapshot()
+    value.timers.speech = running(120000)
+    expect(futureSpeechCues(value, 100000)).toHaveLength(1)
+    value.timers.speech = running(60000)
+    expect(futureSpeechCues(value, 100000)).toEqual([])
+  })
+  it('retains signal identity for unrelated snapshots and replaces it after editing a deadline', () => {
+    const value = snapshot()
+    value.timers.speech = running()
+    const original = futureSpeechCues(value, 100000)
+    expect(futureSpeechCues({ ...value, version: 99 }, 100000)).toEqual(original)
+    value.timers.speech.endsAt = 600000
+    expect(futureSpeechCues(value, 100000).map((cue) => cue.id)).not.toEqual(
+      original.map((cue) => cue.id),
     )
   })
 })

@@ -9,7 +9,7 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 
 from debatemeet.round.domain.drum import DrawnPosition, DrawResult
 from debatemeet.round.domain.ids import ParticipantId
-from debatemeet.round.domain.position import Position
+from debatemeet.round.domain.position import TEAM_POSITIONS, Position
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.timer import TimerKind
 from debatemeet.round.infrastructure.mapper import decode_round, encode_round
@@ -35,7 +35,7 @@ class MotionAndDrum(RuleBasedStateMachine):
         self.round.next_speech(ALICE, self.now)
         self.round.pull_events()
         self.unrelated = copy.deepcopy(self.round)
-        self.enabled = set(Position)
+        self.enabled = set(TEAM_POSITIONS)
         self.remove_drawn = True
         self.drawn: list[DrawnPosition] = []
         self.count = 0
@@ -111,7 +111,7 @@ class MotionAndDrum(RuleBasedStateMachine):
         assert drum.drawn == tuple(self.drawn)
         assert drum.last == self.last
         assert drum.draw_count == self.count
-        assert len({entry.position for entry in drum.drawn}) == len(drum.drawn) <= 4
+        assert len({entry.position for entry in drum.drawn}) == len(drum.drawn) <= len(Position)
         assert len({entry.draw_no for entry in drum.drawn}) == len(drum.drawn)
         assert all(entry.draw_no <= self.count for entry in drum.drawn)
 

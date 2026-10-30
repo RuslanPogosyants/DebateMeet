@@ -90,6 +90,7 @@ test('a lost draw response retries the same command and drum settings persist af
       await route.abort('failed')
     } else await route.continue()
   })
+  await page.getByRole('tab', { name: 'Жребий', exact: true }).click()
   await page.getByRole('button', { name: 'Тянуть', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Повторить команду', exact: true })).toBeVisible()
   await expect.poll(async () => (await snapshot(page)).drum.drawCount).toBe(1)
@@ -99,7 +100,9 @@ test('a lost draw response retries the same command and drum settings persist af
   expect(keys[0]).toMatch(/^[a-f0-9-]{36}$/u)
   expect(keys[1]).toBe(keys[0])
   expect((await snapshot(page)).drum.drawCount).toBe(1)
+  await page.getByRole('tab', { name: 'Общий чат', exact: true }).click()
   await expect(chat(page).locator('.chat-system')).toHaveCount(1)
+  await page.getByRole('tab', { name: 'Жребий', exact: true }).click()
 
   await page.getByText('Меню жребия', { exact: true }).click()
   await page.getByRole('button', { name: 'Настроить жребий', exact: true }).click()
@@ -110,11 +113,14 @@ test('a lost draw response retries the same command and drum settings persist af
   await configuration.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect.poll(async () => (await snapshot(page)).drum.enabled).toEqual(['og'])
   for (const drawCount of [2, 3]) {
+    await page.getByRole('tab', { name: 'Жребий', exact: true }).click()
     await page.getByRole('button', { name: 'Тянуть', exact: true }).click()
     await expect.poll(async () => (await snapshot(page)).drum.drawCount).toBe(drawCount)
     expect((await snapshot(page)).drum.last?.position).toBe('og')
   }
+  await page.getByRole('tab', { name: 'Общий чат', exact: true }).click()
   await expect(chat(page).locator('.chat-system')).toHaveCount(3)
+  await page.getByRole('tab', { name: 'Жребий', exact: true }).click()
   await page.getByRole('button', { name: 'Сбросить барабан', exact: true }).click()
   const reset = page.getByRole('dialog', { name: 'Сбросить барабан', exact: true })
   await expect(reset.getByRole('button', { name: 'Отмена', exact: true })).toBeFocused()
@@ -171,18 +177,21 @@ test('motion draw and chat cross logical rooms through LiveKit while audio stays
       await expect(person.getByTestId('motion-text')).toContainText(
         'Эта Палата поддерживает открытые дебаты',
       )
-      await person.getByRole('button', { name: 'Инфослайд', exact: true }).click()
-      const info = person.getByRole('dialog', { name: 'Инфослайд', exact: true })
+      await person.getByRole('button', { name: 'Полностью', exact: true }).click()
+      const info = person.getByRole('dialog', { name: 'Резолюция', exact: true })
+      await expect(info).toContainText('Эта Палата поддерживает открытые дебаты')
       await expect(info).toContainText('Общий факт\nВторая строка')
       await info.getByRole('button', { name: 'Закрыть', exact: true }).click()
     }
     await expect(team.getByRole('button', { name: 'Тянуть', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Запустить речь', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Пауза речи', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: 'Запустить таймер', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Пауза таймера', exact: true })).toBeEnabled()
+    await page.getByRole('tab', { name: 'Жребий', exact: true }).click()
     await page.getByRole('button', { name: 'Тянуть', exact: true }).click()
     await expect.poll(async () => (await snapshot(page)).drum.drawCount).toBe(1)
     const position = (await snapshot(page)).drum.last?.position.toUpperCase()
     if (position === undefined) throw new Error('The draw did not return a position')
+    await page.getByRole('tab', { name: 'Общий чат', exact: true }).click()
     for (const person of [page, base, team]) {
       await expect(chat(person).getByText(`(жребий: ${position})`, { exact: true })).toHaveCount(1)
     }
@@ -195,7 +204,7 @@ test('motion draw and chat cross logical rooms through LiveKit while audio stays
     const roundId = new URL(page.url()).pathname.split('/').at(-1) ?? ''
     expect(await adminCommand('delete-message', roundId, id)).toEqual({ deleted: 1 })
     await expect(chat(base).locator(`[data-message-id="${id}"]`)).toHaveCount(0)
-    expect((await snapshot(page)).timers.speech.status).toBe('running')
+    expect((await snapshot(page)).timers.prep.status).toBe('running')
     expect((await outputBands(team, [440]))[0]).toBeLessThan(0.001)
     await page.screenshot({ path: testInfo.outputPath('content-desktop.png'), fullPage: true })
     await page.getByRole('button', { name: 'Всех в базу', exact: true }).click()
@@ -278,8 +287,8 @@ test('long multiline motion preserves visible controls at every supported layout
   const motion = `a${'\n'.repeat(298)}a`
   await command(page, 'motion', { text: motion, infoslide: 'Facts' })
   await expect(page.getByTestId('motion-text')).toContainText(motion)
-  await command(page, 'timers/speech/start')
-  await expect(page.getByRole('button', { name: 'Пауза речи', exact: true })).toBeEnabled()
+  await command(page, 'timers/prep/start')
+  await expect(page.getByRole('button', { name: 'Пауза таймера', exact: true })).toBeEnabled()
   for (const size of [
     { width: 1440, height: 900 },
     { width: 1366, height: 650 },
@@ -290,17 +299,14 @@ test('long multiline motion preserves visible controls at every supported layout
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true)
-    const controls =
-      size.width <= 600
-        ? ['Микрофон выключен', 'Камера выключена', 'Поднять руку', 'Чат', 'Ещё']
-        : ['Микрофон выключен', 'Камера выключена', 'Поднять руку', 'Выйти']
+    const controls = ['Микрофон выключен', 'Камера выключена', 'Поднять руку', 'Чат', 'Ещё']
     for (const name of controls) {
       const box = await page.getByRole('button', { name, exact: true }).boundingBox()
       if (box === null) throw new Error(`The ${name} control is hidden`)
       expect(box.y).toBeGreaterThanOrEqual(0)
       expect(box.y + box.height).toBeLessThanOrEqual(size.height)
     }
-    await expect(page.getByRole('timer', { name: 'Таймер речи', exact: true })).toBeInViewport()
+    await expect(page.getByRole('timer', { name: 'Таймер', exact: true })).toBeInViewport()
     if (size.width >= 960) {
       await expect
         .poll(() => chat(page).evaluate((element) => element.clientHeight))
@@ -315,7 +321,7 @@ test('long multiline motion preserves visible controls at every supported layout
     }
     await page.getByRole('button', { name: 'Полностью', exact: true }).click()
     const full = page.getByRole('dialog', { name: 'Резолюция', exact: true })
-    await expect(full.locator('.plain-text')).toHaveText(motion)
+    await expect(full.locator('.plain-text')).toHaveText([motion, 'Facts'])
     await full.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await page.screenshot({
       path: testInfo.outputPath(`content-${size.width}.png`),

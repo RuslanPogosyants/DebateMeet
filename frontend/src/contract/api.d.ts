@@ -833,7 +833,7 @@ export interface components {
          * Position
          * @enum {string}
          */
-        Position: "og" | "oo" | "cg" | "co";
+        Position: "og" | "oo" | "cg" | "co" | "og1" | "og2" | "oo1" | "oo2" | "cg1" | "cg2" | "co1" | "co2";
         /** PostMessageBody */
         PostMessageBody: {
             /** Text */

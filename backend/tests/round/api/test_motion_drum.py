@@ -110,3 +110,40 @@ async def test_motion_drum_reject_invalid_inputs_and_nonjudge(commands: CommandA
             assert invalid.status_code == 422
         no_key = await client.post(f"{base}/drum/draw", json={}, headers=auth)
         assert no_key.status_code == 422
+
+
+async def test_speaker_preset_accepts_eight_positions_and_returns_them_in_the_shared_snapshot(
+    commands: CommandApp,
+) -> None:
+    async with http_client(commands.app) as client:
+        round_id = (await client.post("/api/rounds")).json()["id"]
+        base = f"/api/rounds/{round_id}"
+        joined = (await client.post(f"{base}/join", json={"name": "Судья"})).json()
+        auth = {"Authorization": f"Bearer {joined['participantId']}.{joined['secret']}"}
+        await ConnectParticipant(commands.store, FixedClock(T0))(
+            RoundId(round_id), ParticipantId(joined["participantId"]), SessionId("PA_judge"), "E1"
+        )
+        claimed = await client.post(
+            f"{base}/judge/claim", json={}, headers={**auth, "Idempotency-Key": str(uuid4())}
+        )
+        assert claimed.status_code == 200
+        positions = [f"{team}{number}" for team in ("og", "oo", "cg", "co") for number in (1, 2)]
+        configured = await client.post(
+            f"{base}/drum/configure",
+            json={"enabled": list(reversed(positions)), "removeDrawn": True},
+            headers={**auth, "Idempotency-Key": str(uuid4())},
+        )
+        assert configured.status_code == 200
+        assert configured.json()["drum"]["enabled"] == positions
+        for _ in positions:
+            drawn = await client.post(
+                f"{base}/drum/draw", json={}, headers={**auth, "Idempotency-Key": str(uuid4())}
+            )
+            assert drawn.status_code == 200
+        assert len(drawn.json()["drum"]["drawn"]) == 8
+        assert {entry["position"] for entry in drawn.json()["drum"]["drawn"]} == set(positions)
+        empty = await client.post(
+            f"{base}/drum/draw", json={}, headers={**auth, "Idempotency-Key": str(uuid4())}
+        )
+        assert empty.status_code == 409
+        assert empty.json()["code"] == "drum_empty"
