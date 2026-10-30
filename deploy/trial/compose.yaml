@@ -1,0 +1,14 @@
+# Offline delivery of the existing server bundle for the temporary trial.
+# Every invocation also loads server/compose.yaml, .env and release.env.
+services:
+  postgres:
+    image: debatemeet-postgres:${DM_RELEASE_COMMIT:?}
+    pull_policy: never
+  backend:
+    pull_policy: never
+  livekit:
+    image: debatemeet-livekit:${DM_RELEASE_COMMIT:?}
+    pull_policy: never
+  caddy:
+    image: debatemeet-caddy:${DM_RELEASE_COMMIT:?}
+    pull_policy: never
