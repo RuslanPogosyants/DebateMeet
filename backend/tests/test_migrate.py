@@ -10,10 +10,11 @@ from sqlalchemy import text
 from bots import dev
 from debatemeet.migrate import alembic_config, migrate
 from debatemeet.shared.infrastructure.database import create_engine
+from tests.shared.infrastructure.isolated_database import isolated_database
 
 pytestmark = pytest.mark.postgres
 
-HEAD = "0002"
+HEAD = ScriptDirectory.from_config(alembic_config()).get_current_head()
 # A revision that no image has: the database is ahead of the image.
 FUTURE = "9999"
 
@@ -35,15 +36,10 @@ async def revisions(database_url: str) -> list[str]:
     return await execute(database_url, "SELECT version_num FROM alembic_version")
 
 
-RESET = ("DROP SCHEMA public CASCADE", "CREATE SCHEMA public")
-
-
 @pytest.fixture
 async def fresh_database(database_url: str) -> AsyncIterator[str]:
-    """An empty test database; the fixture `engine` migrates it again for the tests after."""
-    await execute(database_url, *RESET)
-    yield database_url
-    await execute(database_url, *RESET)
+    async with isolated_database(database_url) as isolated:
+        yield isolated
 
 
 def test_the_history_is_one_line() -> None:

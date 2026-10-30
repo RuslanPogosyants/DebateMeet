@@ -146,3 +146,286 @@
     outline-offset: 2px;
   }
 }
+
+/* Entry and base conversation of slice 1; the judge controls arrive in later slices. */
+.start-shell,
+.entry-shell {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 32px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 20px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.brand-dash {
+  font-size: 28px;
+}
+.start-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 100px;
+  margin-top: 100px;
+}
+.start-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 24px;
+}
+.start-description {
+  max-width: 440px;
+  font-size: 20px;
+  line-height: 1.5;
+}
+.action,
+.action-primary {
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+.action-primary {
+  background: var(--foreground);
+  color: var(--background);
+  border-color: var(--foreground);
+}
+.action:disabled,
+.action-primary:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.action[aria-pressed='true'] {
+  border-color: var(--foreground);
+  background: var(--secondary);
+}
+.text-link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.recent-rounds {
+  border-top: 1px solid var(--foreground);
+  padding-top: 18px;
+}
+.recent-rounds h2 {
+  margin-bottom: 24px;
+}
+.recent-rounds li {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  padding: 18px 0;
+}
+.entry-heading,
+.meeting-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+}
+.entry-layout {
+  margin-top: 64px;
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 64px;
+  align-items: start;
+}
+.entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.entry-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+.entry-form input,
+.device-selectors select {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 100%;
+  background: var(--background);
+}
+.entry-form input[aria-invalid='true'] {
+  border: 2px solid var(--foreground);
+}
+.preview-stage {
+  aspect-ratio: 4 / 3;
+  background: var(--stage);
+  color: var(--on-stage);
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.preview-stage video,
+.participant-tile video {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+.video-hidden {
+  visibility: hidden;
+}
+.preview-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.device-selectors {
+  display: grid;
+  gap: 12px;
+  padding-top: 20px;
+}
+.device-selectors label {
+  display: grid;
+  gap: 8px;
+}
+.device-statuses {
+  padding-top: 24px;
+  display: grid;
+  gap: 12px;
+}
+.device-statuses p,
+.server-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+.device-statuses p span {
+  text-align: right;
+  max-width: 72%;
+  color: var(--muted-foreground);
+}
+.device-statuses meter {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--foreground);
+}
+.meeting-shell {
+  min-height: 100svh;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.meeting-heading h1 {
+  margin: 4px 0;
+}
+.meeting-heading p:last-child {
+  color: var(--muted-foreground);
+}
+.meeting-stage {
+  flex: 1;
+  background: var(--stage);
+  color: var(--on-stage);
+  padding: 2px;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+.participant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 2px;
+  flex: 1;
+}
+.participant-tile {
+  min-height: 260px;
+  background: var(--tile);
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.own-tile {
+  background: var(--tile-own);
+}
+.tile-placeholder {
+  font-size: 28px;
+  padding: 30px;
+  text-align: center;
+}
+.tile-caption {
+  position: absolute;
+  bottom: 0;
+  inset-inline: 0;
+  background: var(--tile);
+  padding: 10px 14px;
+}
+.tile-secondary,
+.alone-message,
+.more-people {
+  color: var(--on-stage-muted);
+}
+.speaker-dash {
+  color: var(--word);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 15px;
+}
+.alone-message,
+.more-people {
+  padding: 20px;
+  text-align: center;
+}
+.meeting-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.leave-action {
+  margin-left: auto;
+}
+.meeting-banner {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+  border-block: 1px solid var(--border);
+  padding: 12px 0;
+}
+@media (max-width: 760px) {
+  .start-shell,
+  .entry-shell,
+  .meeting-shell {
+    padding: 24px 18px;
+  }
+  .start-layout {
+    margin-top: 56px;
+    grid-template-columns: 1fr;
+    gap: 48px;
+  }
+  .entry-layout {
+    margin-top: 32px;
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .entry-form {
+    order: -1;
+  }
+  .meeting-heading {
+    align-items: flex-start;
+  }
+  .meeting-controls .action {
+    padding-inline: 12px;
+  }
+  .participant-tile {
+    min-height: 220px;
+  }
+}

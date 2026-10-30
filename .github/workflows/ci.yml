@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 0.11.25
           working-directory: backend
@@ -140,9 +140,9 @@ jobs:
           persist-credentials: false
       # compose.yaml rather than a service container: services start before the checkout and
       # cannot see deploy/dev/livekit.yaml (docs/architecture.md, section 9).
-      - name: Start LiveKit
-        run: docker compose up -d livekit
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Start Postgres and LiveKit
+        run: docker compose up -d --wait postgres livekit
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 0.11.25
           working-directory: backend
@@ -152,9 +152,9 @@ jobs:
       # The tests serve the webhook endpoint on port 8000, where LiveKit sends its webhooks.
       - name: pytest (LiveKit)
         run: uv run --no-sync pytest -m livekit
-      - name: LiveKit logs
+      - name: Media services logs
         if: failure()
-        run: docker compose logs livekit
+        run: docker compose logs postgres livekit
 
   frontend:
     name: Frontend
@@ -169,7 +169,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           package-manager-cache: false
@@ -215,13 +215,13 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 0.11.25
           working-directory: backend
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           package-manager-cache: false
@@ -304,7 +304,7 @@ jobs:
             koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
             tools/app-version.sh deploy/server/livekit/livekit.sh # v0.11.0
       # No uv cache in a job that builds the images servers will run: a poisoned cache would reach them.
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         if: ${{ !cancelled() }}
         with:
           version: 0.11.25
@@ -441,6 +441,44 @@ jobs:
           # `ports` exits 0 even when it cannot parse the config, so its output is what counts.
           grep -q '^TCP Ports' <<< "$ports"
 
+  e2e:
+    name: E2E
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.media == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.11.25
+          working-directory: backend
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: frontend/package.json
+          cache: true
+          cache_dependency_path: frontend/pnpm-lock.yaml
+      - name: Install
+        run: |
+          (cd backend && uv sync --locked)
+          (cd frontend && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+      - name: Start Postgres and LiveKit
+        run: docker compose up -d --wait
+      - name: Built application entry and remote audio
+        working-directory: frontend
+        run: pnpm test:e2e
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --tail 100
+
   # Hygiene and CodeQL run on every PR in full: they are cheap, and code scanning compares the
   # analysis of each language with the base branch.
   hygiene:
@@ -451,7 +489,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 0.11.25
           enable-cache: false
@@ -486,18 +524,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: ${{ matrix.language }}
           build-mode: none
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: /language:${{ matrix.language }}
 
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, backend, contract, frontend, images, media, hygiene, codeql]
+    needs:
+      [
+        changes,
+        backend,
+        contract,
+        frontend,
+        images,
+        media,
+        e2e,
+        hygiene,
+        codeql,
+      ]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

@@ -1,8 +1,6 @@
 import secrets
 
 
-class SecretsRandom:
-    """RandomSource from the operating system's cryptographic generator."""
-
+class SecureRandom:
     def token(self, size: int) -> str:
         return secrets.token_urlsafe(size)

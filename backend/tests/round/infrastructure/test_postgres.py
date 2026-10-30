@@ -1,316 +1,355 @@
-"""The round's ports on a real Postgres: locks, keys, the log, notifications, limits."""
-
 import asyncio
-import contextlib
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from debatemeet.main import build_app
+from debatemeet.migrate import migrate
+from debatemeet.round.api.entry import RoundEndpoints
 from debatemeet.round.application.commands import (
     CreateRound,
+    Joined,
     JoinRequest,
     JoinRound,
     LeaveRound,
     ReadSnapshot,
 )
 from debatemeet.round.application.credentials import Credentials
-from debatemeet.round.domain.events import ParticipantJoined
+from debatemeet.round.application.ports import ArchivedParticipant, CommittedRound, Observation
+from debatemeet.round.application.presence import ConnectParticipant, SyncPresence
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
-from debatemeet.round.domain.presence import Disconnected, Pending
-from debatemeet.round.domain.round import Round
-from debatemeet.round.infrastructure.postgres import (
-    CHANNEL,
-    PostgresRoundReader,
-    PostgresRoundTransaction,
-    PostgresRoundTransactions,
+from debatemeet.round.domain.presence import Connected
+from debatemeet.round.infrastructure.postgres import PostgresRounds
+from debatemeet.shared.application.errors import (
+    RoundBusyError,
+    UnauthorizedError,
+    UnreadableRoundError,
 )
-from debatemeet.shared.application.errors import RoundBusyError
 from debatemeet.shared.application.ports import KeyClaim
-from debatemeet.shared.infrastructure.postgres import (
-    PostgresRateLimiter,
-    PostgresSystemState,
-    window_start,
-)
-from debatemeet.shared.infrastructure.random import SecretsRandom
-from tests.fakes import FixedClock
-from tests.round.application.fakes import FakeMedia
-from tests.round.builders import ROUND_ID, T0, at
+from debatemeet.shared.domain.errors import DomainError
+from debatemeet.shared.infrastructure.persistence import PostgresRateLimiter
+from debatemeet.shared.infrastructure.randomness import SecureRandom
+from tests.client import http_client
+from tests.fakes import FixedClock, RecordingMediaEvents, StubHealthProbe, StubWebhookVerifier
+from tests.round.builders import T0, at
+from tests.shared.infrastructure.isolated_database import isolated_database
 
 pytestmark = pytest.mark.postgres
-
-VIKA = ParticipantId("vika00000001")
-
-
-async def stored_round(transactions: PostgresRoundTransactions) -> Round:
-    round_ = Round.create(ROUND_ID, T0)
-    async with transactions.begin() as tx:
-        await tx.rounds.add(round_, T0)
-    return round_
+IP = "203.0.113.1"
 
 
-class CommandFailedError(Exception):
-    pass
+class Media:
+    url = "ws://media.test"
 
+    def __init__(self, rounds: PostgresRounds) -> None:
+        self.rounds = rounds
+        self.opened: list[CommittedRound] = []
+        self.observation: Observation | None = None
 
-async def rolled_back(
-    transactions: PostgresRoundTransactions,
-    work: Callable[[PostgresRoundTransaction], Awaitable[object]],
-) -> None:
-    """Run `work` in a transaction that fails right after it."""
-    with contextlib.suppress(CommandFailedError):
-        async with transactions.begin() as tx:
-            await work(tx)
-            raise CommandFailedError
-
-
-async def column(engine: AsyncEngine, query: str) -> list[object]:
-    async with engine.connect() as connection:
-        return [row[0] for row in await connection.execute(text(query))]
-
-
-class TestRounds:
-    async def test_a_new_round_is_version_one(self, engine: AsyncEngine) -> None:
-        await stored_round(PostgresRoundTransactions(engine))
-
-        committed = await PostgresRoundReader(engine).committed(ROUND_ID)
-
+    async def open_media_room(self, round_id: RoundId) -> None:
+        committed = await self.rounds.committed(round_id)
         assert committed is not None
-        assert (committed.round.version, committed.epoch, committed.committed_at) == (1, 1, T0)
+        self.opened.append(committed)
 
-    async def test_save_moves_the_version_and_keeps_the_state(self, engine: AsyncEngine) -> None:
-        transactions = PostgresRoundTransactions(engine)
-        await stored_round(transactions)
+    def token(self, round_id: RoundId, participant_id: ParticipantId, name: str) -> str:
+        return "token"
 
-        async with transactions.begin() as tx:
-            round_ = await tx.rounds.get_for_update(ROUND_ID)
-            assert round_ is not None
-            round_.join(VIKA, "Вика", at(5), returning=False)
-            await tx.rounds.save(round_, at(5))
-            assert round_.version == 2
-
-        committed = await PostgresRoundReader(engine).committed(ROUND_ID)
-        assert committed is not None
-        assert committed.round.version == 2
-        assert committed.committed_at == at(5)
-        assert committed.round.participants[VIKA].presence == Pending(at(5))
-
-    async def test_a_missing_round_is_none(self, engine: AsyncEngine) -> None:
-        async with PostgresRoundTransactions(engine).begin() as tx:
-            assert await tx.rounds.get_for_update(RoundId("R" * 22)) is None
-        assert await PostgresRoundReader(engine).committed(RoundId("R" * 22)) is None
-
-    async def test_a_failed_command_leaves_nothing(self, engine: AsyncEngine) -> None:
-        transactions = PostgresRoundTransactions(engine)
-
-        await rolled_back(transactions, lambda tx: tx.rounds.add(Round.create(ROUND_ID, T0), T0))
-
-        assert await PostgresRoundReader(engine).committed(ROUND_ID) is None
-
-    async def test_a_second_writer_waits_then_gives_up_as_busy(self, engine: AsyncEngine) -> None:
-        transactions = PostgresRoundTransactions(engine, lock_timeout=timedelta(milliseconds=200))
-        await stored_round(transactions)
-
-        async with transactions.begin() as holder:
-            await holder.rounds.get_for_update(ROUND_ID)
-            with pytest.raises(RoundBusyError):
-                async with transactions.begin() as waiter:
-                    await waiter.rounds.get_for_update(ROUND_ID)
+    async def observe(self, round_id: RoundId) -> Observation | None:
+        return self.observation
 
 
-class TestArchive:
-    async def test_a_participant_is_found_by_round_and_id(self, engine: AsyncEngine) -> None:
-        transactions = PostgresRoundTransactions(engine)
-        await stored_round(transactions)
-        async with transactions.begin() as tx:
-            await tx.archive.add(ROUND_ID, VIKA, "Вика", b"\x01" * 32, T0)
-            await tx.archive.rejoined(ROUND_ID, VIKA, "Виктория", at(9))
-
-        found = await PostgresRoundReader(engine).participant(ROUND_ID, VIKA)
-
-        assert found is not None
-        assert (found.name, found.secret_hash, found.revoked) == ("Виктория", b"\x01" * 32, False)
-        assert await PostgresRoundReader(engine).participant(RoundId("R" * 22), VIKA) is None
-
-
-class TestEventLog:
-    async def test_events_are_logged_with_ids_only(self, engine: AsyncEngine) -> None:
-        transactions = PostgresRoundTransactions(engine)
-        await stored_round(transactions)
-
-        async with transactions.begin() as tx:
-            await tx.events.append(
-                ROUND_ID,
-                2,
-                [ParticipantJoined(at=at(1), participant_id=VIKA, returning=True)],
-                VIKA,
-            )
-
-        async with engine.connect() as connection:
-            row = (
-                await connection.execute(
-                    text("SELECT version, type, data, actor, at FROM event_log")
-                )
-            ).one()
-        assert (row.version, row.type, row.actor, row.at) == (2, "ParticipantJoined", VIKA, at(1))
-        assert row.data == {"participant_id": VIKA, "returning": True}
-
-
-class TestCommandKeys:
-    async def claim(
-        self, transactions: PostgresRoundTransactions, request_hash: str = "h1"
-    ) -> KeyClaim:
-        async with transactions.begin() as tx:
-            return await tx.command_keys.claim(
-                round_id=ROUND_ID,
-                participant_id=None,
-                key="EV_1",
-                request_hash=request_hash,
-                now=T0,
-            )
-
-    async def test_the_first_repeat_and_conflict(self, engine: AsyncEngine) -> None:
-        transactions = PostgresRoundTransactions(engine)
-
-        assert await self.claim(transactions) is KeyClaim.FIRST
-        assert await self.claim(transactions) is KeyClaim.REPEATED
-        assert await self.claim(transactions, "h2") is KeyClaim.CONFLICT
-
-    async def test_keys_of_participants_and_webhooks_do_not_meet(self, engine: AsyncEngine) -> None:
-        async with PostgresRoundTransactions(engine).begin() as tx:
-            claims = [
-                await tx.command_keys.claim(
-                    round_id=ROUND_ID, participant_id=who, key="K", request_hash="h", now=T0
-                )
-                for who in (None, VIKA, "lev000000002")
-            ]
-        assert claims == [KeyClaim.FIRST] * 3
-
-    async def test_a_concurrent_repeat_waits_for_the_first_to_commit(
-        self, engine: AsyncEngine
-    ) -> None:
-        transactions = PostgresRoundTransactions(engine)
-        first_claimed = asyncio.Event()
-        release_first = asyncio.Event()
-
-        async def first() -> KeyClaim:
-            async with transactions.begin() as tx:
-                claim = await tx.command_keys.claim(
-                    round_id=ROUND_ID, participant_id=None, key="EV_1", request_hash="h", now=T0
-                )
-                first_claimed.set()
-                await release_first.wait()
-                return claim
-
-        running = asyncio.create_task(first())
-        await first_claimed.wait()
-        repeat = asyncio.create_task(self.claim(transactions, "h"))
-        await asyncio.sleep(0.2)
-        assert not repeat.done()
-        release_first.set()
-
-        assert await running is KeyClaim.FIRST
-        assert await repeat is KeyClaim.REPEATED
-
-    async def test_a_key_of_a_rolled_back_command_is_free_again(self, engine: AsyncEngine) -> None:
-        transactions = PostgresRoundTransactions(engine)
-
-        await rolled_back(
-            transactions,
-            lambda tx: tx.command_keys.claim(
-                round_id=ROUND_ID, participant_id=None, key="EV_1", request_hash="h", now=T0
-            ),
+class World:
+    def __init__(self, engine: AsyncEngine, url: str) -> None:
+        self.engine = engine
+        self.url = url
+        self.rounds = PostgresRounds(engine)
+        self.clock = FixedClock(T0)
+        self.random = SecureRandom()
+        self.limits = PostgresRateLimiter(engine)
+        self.media = Media(self.rounds)
+        self.create = CreateRound(self.rounds, self.clock, self.random, self.limits)
+        self.join = JoinRound(
+            self.rounds, self.media, self.rounds, self.clock, self.random, self.limits, self.rounds
         )
+        self.connect = ConnectParticipant(self.rounds, self.clock)
+        self.sync = SyncPresence(self.rounds, self.media, self.clock)
 
-        assert await self.claim(transactions, "h") is KeyClaim.FIRST
+    async def number(self, sql: str) -> int:
+        async with self.engine.connect() as connection:
+            return int((await connection.execute(text(sql))).scalar_one())
 
 
 @pytest.fixture
-async def listener(engine: AsyncEngine) -> AsyncIterator[asyncio.Queue[str]]:
-    """LISTEN as the publisher does, on a connection of its own."""
-    heard: asyncio.Queue[str] = asyncio.Queue()
-    async with engine.connect() as connection:
-        raw = await connection.get_raw_connection()
-        # asyncpg's connection: add_listener calls back with (connection, pid, channel, payload).
-        driver = raw.driver_connection
-        assert driver is not None
-        await driver.add_listener(CHANNEL, lambda *args: heard.put_nowait(args[3]))
-        yield heard
+async def world(database_url: str) -> AsyncIterator[World]:
+    async with isolated_database(database_url) as url:
+        await migrate(url)
+        engine = create_async_engine(url)
+        try:
+            yield World(engine, url)
+        finally:
+            await engine.dispose()
 
 
-class TestNotifier:
-    async def test_the_publisher_hears_a_change_only_after_the_commit(
-        self, engine: AsyncEngine, listener: asyncio.Queue[str]
-    ) -> None:
-        transactions = PostgresRoundTransactions(engine)
-
-        async with transactions.begin() as tx:
-            await tx.notifier.round_changed(ROUND_ID)
-            await asyncio.sleep(0.1)
-            assert listener.empty()
-
-        assert await asyncio.wait_for(listener.get(), timeout=2) == ROUND_ID
-
-    async def test_a_rolled_back_change_is_never_heard(
-        self, engine: AsyncEngine, listener: asyncio.Queue[str]
-    ) -> None:
-        await rolled_back(
-            PostgresRoundTransactions(engine), lambda tx: tx.notifier.round_changed(ROUND_ID)
-        )
-
-        await asyncio.sleep(0.2)
-        assert listener.empty()
-
-
-class TestRateLimiter:
-    async def test_a_window_allows_its_limit(self, engine: AsyncEngine) -> None:
-        limiter = PostgresRateLimiter(engine)
-        minute = timedelta(minutes=1)
-
-        allowed = [await limiter.allow("join:ip", 2, minute, at(n)) for n in range(3)]
-        next_window = await limiter.allow("join:ip", 2, minute, at(60))
-
-        assert allowed == [True, True, False]
-        assert next_window is True
-        assert window_start(at(59), minute) == at(0)
-
-    async def test_keys_count_apart(self, engine: AsyncEngine) -> None:
-        limiter = PostgresRateLimiter(engine)
-
-        assert await limiter.allow("join:a", 1, timedelta(minutes=1), T0)
-        assert await limiter.allow("join:b", 1, timedelta(minutes=1), T0)
-
-
-async def test_the_epoch_starts_at_one(engine: AsyncEngine) -> None:
-    assert await PostgresSystemState(engine).epoch() == 1
-
-
-async def test_entry_and_leaving_on_postgres(engine: AsyncEngine) -> None:
-    clock = FixedClock(T0)
-    transactions = PostgresRoundTransactions(engine)
-    reader = PostgresRoundReader(engine)
-    limiter = PostgresRateLimiter(engine)
-    media = FakeMedia()
-
-    round_id = await CreateRound(transactions, clock, SecretsRandom(), limiter)("198.51.100.1")
-    join = JoinRound(
-        transactions, media, PostgresSystemState(engine), clock, SecretsRandom(), limiter
-    )
-    joined = await join(JoinRequest(round_id, "Вика", None, "198.51.100.1"))
+async def test_real_ports_persist_the_round_archive_and_events_together(world: World) -> None:
+    round_id = await world.create(IP)
+    joined = await world.join(JoinRequest(round_id, "Вика", None, IP))
     assert joined.secret is not None
     credentials = Credentials(joined.participant_id, joined.secret)
-    clock.moment = at(3)
-    await LeaveRound(transactions, clock)(round_id, credentials, SessionId("S1"))
 
-    committed = await ReadSnapshot(reader)(round_id, credentials)
+    returning = await world.join(JoinRequest(round_id, "Новое имя", credentials, IP))
+
+    committed = await world.rounds.committed(round_id)
     assert committed is not None
-    assert committed.round.participants[joined.participant_id].presence == Disconnected(at(3))
     assert committed.round.version == 3
-    assert media.opened == [(round_id, None)]
-    assert await column(engine, "SELECT type FROM event_log ORDER BY id") == [
-        "RoundCreated",
-        "ParticipantJoined",
-        "ParticipantDisconnected",
-    ]
+    assert returning.participant_id == joined.participant_id
+    assert returning.secret is None
+    assert len(world.media.opened) == 2
+    assert world.media.opened[0].round.version == 2
+    assert committed.round.participants[joined.participant_id].name == "Новое имя"
+    assert await world.number("SELECT count(*) FROM participants") == 1
+    async with world.engine.connect() as connection:
+        result = await connection.execute(text("SELECT data::text FROM event_log"))
+        events = [str(row[0]) for row in result]
+    assert "Вика" not in "".join(events)
+    assert joined.secret not in "".join(events)
+    assert await world.number("SELECT count(*) FROM event_log") == 3
+
+
+async def test_twenty_nine_plus_two_concurrent_joins_has_one_winner(world: World) -> None:
+    round_id = await world.create(IP)
+    for n in range(29):
+        await world.join(JoinRequest(round_id, f"Person {n}", None, IP))
+
+    results = await asyncio.gather(
+        world.join(JoinRequest(round_id, "Alice", None, IP)),
+        world.join(JoinRequest(round_id, "Bob", None, IP)),
+        return_exceptions=True,
+    )
+
+    assert sum(isinstance(result, Joined) for result in results) == 1
+    [refused] = [result for result in results if isinstance(result, DomainError)]
+    assert refused.code == "round_full"
+    assert await world.number("SELECT count(*) FROM participants") == 30
+    assert await world.number("SELECT count(*) FROM event_log") == 31
+
+
+async def test_concurrent_null_actor_webhooks_change_the_round_once(world: World) -> None:
+    round_id = await world.create(IP)
+    joined = await world.join(JoinRequest(round_id, "Вика", None, IP))
+
+    await asyncio.gather(
+        world.connect(round_id, joined.participant_id, SessionId("S1"), "EV_same"),
+        world.connect(round_id, joined.participant_id, SessionId("S1"), "EV_same"),
+    )
+
+    assert await world.number("SELECT version FROM rounds") == 3
+    assert await world.number("SELECT count(*) FROM command_keys") == 1
+    assert await world.number("SELECT count(*) FROM event_log") == 3
+
+
+async def test_rate_limits_are_atomic_and_fixed_windows_expire(world: World) -> None:
+    hits = await asyncio.gather(
+        *(world.limits.allow("burst", 3, timedelta(minutes=1), T0) for _ in range(20))
+    )
+
+    assert sum(hits) == 3
+    assert await world.number("SELECT hits FROM rate_limits WHERE key = 'burst'") == 20
+    assert await world.limits.allow("burst", 3, timedelta(minutes=1), at(60))
+    assert await world.limits.allow("another", 3, timedelta(minutes=1), T0)
+
+
+async def test_a_reused_key_checks_the_request_and_a_rollback_releases_it(world: World) -> None:
+    async with world.rounds.begin() as tx:
+        assert (
+            await tx.command_keys.claim(
+                round_id="missing", participant_id=None, key="K", request_hash="a", now=T0
+            )
+            is KeyClaim.FIRST
+        )
+    async with world.rounds.begin() as tx:
+        assert (
+            await tx.command_keys.claim(
+                round_id="missing", participant_id=None, key="K", request_hash="a", now=T0
+            )
+            is KeyClaim.REPEATED
+        )
+        assert (
+            await tx.command_keys.claim(
+                round_id="missing", participant_id=None, key="K", request_hash="b", now=T0
+            )
+            is KeyClaim.CONFLICT
+        )
+
+    async def rolled_back_command() -> None:
+        async with world.rounds.begin() as tx:
+            await tx.command_keys.claim(
+                round_id="missing", participant_id=None, key="rollback", request_hash="", now=T0
+            )
+            raise ValueError("roll back")
+
+    with pytest.raises(ValueError, match="roll back"):
+        await rolled_back_command()
+    assert await world.number("SELECT count(*) FROM command_keys") == 1
+
+
+async def test_a_lock_timeout_rolls_back_the_whole_command(world: World) -> None:
+    round_id = await world.create(IP)
+    async with world.engine.begin() as blocker:
+        await blocker.execute(
+            text("SELECT id FROM rounds WHERE id = :id FOR UPDATE"), {"id": round_id}
+        )
+        with pytest.raises(RoundBusyError):
+            await asyncio.wait_for(world.join(JoinRequest(round_id, "Alice", None, IP)), timeout=4)
+
+    assert await world.number("SELECT count(*) FROM participants") == 0
+    assert await world.number("SELECT count(*) FROM event_log") == 1
+    assert await world.number("SELECT version FROM rounds") == 1
+
+
+async def test_join_with_unknown_credentials_works_with_a_single_connection(world: World) -> None:
+    engine = create_async_engine(world.url, pool_size=1, max_overflow=0, pool_timeout=0.5)
+    try:
+        tiny = World(engine, world.url)
+        round_id = await tiny.create(IP)
+        unknown = Credentials(ParticipantId("x" * 12), "unknown-secret")
+
+        joined = await asyncio.wait_for(
+            asyncio.gather(
+                tiny.join(JoinRequest(round_id, "Alice", unknown, IP)),
+                tiny.join(JoinRequest(round_id, "Bob", unknown, IP)),
+            ),
+            timeout=3,
+        )
+
+        assert len({person.participant_id for person in joined}) == 2
+    finally:
+        await engine.dispose()
+
+
+async def test_revocation_after_preflight_is_checked_again_under_the_lock(world: World) -> None:
+    round_id = await world.create(IP)
+    joined = await world.join(JoinRequest(round_id, "Вика", None, IP))
+    assert joined.secret is not None
+
+    class RevokingReader:
+        async def committed(self, round_id: RoundId) -> CommittedRound | None:
+            return await world.rounds.committed(round_id)
+
+        async def participant(
+            self, round_id: RoundId, participant_id: ParticipantId
+        ) -> ArchivedParticipant | None:
+            record = await world.rounds.participant(round_id, participant_id)
+            async with world.engine.begin() as connection:
+                await connection.execute(text("UPDATE participants SET revoked = true"))
+            return record
+
+    join = JoinRound(
+        world.rounds,
+        world.media,
+        world.rounds,
+        world.clock,
+        world.random,
+        world.limits,
+        RevokingReader(),
+    )
+    with pytest.raises(UnauthorizedError) as refused:
+        await join(
+            JoinRequest(round_id, "Changed", Credentials(joined.participant_id, joined.secret), IP)
+        )
+    assert refused.value.revoked
+    assert await world.number("SELECT version FROM rounds") == 2
+
+
+async def test_unknown_document_schema_is_left_untouched(world: World) -> None:
+    round_id = await world.create(IP)
+    async with world.engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE rounds SET state = CAST(:state AS jsonb)"), {"state": '{"schema":999}'}
+        )
+
+    with pytest.raises(UnreadableRoundError):
+        await world.rounds.committed(round_id)
+    with pytest.raises(UnreadableRoundError):
+        async with world.rounds.begin() as tx:
+            await tx.rounds.get_for_update(round_id)
+    assert await world.number("SELECT (state->>'schema')::int FROM rounds") == 999
+
+
+async def test_a_webhook_waiting_for_the_lock_uses_the_time_after_the_lock(world: World) -> None:
+    round_id = await world.create(IP)
+    joined = await world.join(JoinRequest(round_id, "Вика", None, IP))
+    world.clock.moment = at(1)
+    async with world.engine.begin() as blocker:
+        await blocker.execute(
+            text("SELECT id FROM rounds WHERE id = :id FOR UPDATE"), {"id": round_id}
+        )
+        connecting = asyncio.create_task(
+            world.connect(round_id, joined.participant_id, SessionId("S1"), "EV_waited")
+        )
+        # PostgreSQL exposes the wait; time alone cannot prove that the command reached it.
+        for _ in range(100):
+            if await world.number(
+                "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                "AND wait_event_type = 'Lock'"
+            ):
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("the webhook did not reach the round lock")
+        world.clock.moment = at(3)
+    await connecting
+    world.media.observation = Observation(at=at(2), sessions={})
+    world.clock.moment = at(4)
+
+    await world.sync(round_id)
+
+    committed = await world.rounds.committed(round_id)
+    assert committed is not None
+    assert committed.round.participants[joined.participant_id].presence == Connected(
+        SessionId("S1"), at(3)
+    )
+
+
+async def test_leave_limits_before_the_row_lock_and_resumes_in_the_next_window(
+    world: World,
+) -> None:
+    app = build_app(
+        clock=world.clock,
+        health_probe=StubHealthProbe(),
+        webhook_verifier=StubWebhookVerifier(),
+        media_events=RecordingMediaEvents(),
+        version="test",
+        round_commands=RoundEndpoints(
+            world.create,
+            world.join,
+            LeaveRound(world.rounds, world.clock, world.rounds, world.limits),
+            ReadSnapshot(world.rounds),
+        ),
+    )
+    async with http_client(app) as client:
+        round_id = (await client.post("/api/rounds")).json()["id"]
+        participant = (
+            await client.post(f"/api/rounds/{round_id}/join", json={"name": "Вика"})
+        ).json()
+        headers = {
+            "Authorization": f"Bearer {participant['participantId']}.{participant['secret']}"
+        }
+        path = f"/api/rounds/{round_id}/leave"
+        for _ in range(10):
+            assert (
+                await client.post(path, json={"sid": "PA_closed"}, headers=headers)
+            ).status_code == 204
+        before = await world.rounds.committed(RoundId(round_id))
+        limited = await client.post(path, json={"sid": "PA_closed"}, headers=headers)
+        assert limited.status_code == 429
+        after = await world.rounds.committed(RoundId(round_id))
+        assert before is not None
+        assert after is not None
+        assert after.round.version == before.round.version
+        world.clock.moment = at(1)
+        assert (
+            await client.post(path, json={"sid": "PA_closed"}, headers=headers)
+        ).status_code == 204

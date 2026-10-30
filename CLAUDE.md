@@ -2,15 +2,18 @@
 
 Web platform for British Parliamentary debate rounds: one link = one round with six logical rooms (base, OG, OO, CG, CO, judges), shared timers, motion, position draw, hands, chat. Self-hosted LiveKit, FastAPI, Postgres, React. Goal: a high-tier pet project at pre-product level — production-grade engineering without premature product weight.
 
-**Current stage:** roadmap slices 0a (repository and local environment) and 0b (everything for the stand that needs no server: images, the deploy bundle `deploy/server/`, image builds in CI, the thin deploy agent `deploy/server/agent.py`) are done. Next is slice 1. Slices 1–6 are built and checked locally (dev stack, bots, E2E in CI); the stand itself — registry push, server, backups, alerts and every check that needs a real network — is slice S («С» in the Russian docs), after slice 6 (`docs/adr/0001-stand-after-slice-6.md`).
+**Current stage (2026-10-26, base revision `117f4fd` plus working-tree changes):** roadmap slices 0a (repository/local environment) and 0b (images, deploy bundle, CI image builds and the thin deploy agent) are implemented. Slice 1 code now connects the round/presence domain and use cases to Postgres, HTTP entry/snapshot endpoints, the LiveKit gateway/publisher and the client entry/media flow. Microphones start muted; device preview, local preferences, state validation and conditional snapshot polling are implemented. Local automated checks, image builds and the built-app Playwright scenario have passed, and implementation review findings have been addressed. The physical Chrome/laptop-speaker echo check is still unconfirmed. Do not call the acoustic requirement passed or enable volume above 100% based on synthetic tests. See `docs/architecture.md` §11 for exact evidence, remaining checks and the next slice 2 package.
+
+Slices 1–6 are developed and checked locally (dev stack, bots and E2E; CI is configured, a remote CI run is separate evidence). The stand itself — registry push, server, backups, alerts and every check that needs a real network — remains slice S («С» in the Russian docs), after slice 6 (`docs/adr/0001-stand-after-slice-6.md`). The architecture and API sections below describe the target design: room commands, judge controls, timers, chat/outbox and administration still belong to later slices.
 
 ## Source of truth
 
 - `docs/spec.md` — what we build (MVP decisions). Update it when the author changes a decision.
-- `docs/architecture.md` — how it is built: glossary, contexts, aggregates and invariants, presence transitions, layers, persistence, LiveKit integration, frontend, API, tests, CI/CD and operations, roadmap. Approved by the author and externally reviewed.
+- `docs/architecture.md` — target design: glossary, contexts, aggregates and invariants, presence transitions, layers, persistence, LiveKit integration, frontend, API, tests, CI/CD and operations; §11 tracks implementation status and the roadmap. Design approved by the author and externally reviewed.
 - `docs/design.md` — how the interface looks and behaves: the «Реплика» visual direction and its rules, round screen layout at every size, start and entry screens, action safety, states to draw. Chosen by the author after aesthetic and UX reviews of the first mockups.
 - `docs/research.md` — a historical snapshot (2026-09-27) with sources. Where it disagrees with spec or architecture (e.g. participant attributes, 60 s flag hold, round reset), spec and architecture win.
 - Read the relevant sections before proposing changes. Do not re-propose what they reject without new facts. Major changes go through an ADR in `docs/adr/`, discussed with the author first.
+- Keep `AGENTS.md` byte-for-byte identical to `CLAUDE.md` when editing either file.
 
 ## Principles
 
@@ -32,7 +35,7 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 - The judge never moves individuals: only `recall(room)` for a subroom and `recall_all`.
 - The link code is the round id (not separated). No organizer link; control is admin CLI commands on the server (`just admin …`).
 - Participant id (12 chars, public) and secret (256 bits) are issued by the server per round.
-- State reaches clients as a full versioned `RoundSnapshot`: reliable data packet on every change, room metadata at most every 2 s, snapshot in every command response, `GET /snapshot?epoch=&since=` every 15 s. Participant attributes are not used. Clients cannot publish data packets (no `canPublishData`); reactions go through the backend.
+- State reaches clients as a full versioned `RoundSnapshot`: reliable data packet on change, room metadata refreshed on the active leader's 2 s cadence (including unchanged state to repair a stale in-flight write after lease loss; see architecture §6), snapshot in every command response, `GET /snapshot?epoch=&since=` every 15 s. Participant attributes are not used. Clients cannot publish data packets (no `canPublishData`); reactions go through the backend.
 - Presence is a cache of LiveKit state with the transition table in §3; LiveKit is never called under the round row lock.
 - `@livekit/components-react` is not used: `MediaSession` is the single owner of subscriptions, track attachment and volume.
 
@@ -52,7 +55,7 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 ## Stack and pinned choices
 
 - Python 3.14, uv, FastAPI, Pydantic (API boundary and settings only), SQLAlchemy Core (no ORM), asyncpg, Alembic, livekit-api, structlog; ruff, mypy strict, pytest, Hypothesis.
-- Node ≥ 24, pnpm (with `minimumReleaseAge` and `trustPolicy`), Vite, React, TypeScript 6.0.x (TS 7 is not yet supported by the lint tooling), Zustand, React Router, Tailwind 4, shadcn/ui, livekit-client; oxlint, Prettier, Vitest, fast-check, Playwright.
+- Node ≥ 24, pnpm (version pinned by `frontend/package.json`, with `minimumReleaseAge` and `trustPolicy`), Vite, React, TypeScript 6.0.x (TS 7 is not yet supported by the lint tooling), Zustand, React Router, Tailwind 4, shadcn/ui, livekit-client; oxlint, Prettier, Vitest, fast-check, Playwright. `just test` runs unit/integration tests; `just test-e2e` builds the client and runs Chromium against real local Postgres/LiveKit with fake capture devices.
 - Dev infra: `docker compose up -d` in the repo root starts Postgres 18 (host port 5450, databases `debatemeet` and `debatemeet_test`) and LiveKit 1.13.7 (config in `deploy/dev/livekit.yaml`): it creates no media room on join (`room.auto_create: false`) and sends signed webhooks to the backend on `host.docker.internal:8000`. `just bots N` starts test participants with a tone and a test picture.
 - Servers never reach abroad (images, STUN, error tracking); the only exception is Caddy's ACME for TLS certificates. No Sentry SaaS.
 
