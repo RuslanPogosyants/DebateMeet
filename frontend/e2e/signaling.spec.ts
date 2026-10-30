@@ -103,6 +103,11 @@ for (const phase of ['upgrade', 'first response'] as const) {
     await expect(page).toHaveURL(/\/r\/[A-Za-z0-9_-]{22}$/u)
     await page.getByLabel('Ваше имя').fill('Повторный сигналинг')
     await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    if (phase === 'upgrade') {
+      await expect
+        .poll(() => page.evaluate(() => window.debatemeetSignalProbe), { timeout: 8000 })
+        .toEqual({ attempts: 2, firstOpened: false, firstClosed: true })
+    }
     await expect(page.getByRole('button', { name: 'Микрофон выключен', exact: true })).toBeVisible({
       timeout: 35000,
     })

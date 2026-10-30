@@ -89,7 +89,7 @@ afterEach(() => {
 })
 
 describe('prejoin device controls', () => {
-  it('shows device selectors immediately while keeping camera and test sound as accessible icons', async () => {
+  it('shows the camera icon and a separate text sound check below the devices', async () => {
     const { first, open, sound, selection } = await setup()
     expect(screen.queryByRole('button', { name: 'Звук и устройства' })).not.toBeInTheDocument()
     const cameraSelector = screen.getByRole('combobox', { name: 'Камера' })
@@ -110,6 +110,10 @@ describe('prejoin device controls', () => {
     )
     expect(first.camera.enabled).toBe(true)
     expect(open).toHaveBeenCalledTimes(1)
+    expect(sound).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Проверить звук' })).toHaveTextContent(
+      'Проверить звук',
+    )
     await act(async () => {
       fireEvent.change(cameraSelector, { target: { value: 'camera-two' } })
       await Promise.resolve()

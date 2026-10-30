@@ -67,8 +67,7 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
         aria-describedby={`${id}-text-count`}
       />
       <p className="text-caption" id={`${id}-text-count`}>
-        {Array.from(normalizedText).length}/300 · {new TextEncoder().encode(normalizedText).length}
-        /600 UTF-8
+        {Array.from(normalizedText).length}/300
       </p>
       <label htmlFor={`${id}-info`}>{s.infoslide}</label>
       <textarea
@@ -79,8 +78,7 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
         aria-describedby={`${id}-info-count`}
       />
       <p className="text-caption" id={`${id}-info-count`}>
-        {Array.from(normalizedInfo).length}/1500 · {new TextEncoder().encode(normalizedInfo).length}
-        /3000 UTF-8
+        {Array.from(normalizedInfo).length}/1500
       </p>
       {!valid && <p role="alert">{s.invalidMotion}</p>}
       {submitted !== null && state.error !== null && (

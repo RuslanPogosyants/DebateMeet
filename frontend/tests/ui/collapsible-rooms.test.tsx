@@ -120,7 +120,7 @@ describe('unified meeting panel', () => {
     expect(commands).not.toHaveBeenCalled()
   })
 
-  it('opens the same panel from chat, selecting chat after drum and preserving the draft', async () => {
+  it('switches sidebar tabs and preserves the draft when the panel is reopened', async () => {
     viewport()
     await meeting()
     await userEvent.type(
@@ -128,13 +128,13 @@ describe('unified meeting panel', () => {
       'Мой черновик',
     )
     await userEvent.click(screen.getByRole('tab', { name: 'Жребий' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Чат' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Общий чат' }))
     expect(screen.getByRole('tab', { name: 'Общий чат' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('textbox', { name: 'Сообщение в общий чат' })).toHaveValue(
       'Мой черновик',
     )
     await userEvent.click(screen.getByRole('button', { name: 'Свернуть боковую панель' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Чат' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Показать боковую панель' }))
     expect(screen.getByRole('complementary', { name: 'Комнаты' })).toBeVisible()
     expect(screen.getByRole('textbox', { name: 'Сообщение в общий чат' })).toHaveValue(
       'Мой черновик',

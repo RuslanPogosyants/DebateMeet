@@ -231,7 +231,7 @@ export class LiveKitMediaSession implements MediaSession {
     )
     this.intentional = false
     this.closed = false
-    // Retry transient signaling stalls with the same identity and the existing deadlines.
+    // Keep one identity while retrying transient signaling stalls.
     await this.room.connect(url, token, { autoSubscribe: false, maxRetries: 3 })
     this.self = this.room.localParticipant.identity
     if (devices.outputId !== undefined)

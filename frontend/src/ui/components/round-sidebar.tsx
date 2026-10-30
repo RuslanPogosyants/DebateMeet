@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { RoundController } from '@/application/round-controller'
 import { ControlIcon } from './control-icon'
 import { ChatPanel } from './round-chat'
@@ -10,28 +10,16 @@ export function RoundSidebar({
   tabs = false,
   controls = true,
   onClose,
-  chatRequest,
 }: {
   controller: RoundController
   tabs?: boolean
   controls?: boolean
   onClose?: () => void
-  chatRequest?: number
 }) {
-  const [selection, setSelection] = useState<{ tab: 'chat' | 'drum'; request: number | undefined }>(
-    { tab: 'chat', request: chatRequest },
-  )
-  const selected = selection.request === chatRequest ? selection.tab : 'chat'
-  function setSelected(tab: 'chat' | 'drum') {
-    setSelection({ tab, request: chatRequest })
-  }
+  const [selected, setSelected] = useState<'chat' | 'drum'>('chat')
   const chat = useRef<HTMLButtonElement>(null)
   const drum = useRef<HTMLButtonElement>(null)
   const id = useId()
-  useEffect(() => {
-    if (chatRequest === undefined || chatRequest === 0) return
-    chat.current?.focus()
-  }, [chatRequest])
   return (
     <aside
       className={`round-sidebar${tabs ? ' round-sidebar-tabs' : ''}`}

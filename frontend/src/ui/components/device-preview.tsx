@@ -116,17 +116,6 @@ export function DevicePreview({
         >
           <ControlIcon kind="camera" off={!camera} />
         </button>
-        <button
-          className="action media-toggle"
-          type="button"
-          aria-label={strings.round.sound}
-          title={strings.round.sound}
-          onClick={() => {
-            void devices.sound().catch(setError)
-          }}
-        >
-          <ControlIcon kind="speaker" />
-        </button>
       </div>
       <div className="device-selectors">
         <label>
@@ -207,6 +196,15 @@ export function DevicePreview({
             }}
           />
         </div>
+        <button
+          className="action"
+          type="button"
+          onClick={() => {
+            void devices.sound().catch(setError)
+          }}
+        >
+          {strings.round.sound}
+        </button>
       </div>
       {(error !== null || (preview !== null && (!cameraReady || !microphoneReady))) && (
         <button

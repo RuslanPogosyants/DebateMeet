@@ -300,7 +300,8 @@ test('long multiline motion preserves visible controls at every supported layout
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true)
-    const controls = ['Микрофон выключен', 'Камера выключена', 'Поднять руку', 'Чат', 'Ещё']
+    const controls = ['Микрофон выключен', 'Камера выключена', 'Поднять руку', 'Ещё']
+    await expect(page.getByRole('button', { name: 'Чат', exact: true })).toHaveCount(0)
     for (const name of controls) {
       const box = await page.getByRole('button', { name, exact: true }).boundingBox()
       if (box === null) throw new Error(`The ${name} control is hidden`)
@@ -329,7 +330,7 @@ test('long multiline motion preserves visible controls at every supported layout
       fullPage: true,
     })
   }
-  await page.getByRole('button', { name: 'Чат', exact: true }).click()
+  await page.getByRole('button', { name: 'Показать боковую панель', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Комнаты и чат', exact: true })
   await expect(sheet.getByLabel('Сообщение в общий чат', { exact: true })).toBeInViewport()
   await page.screenshot({ path: testInfo.outputPath('content-phone-chat.png'), fullPage: true })

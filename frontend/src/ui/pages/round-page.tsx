@@ -192,7 +192,6 @@ function Meeting({ controller }: { controller: RoundController }) {
   const [judgeLeave, setJudgeLeave] = useState(false)
   const [transferAndLeave, setTransferAndLeave] = useState(false)
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false)
-  const [chatRequest, setChatRequest] = useState(0)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const roomsPanelId = useId()
   const [moreOpen, setMoreOpen] = useState(false)
@@ -225,9 +224,6 @@ function Meeting({ controller }: { controller: RoundController }) {
     setPreviousLayout(layout)
     if (layout !== 'narrow') setMobilePanelOpen(false)
   }
-  const unread = useStore(controller.chat.store, (chat) => chat.unread)
-  const chatLabel =
-    unread > 0 ? `${contentStrings.chatButton} — ${unread} новых` : contentStrings.chatButton
   const self = state.people.find((person) => person.id === state.self)
   const microphoneEnabled = state.microphoneIntent ?? self?.microphone ?? false
   const cameraEnabled = state.cameraIntent ?? self?.camera ?? false
@@ -318,26 +314,6 @@ function Meeting({ controller }: { controller: RoundController }) {
         )}
         <HandButton controller={controller} />
         <ReactionControls controller={controller} />
-        <button
-          className="action icon-control chat-toggle"
-          type="button"
-          title={chatLabel}
-          aria-label={chatLabel}
-          aria-expanded={layout === 'narrow' ? mobilePanelOpen : !sidebarCollapsed}
-          aria-controls={roomsPanelId}
-          onClick={() => {
-            setChatRequest((request) => request + 1)
-            if (layout === 'narrow') setMobilePanelOpen(true)
-            else setSidebarCollapsed(false)
-          }}
-        >
-          <ControlIcon kind="chat" />
-          {unread > 0 && (
-            <span className="unread-badge" aria-hidden="true">
-              {unread}
-            </span>
-          )}
-        </button>
         <button
           ref={moreButton}
           className="action icon-control more-trigger"
@@ -453,9 +429,7 @@ function Meeting({ controller }: { controller: RoundController }) {
             hidden={sidebarCollapsed}
           >
             <RoomMap controller={controller} />
-            {!sidebarCollapsed && (
-              <RoundSidebar controller={controller} tabs chatRequest={chatRequest} />
-            )}
+            {!sidebarCollapsed && <RoundSidebar controller={controller} tabs />}
           </aside>
         )}
         <div className="meeting-center">
@@ -563,7 +537,7 @@ function Meeting({ controller }: { controller: RoundController }) {
         >
           <div className="meeting-side-panel" id={roomsPanelId}>
             <RoomMap controller={controller} onEntered={() => setMobilePanelOpen(false)} />
-            <RoundSidebar controller={controller} tabs chatRequest={chatRequest} />
+            <RoundSidebar controller={controller} tabs />
           </div>
         </Sheet>
       )}
