@@ -231,7 +231,8 @@ export class LiveKitMediaSession implements MediaSession {
     )
     this.intentional = false
     this.closed = false
-    await this.room.connect(url, token, { autoSubscribe: false })
+    // Retry transient signaling stalls with the same identity and the existing deadlines.
+    await this.room.connect(url, token, { autoSubscribe: false, maxRetries: 3 })
     this.self = this.room.localParticipant.identity
     if (devices.outputId !== undefined)
       await this.devices.select('audiooutput', devices.outputId).catch((error: unknown) => {

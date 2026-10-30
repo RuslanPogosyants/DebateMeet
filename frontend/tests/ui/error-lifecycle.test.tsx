@@ -62,7 +62,7 @@ it('StrictMode keeps one mounted error subscriber, reports its error and release
   expect(active).toBe(0)
   const second = mount()
   await screen.findByRole('textbox', { name: 'Ваше имя' })
-  expect(active).toBe(1)
+  await waitFor(() => expect(active).toBe(1))
   second.unmount()
   expect(active).toBe(0)
 })
