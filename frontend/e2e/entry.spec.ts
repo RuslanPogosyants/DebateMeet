@@ -1,55 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-declare global {
-  interface Window {
-    debatemeetAudioOutputs: AnalyserNode[]
-  }
-}
-
-async function measureRenderedAudio(page: Page) {
-  // Instrument the actual output graph in the test browser, without production debug hooks.
-  await page.addInitScript(() => {
-    window.debatemeetAudioOutputs = []
-    const connect: unknown = Object.getOwnPropertyDescriptor(AudioNode.prototype, 'connect')?.value
-    if (typeof connect !== 'function') throw new Error('AudioNode.connect is unavailable')
-    Object.defineProperty(AudioNode.prototype, 'connect', {
-      value: function (
-        this: AudioNode,
-        destination: AudioNode | AudioParam,
-        output = 0,
-        input = 0,
-      ): AudioNode | undefined {
-        if (destination instanceof AudioDestinationNode) {
-          const analyser = this.context.createAnalyser()
-          analyser.fftSize = 2048
-          Reflect.apply(connect, this, [analyser, output, 0])
-          Reflect.apply(connect, analyser, [destination, 0, input])
-          window.debatemeetAudioOutputs.push(analyser)
-        } else {
-          Reflect.apply(
-            connect,
-            this,
-            destination instanceof AudioNode ? [destination, output, input] : [destination, output],
-          )
-        }
-        return destination instanceof AudioNode ? destination : undefined
-      },
-    })
-  })
-}
-
-async function outputLevel(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    let peak = 0
-    for (const analyser of window.debatemeetAudioOutputs) {
-      const samples = new Float32Array(analyser.fftSize)
-      analyser.getFloatTimeDomainData(samples)
-      const energy = samples.reduce((sum, sample) => sum + sample * sample, 0)
-      peak = Math.max(peak, Math.sqrt(energy / samples.length))
-    }
-    return peak
-  })
-}
+import { measureRenderedAudio, outputLevel } from './media'
 
 async function join(page: Page, name: string) {
   await page.getByLabel('Ваше имя').fill(name)
@@ -98,7 +49,7 @@ test('two participants join with muted microphones, hear a remote tone and retur
     await page.reload()
     await expect(page.getByLabel('Ваше имя')).toHaveValue('Алиса')
     await join(page, 'Алиса')
-    await expect(page.getByText('Алиса', { exact: true })).toHaveCount(1)
+    await expect(page.getByRole('article', { name: 'Алиса', exact: true })).toHaveCount(1)
     await page.getByRole('button', { name: 'Выйти', exact: true }).click()
     await page.goto('/')
     await expect(page.getByRole('link', { name: /Открыть/u }).first()).toHaveAttribute(

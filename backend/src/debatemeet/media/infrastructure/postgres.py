@@ -9,12 +9,37 @@ from typing import Protocol, cast, runtime_checkable
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from debatemeet.media.application.ports import DeliveryState
-from debatemeet.round.application.ports import RoundId
+from debatemeet.media.application.ports import DeliveryState, RemovalEffect
+from debatemeet.round.application.ports import ParticipantId, RoundId
 
 # A session lock on a dedicated connection, never the transaction of a round command.
 PUBLISHER_LOCK = 1145917525
 CHANNEL = "round_changed"
+
+
+class PostgresMediaOutbox:
+    """Enqueue on the caller's transaction; the adapter never owns or commits it."""
+
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def remove_participant(
+        self, round_id: RoundId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        await self._connection.execute(
+            text("""
+                INSERT INTO media_outbox
+                    (round_id, operation, participant_id, created_at, available_at)
+                VALUES (:round_id, 'remove_participant', :participant_id, :now, :now)
+                ON CONFLICT (round_id, participant_id) WHERE delivered_at IS NULL
+                DO UPDATE SET revision = media_outbox.revision + 1,
+                    available_at = EXCLUDED.available_at, attempts = 0
+            """),
+            {"round_id": round_id, "participant_id": participant_id, "now": now},
+        )
+        await self._connection.execute(
+            text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
+        )
 
 
 @runtime_checkable
@@ -103,6 +128,48 @@ class PostgresMediaStore:
                 {"id": state.round_id, "sid": state.room_sid, "version": version, "at": at},
             )
 
+    async def pending_effects(self, now: datetime) -> Sequence[RemovalEffect]:
+        async with self._engine.connect() as connection:
+            rows = await connection.execute(
+                text("""
+                    SELECT id, round_id, participant_id, attempts, revision FROM media_outbox
+                    WHERE delivered_at IS NULL AND available_at <= :now
+                    ORDER BY available_at, id LIMIT 100
+                """),
+                {"now": now},
+            )
+            return [
+                RemovalEffect(
+                    int(row["id"]),
+                    RoundId(row["round_id"]),
+                    ParticipantId(row["participant_id"]),
+                    int(row["attempts"]),
+                    int(row["revision"]),
+                )
+                for row in rows.mappings()
+            ]
+
+    async def effect_delivered(self, effect: RemovalEffect, at: datetime) -> None:
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                # A newer connect can enqueue while the SDK removal is in flight. Its
+                # revision must survive the acknowledgement of the previous connection.
+                text("""UPDATE media_outbox SET delivered_at = :at
+                    WHERE id = :id AND revision = :revision AND delivered_at IS NULL"""),
+                {"id": effect.id, "revision": effect.revision, "at": at},
+            )
+
+    async def effect_failed(self, effect: RemovalEffect, at: datetime) -> None:
+        # Keep pending effects indefinitely; the capped delay prevents a failing identity
+        # from monopolizing every tick while healthy rounds continue to be delivered.
+        retry_at = at + timedelta(seconds=min(2 ** min(effect.attempts, 6), 60))
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                text("""UPDATE media_outbox SET attempts = attempts + 1, available_at = :retry_at
+                    WHERE id = :id AND revision = :revision AND delivered_at IS NULL"""),
+                {"id": effect.id, "revision": effect.revision, "retry_at": retry_at},
+            )
+
     async def maintain(self, now: datetime) -> None:
         # Every current limit window is at most an hour; a day never removes a live window.
         before = now - timedelta(days=1)
@@ -110,6 +177,7 @@ class PostgresMediaStore:
             for statement in (
                 "DELETE FROM command_keys WHERE created_at < :before",
                 "DELETE FROM rate_limits WHERE window_start < :before",
+                "DELETE FROM media_outbox WHERE delivered_at < :before",
             ):
                 await connection.execute(text(statement), {"before": before})
 

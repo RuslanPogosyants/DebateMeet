@@ -4,3 +4,4 @@ dist/
 *.local
 playwright-report/
 test-results/
+measure-results/

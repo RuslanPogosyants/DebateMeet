@@ -91,6 +91,18 @@ class LiveKitApiAdapter:
         except (aiohttp.ClientError, TimeoutError) as error:
             raise MediaUnavailableError from error
 
+    async def remove_participant(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        try:
+            await self._api().room.remove_participant(
+                api.RoomParticipantIdentity(room=round_id, identity=participant_id)
+            )
+        except api.TwirpError as error:
+            if error.code == "not_found":
+                return
+            raise MediaUnavailableError from error
+        except (aiohttp.ClientError, TimeoutError) as error:
+            raise MediaUnavailableError from error
+
     def token(self, round_id: RoundId, participant_id: ParticipantId, name: str) -> str:
         return (
             api.AccessToken(self._key, self._secret)

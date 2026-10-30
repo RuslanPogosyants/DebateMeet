@@ -5,9 +5,19 @@ import { useStore } from 'zustand'
 import { RoundController } from '@/application/round-controller'
 import type { DeviceSelection, MediaPerson } from '@/application/ports'
 import type { Participant } from '@/domain/snapshot'
+import { RoomMap, RoomNavigation, JudgeControl } from '@/ui/components/round-tools'
+import { useMeetingLayout } from '@/ui/use-meeting-layout'
+import { ConfirmDialog } from '@/ui/components/confirm-dialog'
 import { DevicePreview } from '@/ui/components/device-preview'
 import { useServices } from '@/ui/services'
-import { deviceErrorText, endedText, errorText, strings } from '@/ui/strings'
+import {
+  deviceErrorText,
+  endedText,
+  errorText,
+  roomChangeText,
+  roomNames,
+  strings,
+} from '@/ui/strings'
 
 function supportedBrowser(): boolean {
   if (
@@ -183,7 +193,10 @@ function ParticipantTile({
 }
 
 function Meeting({ controller }: { controller: RoundController }) {
+  const layout = useMeetingLayout()
   const state = useStore(controller.store)
+  const [judgeLeave, setJudgeLeave] = useState(false)
+  const [transferAndLeave, setTransferAndLeave] = useState(false)
   const self = state.people.find((person) => person.id === state.self)
   const room =
     state.snapshot?.participants.find((person) => person.id === state.self)?.room ?? 'base'
@@ -197,12 +210,11 @@ function Meeting({ controller }: { controller: RoundController }) {
     <main className="meeting-shell">
       <header className="meeting-heading">
         <div>
-          <p className="text-caption text-muted-foreground">{strings.appName}</p>
-          <h1 className="font-display text-display font-bold">
-            {room === 'base' ? strings.round.base : room.toUpperCase()}
-          </h1>
+          <p className="meeting-brand text-caption text-muted-foreground">{strings.appName}</p>
+          <h1 className="font-display text-display font-bold">{roomNames[room]}</h1>
           <p>{strings.round.hearing}</p>
         </div>
+        <JudgeControl controller={controller} panel={layout === 'narrow'} />
         <CopyLink />
       </header>
       {state.stage === 'reconnecting' && (
@@ -234,29 +246,86 @@ function Meeting({ controller }: { controller: RoundController }) {
           {deviceErrorText(state.deviceError)}
         </p>
       )}
-      <section className="meeting-stage" aria-label={strings.round.people}>
-        <div className="participant-grid">
-          {visible.slice(0, 12).map((participant) => (
-            <ParticipantTile
-              key={participant.id}
-              participant={participant}
-              media={state.people.find((person) => person.id === participant.id)}
-              self={participant.id === state.self}
-              controller={controller}
-            />
-          ))}
+      {state.roomChanges.length > 0 && (
+        <div className="meeting-banner" role="status">
+          <ul>
+            {state.roomChanges.map((change) => (
+              <li key={`${change.from}:${change.to}`}>
+                {roomChangeText(change.from, change.to, change.names)}
+              </li>
+            ))}
+          </ul>
         </div>
-        {visible.length === 1 && <p className="alone-message">{strings.round.alone}</p>}
-        {visible.length > 12 && (
-          <p className="more-people">
-            {strings.round.morePeople}:{' '}
-            {visible
-              .slice(12)
-              .map((person) => person.name)
-              .join(', ')}
-          </p>
-        )}
-      </section>
+      )}
+      {state.returnedToBase && (
+        <div className="meeting-banner" role="status">
+          <span>{strings.round.returned}</span>
+          <button className="text-link" type="button" onClick={() => controller.dismissReturned()}>
+            {strings.round.dismiss}
+          </button>
+        </div>
+      )}
+      {state.error !== null && (
+        <p className="meeting-banner" role="alert">
+          {errorText(state.error)}
+        </p>
+      )}
+      {state.commandUncertain && (
+        <div className="meeting-banner" role="status">
+          <span>{strings.round.uncertain}</span>
+          <button
+            className="action"
+            type="button"
+            disabled={state.commandPending}
+            onClick={() => {
+              void controller.retryCommand()
+            }}
+          >
+            {strings.round.retryCommand}
+          </button>
+        </div>
+      )}
+      {layout !== 'full' && <RoomNavigation controller={controller} layout={layout} />}
+      <div className={`meeting-workspace${layout !== 'full' ? ' meeting-workspace-compact' : ''}`}>
+        {layout === 'full' && <RoomMap controller={controller} />}
+        <div className="meeting-scene">
+          {room !== 'base' && (
+            <button
+              className="text-link back-to-base"
+              type="button"
+              disabled={state.commandPending || state.commandUncertain}
+              onClick={() => {
+                void controller.command({ type: 'enter', room: 'base' })
+              }}
+            >
+              {strings.round.backToBase}
+            </button>
+          )}
+          <section className="meeting-stage" aria-label={strings.round.people}>
+            <div className="participant-grid">
+              {visible.slice(0, 12).map((participant) => (
+                <ParticipantTile
+                  key={participant.id}
+                  participant={participant}
+                  media={state.people.find((person) => person.id === participant.id)}
+                  self={participant.id === state.self}
+                  controller={controller}
+                />
+              ))}
+            </div>
+            {visible.length === 1 && <p className="alone-message">{strings.round.alone}</p>}
+            {visible.length > 12 && (
+              <p className="more-people">
+                {strings.round.morePeople}:{' '}
+                {visible
+                  .slice(12)
+                  .map((person) => person.name)
+                  .join(', ')}
+              </p>
+            )}
+          </section>
+        </div>
+      </div>
       <footer className="meeting-controls">
         <button
           className="action"
@@ -282,12 +351,56 @@ function Meeting({ controller }: { controller: RoundController }) {
           className="action leave-action"
           type="button"
           onClick={() => {
-            void controller.leave()
+            if (state.snapshot?.judgeFlag.holder === state.self) setJudgeLeave(true)
+            else void controller.leave()
           }}
         >
           {strings.round.leave}
         </button>
       </footer>
+      {judgeLeave && (
+        <ConfirmDialog
+          title={strings.round.judgeLeave}
+          confirm={strings.round.leave}
+          onCancel={() => setJudgeLeave(false)}
+          onConfirm={() => {
+            setJudgeLeave(false)
+            void controller.leave()
+          }}
+        >
+          <p>{strings.round.judgeLeaveDescription}</p>
+          <button
+            className="text-link"
+            type="button"
+            onClick={() => {
+              setJudgeLeave(false)
+              setTransferAndLeave(true)
+            }}
+          >
+            {strings.round.handOverAndLeave}
+          </button>
+        </ConfirmDialog>
+      )}
+      {transferAndLeave && (
+        <JudgeControl
+          controller={controller}
+          leaveAfter
+          onClose={() => setTransferAndLeave(false)}
+        />
+      )}
+      {state.alonePrompt && (
+        <ConfirmDialog
+          title={strings.round.stillHere}
+          confirm={strings.round.stillHereAnswer}
+          cancel={strings.round.leave}
+          onCancel={() => {
+            void controller.leave()
+          }}
+          onConfirm={() => controller.stillHere()}
+        >
+          <p>{strings.round.stillHereDescription}</p>
+        </ConfirmDialog>
+      )}
     </main>
   )
 }
@@ -370,7 +483,22 @@ export function RoundPage() {
           </button>
         </section>
       ) : (
-        <Prejoin controller={controller} />
+        <>
+          <Prejoin controller={controller} />
+          {state.stage === 'transfer' && (
+            <ConfirmDialog
+              title={strings.round.takeoverTitle}
+              confirm={strings.round.takeover}
+              cancel={strings.round.keepPreviousTab}
+              onCancel={() => controller.cancelTransfer()}
+              onConfirm={() => {
+                void controller.confirmTransfer()
+              }}
+            >
+              <p>{strings.round.takeoverDescription}</p>
+            </ConfirmDialog>
+          )}
+        </>
       )}
     </main>
   )

@@ -36,6 +36,7 @@ class Store:
     keys: dict[tuple[str, str | None, str], str] = field(default_factory=dict)
     notified: list[RoundId] = field(default_factory=list)
     commits: int = 0
+    media_removals: list[tuple[RoundId, ParticipantId, datetime]] = field(default_factory=list)
 
 
 def _stored(round_: Round) -> Round:
@@ -95,6 +96,20 @@ class _Archive:
         self._store.archive[key] = replace(self._store.archive[key], name=name)
         self._store.last_joined[key] = now
 
+    async def revoke(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        key = (round_id, participant_id)
+        self._store.archive[key] = replace(self._store.archive[key], revoked=True)
+
+
+class _MediaOutbox:
+    def __init__(self, store: Store) -> None:
+        self._store = store
+
+    async def remove_participant(
+        self, round_id: RoundId, participant_id: ParticipantId, now: datetime
+    ) -> None:
+        self._store.media_removals.append((round_id, participant_id, now))
+
 
 class _EventLog:
     def __init__(self, store: Store) -> None:
@@ -141,6 +156,7 @@ class Transaction:
         self.events = _EventLog(store)
         self.command_keys = _CommandKeys(store)
         self.notifier = _Notifier(store)
+        self.media_outbox = _MediaOutbox(store)
 
 
 class InMemoryRounds:

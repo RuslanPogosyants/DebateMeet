@@ -2,9 +2,14 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from debatemeet.media.application.ports import DeliveryState, MediaRoom, MediaRoomMissingError
+from debatemeet.media.application.ports import (
+    DeliveryState,
+    MediaRoom,
+    MediaRoomMissingError,
+    RemovalEffect,
+)
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
 from debatemeet.round.application.ports import ArchivedParticipant, CommittedRound
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
@@ -31,6 +36,9 @@ class Reader:
 class MemoryMedia:
     def __init__(self) -> None:
         self.states: dict[RoundId, DeliveryState] = {}
+        self.effects: dict[int, RemovalEffect] = {}
+        self.retry_at: dict[int, datetime] = {}
+        self.delivered: list[int] = []
 
     async def started(self, round_id: RoundId, room_sid: str) -> None:
         current = self.states.get(round_id)
@@ -65,6 +73,21 @@ class MemoryMedia:
     async def maintain(self, now: datetime) -> None:
         pass
 
+    async def pending_effects(self, now: datetime) -> Sequence[RemovalEffect]:
+        return [
+            effect
+            for effect in self.effects.values()
+            if effect.id not in self.retry_at or self.retry_at[effect.id] <= now
+        ]
+
+    async def effect_delivered(self, effect: RemovalEffect, at: datetime) -> None:
+        self.delivered.append(effect.id)
+        self.effects.pop(effect.id)
+
+    async def effect_failed(self, effect: RemovalEffect, at: datetime) -> None:
+        self.effects[effect.id] = replace(effect, attempts=effect.attempts + 1)
+        self.retry_at[effect.id] = at + timedelta(seconds=1)
+
 
 class FakeApi(LiveKitApiAdapter):
     def __init__(self, clock: FixedClock | None = None) -> None:
@@ -74,6 +97,7 @@ class FakeApi(LiveKitApiAdapter):
         self.data: list[bytes] = []
         self.metadata: list[str] = []
         self.created: list[tuple[RoundId, str]] = []
+        self.removed: list[tuple[RoundId, ParticipantId]] = []
         self.unavailable = False
         self.missing = False
         self.closed = False
@@ -108,6 +132,11 @@ class FakeApi(LiveKitApiAdapter):
         self._check()
         self.metadata.append(metadata)
 
+    async def remove_participant(self, round_id: RoundId, participant_id: ParticipantId) -> None:
+        if self.unavailable:
+            raise MediaUnavailableError
+        self.removed.append((round_id, participant_id))
+
     async def aclose(self) -> None:
         self.closed = True
 
@@ -123,10 +152,12 @@ class FakeWakeup:
 class FakeLease:
     def __init__(self) -> None:
         self.held = False
+        self.acquired = asyncio.Event()
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[FakeWakeup | None]:
         self.held = True
+        self.acquired.set()
         try:
             yield FakeWakeup()
         finally:

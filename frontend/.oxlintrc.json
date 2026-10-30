@@ -52,7 +52,7 @@
   },
   "overrides": [
     {
-      "files": ["vite.config.ts", "playwright.config.ts", "e2e/**", "*.cjs", "scripts/**"],
+      "files": ["vite.config.ts", "playwright*.config.ts", "e2e/**", "*.cjs", "scripts/**"],
       "env": { "node": true, "browser": false }
     }
   ]

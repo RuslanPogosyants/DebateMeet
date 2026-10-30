@@ -7,6 +7,7 @@ import { routes } from '@/ui/routes'
 import { ServicesContext } from '@/ui/services'
 import { BrowserDevices } from '@/infrastructure/devices'
 import { BrowserPreferences } from '@/infrastructure/preferences'
+import { BrowserSessionOwnership } from '@/infrastructure/session-ownership'
 import { HttpRoundApi } from '@/infrastructure/round-api'
 import type { Services } from '@/application/ports'
 import '@/ui/styles.css'
@@ -20,6 +21,7 @@ const services: Services = {
   api: new HttpRoundApi(),
   preferences: new BrowserPreferences(),
   devices: new BrowserDevices(),
+  ownership: (roundId) => new BrowserSessionOwnership(roundId),
   media: async () => {
     const { LiveKitMediaSession } = await import('@/infrastructure/media-session')
     return new LiveKitMediaSession()

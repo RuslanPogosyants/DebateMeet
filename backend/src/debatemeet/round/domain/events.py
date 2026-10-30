@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import ReleaseReason
+from debatemeet.round.domain.room import Room
 from debatemeet.shared.domain.events import DomainEvent
 
 
@@ -56,3 +57,37 @@ class ParticipantEvicted(DomainEvent):
     archive remembers them now."""
 
     participant_id: ParticipantId
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ParticipantEntered(DomainEvent):
+    participant_id: ParticipantId
+    previous_room: Room
+    room: Room
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class JudgeFlagClaimed(DomainEvent):
+    participant_id: ParticipantId
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class JudgeFlagHandedOver(DomainEvent):
+    previous_holder: ParticipantId
+    participant_id: ParticipantId
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ParticipantsRecalled(DomainEvent):
+    previous_rooms: dict[ParticipantId, Room]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ParticipantRemoved(DomainEvent):
+    participant_id: ParticipantId
+    previous_room: Room | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EntryChanged(DomainEvent):
+    closed: bool

@@ -1,4 +1,10 @@
-import { ClientError, type Credentials, type Joined, type RoundApi } from '@/application/ports'
+import {
+  ClientError,
+  type Credentials,
+  type Joined,
+  type RoundApi,
+  type RoundCommand,
+} from '@/application/ports'
 import { readSnapshot, record, type Snapshot } from '@/domain/snapshot'
 
 export class HttpRoundApi implements RoundApi {
@@ -86,6 +92,27 @@ export class HttpRoundApi implements RoundApi {
       },
     )
     if (response.status === 304) return null
+    const snapshot = readSnapshot(await this.accepted(response), roundId)
+    if (snapshot === null) throw new ClientError('invalid_response')
+    return snapshot
+  }
+
+  async command(
+    roundId: string,
+    credentials: Credentials,
+    intent: RoundCommand,
+    key: string,
+  ): Promise<Snapshot> {
+    const { type, ...payload } = intent
+    const response = await this.request(`/api/rounds/${encodeURIComponent(roundId)}/${type}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credentials.participantId}.${credentials.secret}`,
+        'Idempotency-Key': key,
+      },
+      body: JSON.stringify(payload),
+    })
     const snapshot = readSnapshot(await this.accepted(response), roundId)
     if (snapshot === null) throw new ClientError('invalid_response')
     return snapshot

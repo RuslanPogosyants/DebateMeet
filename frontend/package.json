@@ -13,6 +13,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:e2e": "vite build && playwright test",
+    "measure:rooms": "vite build && playwright test --config playwright.measure.config.ts",
     "depcruise": "depcruise src",
     "budget": "node scripts/check-budget.ts",
     "contract": "openapi-typescript src/contract/openapi.json --output src/contract/api.d.ts"

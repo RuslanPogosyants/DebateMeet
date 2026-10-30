@@ -18,15 +18,21 @@ from debatemeet.media.application.webhooks import (
 )
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
 from debatemeet.media.infrastructure.livekit_webhooks import LiveKitWebhookVerifier
-from debatemeet.media.infrastructure.postgres import PostgresMediaStore, PostgresPublisherLease
+from debatemeet.media.infrastructure.postgres import (
+    PostgresMediaOutbox,
+    PostgresMediaStore,
+    PostgresPublisherLease,
+)
 from debatemeet.media.infrastructure.runtime import MediaRuntime
 from debatemeet.round.api.entry import RoundEndpoints, entry_router
+from debatemeet.round.api.rooms import room_router
 from debatemeet.round.application.commands import CreateRound, JoinRound, LeaveRound, ReadSnapshot
 from debatemeet.round.application.presence import (
     ConnectParticipant,
     DisconnectParticipant,
     SyncPresence,
 )
+from debatemeet.round.application.room_commands import ExecuteRoundCommand
 from debatemeet.round.contract.entry import StatePacket
 from debatemeet.round.infrastructure.postgres import PostgresRounds
 from debatemeet.shared.api.errors import install_error_handlers
@@ -54,6 +60,7 @@ def build_app(
     docs: bool = False,
     lifespan: Lifespan | None = None,
     round_commands: RoundEndpoints | None = None,
+    room_commands: ExecuteRoundCommand | None = None,
 ) -> FastAPI:
     """The HTTP app over ports; tests call it with fakes."""
     app = FastAPI(
@@ -69,6 +76,7 @@ def build_app(
     app.include_router(time_router(clock))
     app.include_router(webhook_router(webhook_verifier, media_events))
     app.include_router(entry_router(round_commands, version))
+    app.include_router(room_router(room_commands, version))
     # Data packets travel through LiveKit, but their schema belongs to the same public contract.
     schema = app.openapi()
     packet_schema = StatePacket.model_json_schema(ref_template="#/components/schemas/{model}")
@@ -84,7 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(environment=settings.environment, level=settings.log_level)
     engine = create_engine(settings.database_url)
     clock = SystemClock()
-    rounds = PostgresRounds(engine)
+    rounds = PostgresRounds(engine, PostgresMediaOutbox)
     limiter = PostgresRateLimiter(engine)
     random = SecureRandom()
     livekit = LiveKitApiAdapter(
@@ -138,4 +146,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             LeaveRound(rounds, clock, rounds, limiter),
             ReadSnapshot(rounds),
         ),
+        room_commands=ExecuteRoundCommand(rounds, media, rounds, clock, limiter),
     )

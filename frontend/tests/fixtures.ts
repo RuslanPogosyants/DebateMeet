@@ -8,7 +8,9 @@ import type {
   Preferences,
   Preview,
   RoundApi,
+  RoundCommand,
   Services,
+  SessionOwnership,
 } from '@/application/ports'
 
 export const ROUND_ID = 'r'.repeat(22)
@@ -53,6 +55,7 @@ export class MemoryPreferences implements Preferences {
 export class FakeApi implements RoundApi {
   joins: (Credentials | null)[] = []
   leaves: string[] = []
+  commands: { intent: RoundCommand; key: string }[] = []
   response: Joined = {
     ...credentials,
     mediaUrl: 'ws://localhost:7880',
@@ -72,6 +75,10 @@ export class FakeApi implements RoundApi {
   }
   snapshot() {
     return Promise.resolve(null)
+  }
+  command(_: string, __: Credentials, intent: RoundCommand, key: string) {
+    this.commands.push({ intent, key })
+    return Promise.resolve(this.response.snapshot)
   }
   leave(_: string, __: Credentials, sid: string) {
     this.leaves.push(sid)
@@ -100,6 +107,7 @@ export class FakeMedia implements MediaSession {
   }
   apply(value: Snapshot) {
     this.applied.push(value)
+    return Promise.resolve()
   }
   microphone(value: boolean) {
     this.microphoneChanges.push(value)
@@ -133,19 +141,45 @@ export class FakeDevices implements Devices {
   }
 }
 
+export class FakeOwnership implements SessionOwnership {
+  available = true
+  held = false
+  lost: () => void = () => {}
+  acquire(_: boolean, lost: () => void) {
+    this.lost = lost
+    this.held = this.available
+    return Promise.resolve(this.available)
+  }
+  async connect(takeover: boolean, connect: () => Promise<void>) {
+    await connect()
+    if (takeover) this.held = true
+  }
+  current() {
+    return Promise.resolve(this.held)
+  }
+  owned() {
+    return this.held
+  }
+  release() {
+    this.held = false
+  }
+}
+
 export function fixture() {
   const api = new FakeApi()
   const preferences = new MemoryPreferences()
   const media: FakeMedia[] = []
+  const ownership = new FakeOwnership()
   const services: Services = {
     api,
     preferences,
     devices: new FakeDevices(),
+    ownership: () => ownership,
     media: () => {
       const session = new FakeMedia()
       media.push(session)
       return Promise.resolve(session)
     },
   }
-  return { api, preferences, media, services }
+  return { api, preferences, media, services, ownership }
 }

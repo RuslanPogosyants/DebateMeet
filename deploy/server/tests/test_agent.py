@@ -106,6 +106,7 @@ class FakeDocker:
                 "/bundle/compose.yaml": f"# compose.yaml of {name}\n".encode(),
                 "/bundle/env.example": b"DM_ENVIRONMENT=stage\n",
                 "/bundle/agent.py": f"# agent of {name}\n".encode(),
+                "/bundle/justfile": f"# operator commands of {name}\n".encode(),
                 "/bundle/caddy/Caddyfile": caddyfile.encode(),
                 "/bundle/livekit/livekit.yaml": livekit.encode(),
                 "/bundle/livekit/livekit.sh": b"#!/bin/sh\n",

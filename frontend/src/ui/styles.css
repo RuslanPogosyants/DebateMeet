@@ -93,6 +93,7 @@
   --on-stage-muted: #b8b8b2;
   /* The elapsed part of the speech scale. */
   --elapsed: #c9c9c3;
+  --overlay: #14140f66;
 }
 
 @theme inline {
@@ -427,5 +428,334 @@
   }
   .participant-tile {
     min-height: 220px;
+  }
+}
+
+/* Logical rooms remain visible while the media scene switches subscriptions. */
+.meeting-workspace {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 24px;
+  flex: 1;
+}
+.meeting-scene {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.room-map-heading,
+.room-card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.room-map-heading {
+  margin-bottom: 12px;
+}
+.room-map-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.room-card {
+  border: 1px solid var(--border);
+  padding: 12px;
+  min-width: 0;
+}
+.room-wide {
+  grid-column: 1 / -1;
+}
+.room-card-heading {
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.room-card ul {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+.room-card li + li {
+  margin-top: 8px;
+}
+.room-person-state {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 18px;
+}
+.room-own {
+  background: var(--foreground);
+  color: var(--background);
+  border-color: var(--foreground);
+}
+.room-own .room-person-state {
+  color: var(--on-stage-muted);
+}
+.room-enter,
+.room-recall {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 13px;
+  line-height: 18px;
+}
+.room-description {
+  color: var(--muted-foreground);
+  margin-top: 6px;
+}
+.room-own .room-description {
+  color: var(--on-stage-muted);
+}
+.room-recall {
+  display: block;
+  margin-top: 12px;
+  text-align: left;
+}
+.judge-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  max-width: 440px;
+}
+.judge-control > p {
+  flex-basis: 100%;
+  text-align: right;
+}
+.back-to-base {
+  align-self: flex-start;
+}
+dialog {
+  color: var(--foreground);
+  background: var(--background);
+  border: 1.5px solid var(--foreground);
+  padding: 24px;
+  max-width: min(480px, calc(100vw - 32px));
+  width: 100%;
+  margin: auto;
+}
+dialog::backdrop {
+  background: var(--overlay);
+}
+.dialog-content {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+dialog select {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  width: 100%;
+}
+@media (max-width: 900px) {
+  .meeting-workspace {
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+@media (max-width: 760px) {
+  .meeting-heading {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .judge-control {
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+  .judge-control > p {
+    text-align: left;
+  }
+  .meeting-workspace {
+    display: flex;
+    flex-direction: column;
+  }
+  .meeting-scene {
+    order: -1;
+  }
+  .room-map-grid {
+    gap: 6px;
+  }
+  .room-card {
+    padding: 10px;
+  }
+}
+
+/* At compact sizes the complete roster lives in one modal sheet, not below the scene. */
+.meeting-workspace-compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+.room-navigation {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+.room-strip {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+.room-strip-item {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+}
+.room-strip-item .room-enter {
+  min-height: 36px;
+}
+.room-strip-item > span {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+}
+.room-navigation-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+.room-navigation-narrow {
+  border-block: 1px solid var(--border);
+  padding-block: 8px;
+}
+.room-navigation-narrow .room-navigation-actions {
+  flex-direction: row;
+}
+.meeting-sheet {
+  width: min(480px, 100vw);
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0 0 0 auto;
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+    max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  overflow: hidden;
+}
+.meeting-sheet[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.sheet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.sheet-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sheet-content .room-map-heading h2 {
+  display: none;
+}
+.sheet-content .room-enter,
+.sheet-content .room-recall {
+  min-height: 44px;
+  padding-block: 8px;
+}
+.sheet-content .judge-control {
+  max-width: none;
+  justify-content: flex-start;
+  margin-bottom: 24px;
+}
+.sheet-content .judge-control > p {
+  text-align: left;
+}
+.judge-control > p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1399px), (max-height: 759px) {
+  .meeting-heading .meeting-brand {
+    display: none;
+  }
+}
+@media (max-width: 959px) {
+  .meeting-workspace-compact {
+    display: flex;
+    flex-direction: column;
+  }
+  .meeting-controls {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: var(--background);
+    padding-block: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .meeting-stage {
+    min-height: 280px;
+  }
+}
+@media (max-width: 600px) {
+  .meeting-shell {
+    gap: 14px;
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+  .meeting-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+  .meeting-heading > :last-child {
+    grid-column: 1 / -1;
+  }
+  .meeting-heading .judge-control {
+    justify-content: flex-end;
+    max-width: 145px;
+  }
+  .meeting-heading .judge-control > p {
+    text-align: right;
+  }
+  .meeting-heading .judge-control .action,
+  .meeting-heading .judge-control .action-primary {
+    padding-inline: 12px;
+  }
+  .participant-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .participant-tile {
+    min-height: 220px;
+  }
+  .tile-placeholder {
+    font-size: 20px;
+    line-height: 28px;
+    padding: 12px;
+    overflow-wrap: anywhere;
+  }
+  .tile-caption {
+    padding: 8px;
+    overflow-wrap: anywhere;
+  }
+  .meeting-controls {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 10px max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+  }
+  .meeting-controls .action {
+    min-height: 56px;
+    padding: 8px;
+    line-height: 18px;
+  }
+  .leave-action {
+    margin-left: 0;
   }
 }
