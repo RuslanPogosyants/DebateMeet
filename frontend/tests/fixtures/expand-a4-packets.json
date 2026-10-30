@@ -1,0 +1,93 @@
+[
+  {
+    "topic": "chat",
+    "packet": {
+      "topic": "chat",
+      "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+      "epoch": 1,
+      "message": {
+        "id": "1",
+        "changeId": "1",
+        "kind": "user",
+        "authorId": "aaaaaaaaaaaa",
+        "authorName": "Алиса",
+        "text": "Живое сообщение\nвсем",
+        "createdAt": 1790704800000,
+        "deletedAt": null
+      }
+    }
+  },
+  {
+    "topic": "chat",
+    "packet": null
+  },
+  {
+    "topic": "chat",
+    "packet": {
+      "topic": "chat",
+      "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+      "epoch": 1,
+      "message": {
+        "id": "3",
+        "changeId": "3",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704804000,
+        "deletedAt": null
+      }
+    }
+  },
+  {
+    "topic": "chat",
+    "packet": {
+      "topic": "chat",
+      "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+      "epoch": 1,
+      "message": {
+        "id": "4",
+        "changeId": "4",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704805000,
+        "deletedAt": null
+      }
+    }
+  },
+  {
+    "topic": "chat",
+    "packet": {
+      "topic": "chat",
+      "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+      "epoch": 1,
+      "message": {
+        "id": "5",
+        "changeId": "5",
+        "kind": "system",
+        "authorId": null,
+        "authorName": null,
+        "text": "жребий: CO",
+        "createdAt": 1790704807000,
+        "deletedAt": null
+      }
+    }
+  },
+  {
+    "topic": "chat_deleted",
+    "packet": {
+      "topic": "chat_deleted",
+      "roundId": "RRRRRRRRRRRRRRRRRRRRRR",
+      "epoch": 1,
+      "deleted": [
+        {
+          "id": "2",
+          "changeId": "6",
+          "deletedAt": 1790704809000
+        }
+      ]
+    }
+  }
+]

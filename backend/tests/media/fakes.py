@@ -8,10 +8,11 @@ from debatemeet.media.application.ports import (
     DeliveryState,
     MediaRoom,
     MediaRoomMissingError,
+    PacketEffect,
     RemovalEffect,
 )
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
-from debatemeet.round.application.ports import ArchivedParticipant, CommittedRound
+from debatemeet.round.application.ports import ArchivedParticipant, CommittedRound, PacketTopic
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.shared.application.errors import MediaUnavailableError
 from tests.fakes import FixedClock
@@ -37,6 +38,7 @@ class MemoryMedia:
     def __init__(self) -> None:
         self.states: dict[RoundId, DeliveryState] = {}
         self.effects: dict[int, RemovalEffect] = {}
+        self.packets: dict[int, PacketEffect] = {}
         self.retry_at: dict[int, datetime] = {}
         self.delivered: list[int] = []
 
@@ -44,6 +46,14 @@ class MemoryMedia:
         current = self.states.get(round_id)
         if current is None or current.room_sid != room_sid:
             self.states[round_id] = DeliveryState(round_id, room_sid, 0, 0, None)
+        heads = sorted(
+            (effect for effect in self.packets.values() if effect.round_id == round_id),
+            key=lambda effect: effect.id,
+        )
+        if heads:
+            head = heads[0]
+            self.packets[head.id] = replace(head, revision=head.revision + 1, attempts=0)
+            self.retry_at.pop(head.id, None)
 
     async def finished(self, round_id: RoundId, room_sid: str) -> None:
         if (current := self.states.get(round_id)) is not None and current.room_sid == room_sid:
@@ -80,12 +90,36 @@ class MemoryMedia:
             if effect.id not in self.retry_at or self.retry_at[effect.id] <= now
         ]
 
-    async def effect_delivered(self, effect: RemovalEffect, at: datetime) -> None:
-        self.delivered.append(effect.id)
-        self.effects.pop(effect.id)
+    async def packet_heads(self, now: datetime) -> Sequence[PacketEffect]:
+        heads: dict[RoundId, PacketEffect] = {}
+        for effect in sorted(self.packets.values(), key=lambda item: item.id):
+            heads.setdefault(effect.round_id, effect)
+        return [
+            effect
+            for effect in heads.values()
+            if effect.id not in self.retry_at or self.retry_at[effect.id] <= now
+        ]
 
-    async def effect_failed(self, effect: RemovalEffect, at: datetime) -> None:
-        self.effects[effect.id] = replace(effect, attempts=effect.attempts + 1)
+    async def effect_delivered(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None:
+        if isinstance(effect, PacketEffect):
+            if self.packets.get(effect.id) != effect:
+                return
+            del self.packets[effect.id]
+        else:
+            if self.effects.get(effect.id) != effect:
+                return
+            del self.effects[effect.id]
+        self.delivered.append(effect.id)
+
+    async def effect_failed(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None:
+        if isinstance(effect, PacketEffect):
+            if self.packets.get(effect.id) != effect:
+                return
+            self.packets[effect.id] = replace(effect, attempts=effect.attempts + 1)
+        else:
+            if self.effects.get(effect.id) != effect:
+                return
+            self.effects[effect.id] = replace(effect, attempts=effect.attempts + 1)
         self.retry_at[effect.id] = at + timedelta(seconds=1)
 
 
@@ -95,6 +129,7 @@ class FakeApi(LiveKitApiAdapter):
         self.media_rooms: list[MediaRoom] = [MediaRoom(ROUND_ID, "RM_1")]
         self.observed: Mapping[ParticipantId, SessionId] = {}
         self.data: list[bytes] = []
+        self.packets: list[tuple[RoundId, str, bytes]] = []
         self.metadata: list[str] = []
         self.created: list[tuple[RoundId, str]] = []
         self.removed: list[tuple[RoundId, ParticipantId]] = []
@@ -128,6 +163,10 @@ class FakeApi(LiveKitApiAdapter):
         self._check()
         self.data.append(packet)
 
+    async def send_packet(self, round_id: RoundId, topic: PacketTopic, packet: bytes) -> None:
+        self._check()
+        self.packets.append((round_id, topic, packet))
+
     async def update_metadata(self, round_id: RoundId, metadata: str) -> None:
         self._check()
         self.metadata.append(metadata)
@@ -147,6 +186,13 @@ class FakeWakeup:
 
     async def wait(self) -> None:
         await asyncio.Event().wait()
+
+
+class PassthroughPackets:
+    async def current_packet(
+        self, round_id: RoundId, topic: PacketTopic, payload: bytes
+    ) -> bytes | None:
+        return payload
 
 
 class FakeLease:

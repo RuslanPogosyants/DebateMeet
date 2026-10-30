@@ -2,8 +2,11 @@
 
 from datetime import UTC, datetime
 
+from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
+from debatemeet.round.domain.motion import Motion
+from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.presence import Connected, Disconnected, Pending, Presence
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import MAX_PARTICIPANTS, Participant, Round
@@ -56,6 +59,8 @@ def encode_round(round_: Round) -> dict[str, object]:
             if round_.speech_undo is not None
             else None
         ),
+        "motion": {"text": round_.motion.text, "infoslide": round_.motion.infoslide},
+        "drum": _encode_drum(round_.drum),
     }
 
 
@@ -93,6 +98,13 @@ def decode_round(document: object, round_id: RoundId, version: int) -> Round:
                     _integer(previous["speech_no"], positive=True),
                     _timer(previous["timer"], TimerKind.SPEECH),
                 )
+        motion_keys = {"motion", "drum"}
+        if motion_keys.intersection(data):
+            if not motion_keys.issubset(data):
+                raise ValueError("partial motion and drum extension")
+            motion = _object(data["motion"])
+            round_.motion = Motion(_string(motion["text"]), _string(motion["infoslide"]))
+            round_.drum = _drum(data["drum"])
         return round_
     except (KeyError, TypeError, ValueError, OverflowError, DomainError) as error:
         raise UnreadableRoundError("the persisted round document cannot be read") from error
@@ -169,6 +181,49 @@ def _timer(value: object, kind: TimerKind) -> Timer:
         status=TimerStatus(_string(data["status"])),
         ends_at=_time(data["ends_at"]) if data["ends_at"] is not None else None,
         remaining_ms=(_integer(data["remaining_ms"]) if data["remaining_ms"] is not None else None),
+    )
+
+
+def _encode_drum(drum: Drum) -> dict[str, object]:
+    last = drum.last
+    return {
+        "enabled": [position.value for position in drum.enabled],
+        "drawn": [
+            {"position": value.position.value, "draw_no": value.draw_no} for value in drum.drawn
+        ],
+        "remove_drawn": drum.remove_drawn,
+        "last": {
+            "position": last.position.value,
+            "draw_no": last.draw_no,
+            "at": last.at.isoformat(),
+        }
+        if last is not None
+        else None,
+        "draw_count": drum.draw_count,
+    }
+
+
+def _drum(value: object) -> Drum:
+    data = _object(value)
+    drawn = [_object(item) for item in _list(data["drawn"])]
+    last = _object(data["last"]) if data["last"] is not None else None
+    return Drum(
+        enabled=tuple(Position(_string(position)) for position in _list(data["enabled"])),
+        drawn=tuple(
+            DrawnPosition(
+                Position(_string(item["position"])), _integer(item["draw_no"], positive=True)
+            )
+            for item in drawn
+        ),
+        remove_drawn=_bool(data["remove_drawn"]),
+        last=DrawResult(
+            Position(_string(last["position"])),
+            _integer(last["draw_no"], positive=True),
+            _time(last["at"]),
+        )
+        if last is not None
+        else None,
+        draw_count=_integer(data["draw_count"]),
     )
 
 

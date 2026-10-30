@@ -1,4 +1,4 @@
-"""The six participant commands share authentication, idempotency and snapshot responses."""
+"""Round commands share authentication, idempotency and full snapshot responses."""
 
 from typing import Annotated
 from uuid import UUID
@@ -9,7 +9,9 @@ from debatemeet.round.api.entry import RoundPath, no_store, participant_credenti
 from debatemeet.round.application.credentials import Credentials
 from debatemeet.round.application.room_commands import (
     ClaimJudge,
+    ConfigureDrum,
     ConfigureTimer,
+    Draw,
     Enter,
     ExecuteRoundCommand,
     HandOverJudge,
@@ -18,12 +20,15 @@ from debatemeet.round.application.room_commands import (
     Recall,
     RecallAll,
     ReleaseJudge,
+    ResetDrum,
     ResetTimer,
     RoundCommand,
+    SetMotion,
     SetTimer,
     StartTimer,
     UndoNextSpeech,
 )
+from debatemeet.round.contract.motion_drum import ConfigureDrumBody, SetMotionBody
 from debatemeet.round.contract.rooms import EmptyCommandBody, EnterBody, HandOverBody, RecallBody
 from debatemeet.round.contract.snapshot import RoundSnapshot, snapshot_of
 from debatemeet.round.contract.timers import ConfigureTimerBody, SetTimerBody
@@ -183,5 +188,43 @@ def room_router(execute: ExecuteRoundCommand | None, app_version: str) -> APIRou
         key: IdempotencyKey,
     ) -> RoundSnapshot:
         return await run(round_id, credentials, key, UndoNextSpeech())
+
+    @router.post("/motion", response_model=RoundSnapshot)
+    async def set_motion(
+        round_id: RoundPath,
+        body: SetMotionBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, SetMotion(body.text, body.infoslide))
+
+    @router.post("/drum/draw", response_model=RoundSnapshot)
+    async def draw(
+        round_id: RoundPath,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, Draw())
+
+    @router.post("/drum/reset", response_model=RoundSnapshot)
+    async def reset_drum(
+        round_id: RoundPath,
+        body: EmptyCommandBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(round_id, credentials, key, ResetDrum())
+
+    @router.post("/drum/configure", response_model=RoundSnapshot)
+    async def configure_drum(
+        round_id: RoundPath,
+        body: ConfigureDrumBody,
+        credentials: ParticipantCredentials,
+        key: IdempotencyKey,
+    ) -> RoundSnapshot:
+        return await run(
+            round_id, credentials, key, ConfigureDrum(tuple(body.enabled), body.remove_drawn)
+        )
 
     return router

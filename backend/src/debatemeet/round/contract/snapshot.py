@@ -11,7 +11,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from debatemeet.round.domain.drum import Drum
 from debatemeet.round.domain.judge import JudgeFlag, ReleaseReason
+from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.presence import Connected, Pending, Presence
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Participant, Round
@@ -69,6 +71,30 @@ class SpeechUndoView(ContractModel):
     timer: TimerView
 
 
+class MotionView(ContractModel):
+    text: str
+    infoslide: str
+
+
+class DrawnPositionView(ContractModel):
+    position: Position
+    draw_no: int
+
+
+class DrawResultView(ContractModel):
+    position: Position
+    draw_no: int
+    at: int
+
+
+class DrumView(ContractModel):
+    enabled: list[Position]
+    drawn: list[DrawnPositionView]
+    remove_drawn: bool
+    last: DrawResultView | None
+    draw_count: int
+
+
 class RoundSnapshot(ContractModel):
     round_id: str
     # Changes when a backup is restored: a client takes a new epoch whatever the version.
@@ -84,6 +110,8 @@ class RoundSnapshot(ContractModel):
     timers: TimersView
     speech_no: int
     speech_undo: SpeechUndoView | None
+    motion: MotionView
+    drum: DrumView
 
 
 def snapshot_of(
@@ -101,6 +129,8 @@ def snapshot_of(
         timers=TimersView(prep=_timer(round_.prep_timer), speech=_timer(round_.speech_timer)),
         speech_no=round_.speech_no,
         speech_undo=_speech_undo(round_.speech_undo),
+        motion=MotionView(text=round_.motion.text, infoslide=round_.motion.infoslide),
+        drum=_drum(round_.drum),
     )
 
 
@@ -150,3 +180,19 @@ def _speech_undo(previous: SpeechUndo | None) -> SpeechUndoView | None:
     if previous is None:
         return None
     return SpeechUndoView(speech_no=previous.speech_no, timer=_timer(previous.timer))
+
+
+def _drum(drum: Drum) -> DrumView:
+    last = drum.last
+    return DrumView(
+        enabled=list(drum.enabled),
+        drawn=[
+            DrawnPositionView(position=value.position, draw_no=value.draw_no)
+            for value in drum.drawn
+        ],
+        remove_drawn=drum.remove_drawn,
+        last=DrawResultView(position=last.position, draw_no=last.draw_no, at=_ms(last.at))
+        if last is not None
+        else None,
+        draw_count=drum.draw_count,
+    )

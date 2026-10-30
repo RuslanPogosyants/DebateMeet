@@ -14,7 +14,10 @@ from debatemeet.round.application.ports import (
     RoundTransactions,
 )
 from debatemeet.round.application.presence import reconcile_observation
+from debatemeet.round.domain.drum import Drum
 from debatemeet.round.domain.ids import ParticipantId, RoundId
+from debatemeet.round.domain.motion import Motion
+from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.timer import TimerKind
 from debatemeet.shared.application.clock import Clock
@@ -23,7 +26,7 @@ from debatemeet.shared.application.errors import (
     RateLimitedError,
     RequestConflictError,
 )
-from debatemeet.shared.application.ports import KeyClaim, RateLimiter
+from debatemeet.shared.application.ports import KeyClaim, RandomSource, RateLimiter
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +96,38 @@ class UndoNextSpeech:
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class SetMotion:
+    text: str
+    infoslide: str
+
+    def __post_init__(self) -> None:
+        motion = Motion(self.text, self.infoslide)
+        object.__setattr__(self, "text", motion.text)
+        object.__setattr__(self, "infoslide", motion.infoslide)
+
+
+@dataclass(frozen=True, slots=True)
+class Draw:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class ResetDrum:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigureDrum:
+    enabled: tuple[Position, ...]
+    remove_drawn: bool
+
+    def __post_init__(self) -> None:
+        validated = Drum(enabled=self.enabled, remove_drawn=self.remove_drawn)
+        canonical = tuple(position for position in Position if position in validated.enabled)
+        object.__setattr__(self, "enabled", canonical)
+
+
 type RoundCommand = (
     Enter
     | ClaimJudge
@@ -107,11 +142,15 @@ type RoundCommand = (
     | ConfigureTimer
     | NextSpeech
     | UndoNextSpeech
+    | SetMotion
+    | Draw
+    | ResetDrum
+    | ConfigureDrum
 )
 
 
 def _request_hash(command: RoundCommand) -> str:
-    payload: dict[str, str | int]
+    payload: dict[str, str | int | list[str]]
     match command:
         case Enter(room):
             operation, payload = "enter", {"room": str(room)}
@@ -139,6 +178,20 @@ def _request_hash(command: RoundCommand) -> str:
             operation, payload = "speech/next", {}
         case UndoNextSpeech():
             operation, payload = "speech/undo", {}
+        case SetMotion(text, infoslide):
+            operation, payload = "motion", {"text": text, "infoslide": infoslide}
+        case Draw():
+            operation, payload = "drum/draw", {}
+        case ResetDrum():
+            operation, payload = "drum/reset", {}
+        case ConfigureDrum(enabled, remove_drawn):
+            operation, payload = (
+                "drum/configure",
+                {
+                    "enabled": [position.value for position in enabled],
+                    "removeDrawn": remove_drawn,
+                },
+            )
     canonical = json.dumps([operation, payload], sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -151,12 +204,14 @@ class ExecuteRoundCommand:
         reader: RoundReader,
         clock: Clock,
         rate_limiter: RateLimiter,
+        random: RandomSource,
     ) -> None:
         self._rounds = rounds
         self._media = media
         self._reader = reader
         self._clock = clock
         self._rate_limiter = rate_limiter
+        self._random = random
 
     async def __call__(
         self, round_id: RoundId, credentials: Credentials, key: str, command: RoundCommand
@@ -181,6 +236,8 @@ class ExecuteRoundCommand:
             )
             if claim is KeyClaim.CONFLICT:
                 raise RequestConflictError
+            if claim is KeyClaim.FIRST and isinstance(command, Draw):
+                await tx.system_messages.prepare(round_id)
             round_ = await tx.rounds.get_for_update(round_id)
             if round_ is None:
                 raise NotFoundError
@@ -216,6 +273,16 @@ class ExecuteRoundCommand:
                         round_.next_speech(actor, now)
                     case UndoNextSpeech():
                         round_.undo_next_speech(actor, now)
+                    case SetMotion(text, infoslide):
+                        round_.set_motion(actor, text, infoslide, now)
+                    case Draw():
+                        candidates = round_.draw_candidates(actor, now)
+                        position = candidates[self._random.below(len(candidates))]
+                        round_.draw(actor, position, now)
+                    case ResetDrum():
+                        round_.reset_drum(actor, now)
+                    case ConfigureDrum(enabled, remove_drawn):
+                        round_.configure_drum(actor, enabled, remove_drawn, now)
                 await commit_changes(tx, round_, actor, now)
         committed = await self._reader.committed(round_id)
         if committed is None:

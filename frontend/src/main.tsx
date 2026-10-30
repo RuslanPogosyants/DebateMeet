@@ -9,6 +9,7 @@ import { BrowserDevices } from '@/infrastructure/devices'
 import { BrowserPreferences } from '@/infrastructure/preferences'
 import { BrowserSessionOwnership } from '@/infrastructure/session-ownership'
 import { HttpRoundApi } from '@/infrastructure/round-api'
+import { HttpChatApi } from '@/infrastructure/chat-api'
 import { BrowserClientClock } from '@/infrastructure/client-clock'
 import { WebAudioTimerAudio } from '@/infrastructure/timer-audio'
 import type { Services } from '@/application/ports'
@@ -19,8 +20,10 @@ if (container === null) {
   throw new Error('index.html has no #root element')
 }
 
+const api = new HttpRoundApi()
 const services: Services = {
-  api: new HttpRoundApi(),
+  api,
+  chat: new HttpChatApi(api),
   clientClock: new BrowserClientClock(),
   timerAudio: (events) => new WebAudioTimerAudio(events),
   preferences: new BrowserPreferences(),

@@ -5,6 +5,8 @@ import type { LogicalRoom, RoundCommand, SubRoom } from '@/application/ports'
 import { ConfirmDialog } from './confirm-dialog'
 import { Sheet } from './sheet'
 import { TimerControls, TimerReadouts } from './round-timers'
+import { DrumPanel } from './round-drum'
+import { MotionEditorButton } from './round-motion'
 import type { MeetingLayout } from '@/ui/use-meeting-layout'
 import {
   enterRoom,
@@ -364,6 +366,8 @@ export function JudgeControl({
           pinned={<TimerReadouts controller={controller} />}
         >
           <TimerControls controller={controller} />
+          <DrumPanel controller={controller} />
+          <MotionEditorButton controller={controller} />
           <JudgeControl controller={controller} />
           <button
             className="action-primary"

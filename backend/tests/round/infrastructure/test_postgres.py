@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
+from functools import partial
 from uuid import uuid4
 
 import pytest
@@ -29,6 +30,7 @@ from debatemeet.round.application.room_commands import (
     ExecuteRoundCommand,
     RecallAll,
 )
+from debatemeet.round.chat.infrastructure.transactions import PostgresSystemMessages
 from debatemeet.round.contract.snapshot import snapshot_of
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.presence import Connected
@@ -78,7 +80,13 @@ class World:
     def __init__(self, engine: AsyncEngine, url: str) -> None:
         self.engine = engine
         self.url = url
-        self.rounds = PostgresRounds(engine, PostgresMediaOutbox)
+        self.rounds = PostgresRounds(
+            engine,
+            PostgresMediaOutbox,
+            system_messages_factory=partial(
+                PostgresSystemMessages, outbox_factory=PostgresMediaOutbox
+            ),
+        )
         self.clock = FixedClock(T0)
         self.random = SecureRandom()
         self.limits = PostgresRateLimiter(engine)
@@ -90,7 +98,7 @@ class World:
         self.connect = ConnectParticipant(self.rounds, self.clock)
         self.sync = SyncPresence(self.rounds, self.media, self.clock)
         self.command = ExecuteRoundCommand(
-            self.rounds, self.media, self.rounds, self.clock, self.limits
+            self.rounds, self.media, self.rounds, self.clock, self.limits, self.random
         )
         self.admin = AdministerRound(self.rounds, self.rounds, self.clock)
 
@@ -133,6 +141,24 @@ async def test_real_ports_persist_the_round_archive_and_events_together(world: W
     assert "Вика" not in "".join(events)
     assert joined.secret not in "".join(events)
     assert await world.number("SELECT count(*) FROM event_log") == 3
+
+
+async def test_a_chat_foreign_key_does_not_wait_for_the_production_round_writer_lock(
+    world: World,
+) -> None:
+    round_id = await world.create(IP)
+    async with world.rounds.begin() as locked:
+        assert await locked.rounds.get_for_update(round_id) is not None
+        # This insert and commit must complete while the first connection still owns
+        # its row lock. FOR UPDATE would block the FK's KEY SHARE here.
+        async with asyncio.timeout(1):
+            async with world.engine.begin() as writer:
+                await writer.execute(
+                    text("""INSERT INTO messages (round_id, kind, text, created_at)
+                        VALUES (:round_id, 'system', 'A system line', :now)"""),
+                    {"round_id": round_id, "now": T0},
+                )
+        assert await world.number("SELECT count(*) FROM messages") == 1
 
 
 async def test_twenty_nine_plus_two_concurrent_joins_has_one_winner(world: World) -> None:
@@ -445,7 +471,11 @@ async def test_admin_removal_revocation_event_and_outbox_rollback_together(world
             await super().remove_participant(round_id, participant_id, now)
             raise RuntimeError("fail after enqueue")
 
-    failing = PostgresRounds(world.engine, FailingOutbox)
+    failing = PostgresRounds(
+        world.engine,
+        FailingOutbox,
+        system_messages_factory=partial(PostgresSystemMessages, outbox_factory=FailingOutbox),
+    )
     admin = AdministerRound(failing, world.rounds, world.clock)
     with pytest.raises(RuntimeError, match="fail after enqueue"):
         await admin.remove_participant(round_id, person.participant_id)

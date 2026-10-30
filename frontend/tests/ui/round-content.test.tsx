@@ -1,0 +1,224 @@
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { RoundController } from '@/application/round-controller'
+import { MotionDisplay, MotionEditorButton } from '@/ui/components/round-motion'
+import { DrumPanel } from '@/ui/components/round-drum'
+import { ChatPanel } from '@/ui/components/round-chat'
+import { RoundSidebar } from '@/ui/components/round-sidebar'
+import { ClientError } from '@/application/ports'
+import type { Message, PostedMessage } from '@/domain/chat'
+import { ROUND_ID, SELF, fixture, snapshot } from '../fixtures'
+
+const controllers: RoundController[] = []
+afterEach(() => {
+  controllers.splice(0).forEach((controller) => controller.dispose())
+  vi.useRealTimers()
+})
+async function setup(judge = true) {
+  const fakes = fixture()
+  const value = snapshot()
+  value.judgeFlag.holder = judge ? SELF : null
+  fakes.api.response.snapshot = value
+  const controller = new RoundController(ROUND_ID, fakes.services)
+  controllers.push(controller)
+  await controller.join('Вика', false)
+  await controller.chat.repair()
+  return { ...fakes, controller, value }
+}
+const message: Message = {
+  id: '1',
+  changeId: '1',
+  authorId: SELF,
+  authorName: 'Вика',
+  text: '<img onerror=alert(1)>',
+  kind: 'user',
+  createdAt: 1000,
+  deletedAt: null,
+}
+
+describe('shared motion and judge drawing', () => {
+  it('renders motion and independent infoslide as plain text and restores focus after closing', async () => {
+    const { controller, value } = await setup(false)
+    value.motion = { text: '<script>Motion</script>', infoslide: 'Only a slide' }
+    act(() => controller.store.setState({ snapshot: value }))
+    const { container } = render(<MotionDisplay controller={controller} editable />)
+    expect(screen.getByTestId('motion-text')).toHaveTextContent('«<script>Motion</script>»')
+    expect(container.querySelector('script')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Изменить резолюцию' })).not.toBeInTheDocument()
+    const open = screen.getByRole('button', { name: 'Инфослайд' })
+    await userEvent.click(open)
+    const dialog = screen.getByRole('dialog', { name: 'Инфослайд' })
+    expect(within(dialog).getByText('Only a slide')).toBeVisible()
+    fireEvent(dialog, new Event('cancel', { cancelable: true }))
+    expect(open).toHaveFocus()
+  })
+
+  it('validates UTF-8 limits and saves both normalized fields through the existing command', async () => {
+    const { controller, api } = await setup()
+    render(<MotionEditorButton controller={controller} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Изменить резолюцию' }))
+    expect(screen.getByRole('button', { name: 'Отмена' })).toHaveFocus()
+    fireEvent.change(screen.getByLabelText('Резолюция'), { target: { value: '界'.repeat(201) } })
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Резолюция'), { target: { value: '  Line\r\nTwo  ' } })
+    fireEvent.change(screen.getByLabelText('Инфослайд'), { target: { value: '  Slide  ' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    expect(api.commands.at(-1)?.intent).toEqual({
+      type: 'motion',
+      text: 'Line\nTwo',
+      infoslide: 'Slide',
+    })
+  })
+
+  it('explains disabled/drawn chips and permits configuring all positions off without resetting history', async () => {
+    const { controller, api, value } = await setup()
+    value.drum = {
+      enabled: ['og', 'oo'],
+      drawn: [{ position: 'og', drawNo: 2 }],
+      removeDrawn: true,
+      last: { position: 'co', drawNo: 3, at: 1000 },
+      drawCount: 3,
+    }
+    act(() => controller.store.setState({ snapshot: value }))
+    render(<DrumPanel controller={controller} />)
+    expect(screen.getByText('выпала №2')).toBeVisible()
+    expect(screen.getAllByText('выкл.')).toHaveLength(2)
+    await userEvent.click(screen.getByText('Меню жребия'))
+    await userEvent.click(screen.getByRole('button', { name: 'Настроить жребий' }))
+    await userEvent.click(screen.getByLabelText('OG'))
+    await userEvent.click(screen.getByLabelText('OO'))
+    await userEvent.click(screen.getByLabelText('Убирать выпавшее'))
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    expect(api.commands.at(-1)?.intent).toEqual({
+      type: 'drum/configure',
+      enabled: [],
+      removeDrawn: false,
+    })
+    expect(controller.store.getState().snapshot?.drum.drawn).toEqual([
+      { position: 'og', drawNo: 2 },
+    ])
+  })
+
+  it('confirms reset safely and does not reset on Escape', async () => {
+    const { controller, api } = await setup()
+    render(<DrumPanel controller={controller} />)
+    await userEvent.click(screen.getByText('Меню жребия'))
+    const open = screen.getByRole('button', { name: 'Сбросить барабан' })
+    await userEvent.click(open)
+    const dialog = screen.getByRole('dialog', { name: 'Сбросить барабан' })
+    expect(within(dialog).getByRole('button', { name: 'Отмена' })).toHaveFocus()
+    fireEvent(dialog, new Event('cancel', { cancelable: true }))
+    expect(open).toHaveFocus()
+    expect(api.commands).toHaveLength(0)
+  })
+
+  it('holds the draw cooldown across unrelated snapshots and releases it after 1.5 seconds', async () => {
+    const { controller, api, value } = await setup()
+    render(<DrumPanel controller={controller} />)
+    vi.useFakeTimers()
+    const next = {
+      ...value,
+      version: 2,
+      drum: {
+        ...value.drum,
+        drawn: [{ position: 'og' as const, drawNo: 1 }],
+        last: { position: 'og' as const, drawNo: 1, at: 1000 },
+        drawCount: 1,
+      },
+    }
+    api.response.snapshot = next
+    await act(() => controller.command({ type: 'drum/draw' }))
+    expect(screen.getByRole('button', { name: 'Тянуть' })).toBeDisabled()
+    act(() =>
+      controller.store.setState({ snapshot: { ...next, version: 3, drum: { ...next.drum } } }),
+    )
+    await act(() => vi.advanceTimersByTimeAsync(1499))
+    expect(screen.getByRole('button', { name: 'Тянуть' })).toBeDisabled()
+    await act(() => vi.advanceTimersByTimeAsync(1))
+    expect(screen.getByRole('button', { name: 'Тянуть' })).toBeEnabled()
+  })
+})
+
+describe('common chat controls', () => {
+  it('shows a common-room notice and literal user/system messages while preserving command independence', async () => {
+    const { controller, chat, api, value } = await setup()
+    const self = value.participants[0]
+    if (self) self.room = 'og'
+    act(() => controller.store.setState({ snapshot: value }))
+    let finish: ((value: PostedMessage) => void) | null = null
+    vi.spyOn(chat, 'post').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    act(() => {
+      controller.chat.receive({ topic: 'chat', roundId: ROUND_ID, epoch: 1, message })
+      controller.chat.receive({
+        topic: 'chat',
+        roundId: ROUND_ID,
+        epoch: 1,
+        message: {
+          ...message,
+          id: '2',
+          changeId: '2',
+          kind: 'system',
+          authorId: null,
+          authorName: null,
+          text: 'жребий: OG',
+        },
+      })
+    })
+    const { container } = render(<ChatPanel controller={controller} />)
+    expect(screen.getByText('видят все, включая другие команды')).toBeVisible()
+    expect(screen.getByText('<img onerror=alert(1)>')).toBeVisible()
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('em')).toHaveTextContent('(жребий: OG)')
+    fireEvent.change(screen.getByLabelText('Сообщение в общий чат'), { target: { value: 'Hello' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+    expect(controller.store.getState().commandPending).toBe(false)
+    await act(() => controller.command({ type: 'enter', room: 'oo' }))
+    expect(api.commands.at(-1)?.intent).toEqual({ type: 'enter', room: 'oo' })
+    const resolvePost = finish as ((value: PostedMessage) => void) | null
+    await act(async () => {
+      resolvePost?.({
+        epoch: 1,
+        asOfCursor: '3',
+        message: { ...message, id: '3', changeId: '3', text: 'Hello' },
+      })
+      await Promise.resolve()
+    })
+    expect(screen.getByLabelText('Сообщение в общий чат')).toHaveValue('')
+  })
+
+  it('keeps text and offers the same message retry after an unknown send outcome', async () => {
+    const { controller, chat } = await setup(false)
+    const post = vi.spyOn(chat, 'post').mockRejectedValueOnce(new ClientError('network'))
+    render(<ChatPanel controller={controller} />)
+    fireEvent.change(screen.getByLabelText('Сообщение в общий чат'), {
+      target: { value: 'Keep me' },
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }))
+    expect(screen.getByLabelText('Сообщение в общий чат')).toHaveValue('Keep me')
+    expect(screen.getByLabelText('Сообщение в общий чат')).toBeDisabled()
+    post.mockResolvedValue({ epoch: 1, asOfCursor: '1', message })
+    await userEvent.click(screen.getByRole('button', { name: 'Повторить отправку' }))
+    expect(post.mock.calls[1]?.[3]).toBe(post.mock.calls[0]?.[3])
+  })
+
+  it('provides keyboard tabs, counts new messages while hidden and clears unread on opening', async () => {
+    const { controller } = await setup(false)
+    render(<RoundSidebar controller={controller} tabs />)
+    const chat = screen.getByRole('tab', { name: 'Общий чат' })
+    chat.focus()
+    fireEvent.keyDown(chat, { key: 'ArrowRight' })
+    expect(screen.getByRole('tab', { name: 'Жребий' })).toHaveFocus()
+    expect(screen.getByRole('tabpanel', { name: 'Жребий' })).toBeVisible()
+    act(() => controller.chat.receive({ topic: 'chat', roundId: ROUND_ID, epoch: 1, message }))
+    expect(controller.chat.store.getState().unread).toBe(1)
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Жребий' }), { key: 'Home' })
+    expect(chat).toHaveFocus()
+    expect(controller.chat.store.getState().unread).toBe(0)
+  })
+})

@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from sqlalchemy import RowMapping, text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from debatemeet.round.application.ports import (
@@ -14,11 +13,12 @@ from debatemeet.round.application.ports import (
     CommittedRound,
     MediaOutbox,
     RoundTransaction,
+    SystemMessages,
 )
 from debatemeet.round.domain.ids import ParticipantId, RoundId
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.mapper import decode_round, encode_round
-from debatemeet.shared.application.errors import RoundBusyError
+from debatemeet.shared.infrastructure.database import command_transaction
 from debatemeet.shared.infrastructure.persistence import PostgresCommandKeys, PostgresEventLog
 
 
@@ -47,7 +47,10 @@ class _RoundRepository:
 
     async def get_for_update(self, round_id: RoundId) -> Round | None:
         result = await self._connection.execute(
-            text("SELECT state, version FROM rounds WHERE id = :id FOR UPDATE"), {"id": round_id}
+            # The id never changes. This still serializes writers without blocking the
+            # KEY SHARE acquired by a chat message's foreign key.
+            text("SELECT state, version FROM rounds WHERE id = :id FOR NO KEY UPDATE"),
+            {"id": round_id},
         )
         row = result.mappings().one_or_none()
         return None if row is None else decode_round(row["state"], round_id, row["version"])
@@ -61,7 +64,7 @@ class _RoundRepository:
         round_.version = int(result.scalar_one())
 
 
-class _ParticipantArchive:
+class PostgresParticipantArchive:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
@@ -71,6 +74,16 @@ class _ParticipantArchive:
         result = await self._connection.execute(
             text("""SELECT participant_id, name, secret_hash, revoked FROM participants
                 WHERE round_id = :round_id AND participant_id = :participant_id"""),
+            {"round_id": round_id, "participant_id": participant_id},
+        )
+        return _archived(result.mappings().one_or_none())
+
+    async def find_shared(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> ArchivedParticipant | None:
+        result = await self._connection.execute(
+            text("""SELECT participant_id, name, secret_hash, revoked FROM participants
+                WHERE round_id = :round_id AND participant_id = :participant_id FOR SHARE"""),
             {"round_id": round_id, "participant_id": participant_id},
         )
         return _archived(result.mappings().one_or_none())
@@ -125,39 +138,37 @@ class _ChangeNotifier:
 
 class _Transaction:
     def __init__(
-        self, connection: AsyncConnection, outbox_factory: Callable[[AsyncConnection], MediaOutbox]
+        self,
+        connection: AsyncConnection,
+        outbox_factory: Callable[[AsyncConnection], MediaOutbox],
+        system_messages_factory: Callable[[AsyncConnection], SystemMessages],
     ) -> None:
         self.rounds = _RoundRepository(connection)
-        self.archive = _ParticipantArchive(connection)
+        self.archive = PostgresParticipantArchive(connection)
         self.events = PostgresEventLog(connection)
         self.command_keys = PostgresCommandKeys(connection)
         self.notifier = _ChangeNotifier(connection)
         self.media_outbox = outbox_factory(connection)
+        self.system_messages = system_messages_factory(connection)
 
 
 class PostgresRounds:
     """RoundTransactions, RoundReader and SystemState over the same engine."""
 
     def __init__(
-        self, engine: AsyncEngine, outbox_factory: Callable[[AsyncConnection], MediaOutbox]
+        self,
+        engine: AsyncEngine,
+        outbox_factory: Callable[[AsyncConnection], MediaOutbox],
+        system_messages_factory: Callable[[AsyncConnection], SystemMessages],
     ) -> None:
         self._engine = engine
         self._outbox_factory = outbox_factory
+        self._system_messages_factory = system_messages_factory
 
     @asynccontextmanager
     async def begin(self) -> AsyncIterator[RoundTransaction]:
-        try:
-            async with self._engine.begin() as connection:
-                await connection.execute(text("SET LOCAL lock_timeout = '2s'"))
-                await connection.execute(
-                    text("SET LOCAL idle_in_transaction_session_timeout = '5s'")
-                )
-                yield _Transaction(connection, self._outbox_factory)
-        except DBAPIError as error:
-            # asyncpg's adapter exposes PostgreSQL SQLSTATE on its original exception.
-            if getattr(error.orig, "sqlstate", None) == "55P03":
-                raise RoundBusyError from error
-            raise
+        async with command_transaction(self._engine) as connection:
+            yield _Transaction(connection, self._outbox_factory, self._system_messages_factory)
 
     async def committed(self, round_id: RoundId) -> CommittedRound | None:
         async with self._engine.connect() as connection:
@@ -180,7 +191,7 @@ class PostgresRounds:
         self, round_id: RoundId, participant_id: ParticipantId
     ) -> ArchivedParticipant | None:
         async with self._engine.connect() as connection:
-            return await _ParticipantArchive(connection).find(round_id, participant_id)
+            return await PostgresParticipantArchive(connection).find(round_id, participant_id)
 
     async def epoch(self) -> int:
         async with self._engine.connect() as connection:

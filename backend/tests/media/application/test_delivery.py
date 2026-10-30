@@ -24,7 +24,14 @@ from debatemeet.shared.application.errors import (
     UnreadableRoundError,
 )
 from tests.fakes import FixedClock
-from tests.media.fakes import FakeApi, FakeLease, FakeWakeup, MemoryMedia, Reader
+from tests.media.fakes import (
+    FakeApi,
+    FakeLease,
+    FakeWakeup,
+    MemoryMedia,
+    PassthroughPackets,
+    Reader,
+)
 from tests.round.application.fakes import InMemoryRounds
 from tests.round.builders import ROUND_ID, T0, at
 
@@ -67,7 +74,9 @@ async def test_observation_is_dated_before_the_livekit_rpc() -> None:
 async def test_data_is_immediate_but_metadata_waits_two_seconds() -> None:
     reader, api, store, clock = Reader(), FakeApi(), MemoryMedia(), FixedClock(T0)
     await store.started(ROUND_ID, "RM_1")
-    publisher = SnapshotPublisher(reader, api, store, FakeLease(), clock, "test")
+    publisher = SnapshotPublisher(
+        reader, api, store, FakeLease(), clock, "test", packets=PassthroughPackets()
+    )
 
     await publisher.publish_once()
     packet = json.loads(api.data[-1])
@@ -89,7 +98,9 @@ async def test_data_is_immediate_but_metadata_waits_two_seconds() -> None:
 async def test_a_failed_delivery_is_retried_and_a_closed_room_is_never_recreated() -> None:
     reader, api, store, clock = Reader(), FakeApi(), MemoryMedia(), FixedClock(T0)
     await store.started(ROUND_ID, "RM_1")
-    publisher = SnapshotPublisher(reader, api, store, FakeLease(), clock, "test")
+    publisher = SnapshotPublisher(
+        reader, api, store, FakeLease(), clock, "test", packets=PassthroughPackets()
+    )
     api.unavailable = True
 
     await publisher.publish_once()
@@ -116,7 +127,9 @@ async def test_an_unreadable_round_does_not_stall_other_rounds() -> None:
     reader, api, store, clock = PartlyUnreadableReader(), FakeApi(), MemoryMedia(), FixedClock(T0)
     await store.started(broken_id, "RM_broken")
     await store.started(ROUND_ID, "RM_good")
-    publisher = SnapshotPublisher(reader, api, store, FakeLease(), clock, "test")
+    publisher = SnapshotPublisher(
+        reader, api, store, FakeLease(), clock, "test", packets=PassthroughPackets()
+    )
 
     await publisher.publish_once()
 
@@ -144,7 +157,9 @@ async def test_removals_run_without_active_or_readable_rounds_and_retry_independ
             await super().remove_participant(round_id, participant_id)
 
     api = PartlyUnavailableApi()
-    publisher = SnapshotPublisher(reader, api, store, FakeLease(), clock, "test")
+    publisher = SnapshotPublisher(
+        reader, api, store, FakeLease(), clock, "test", packets=PassthroughPackets()
+    )
 
     await publisher.publish_once()
 
@@ -183,7 +198,9 @@ async def test_a_slow_removal_does_not_block_healthy_snapshots_and_is_cancelled_
             data_delivered.set()
 
     sdk, lease = SlowRemovalApi(), FakeLease()
-    publisher = SnapshotPublisher(reader, sdk, store, lease, clock, "test")
+    publisher = SnapshotPublisher(
+        reader, sdk, store, lease, clock, "test", packets=PassthroughPackets()
+    )
     task = asyncio.create_task(publisher.run())
     try:
         await asyncio.wait_for(started.wait(), 1)
@@ -330,7 +347,15 @@ async def test_shutdown_releases_leadership_and_closes_the_sdk() -> None:
     world = PresenceWorld()
     await world.prepare()
     lease = FakeLease()
-    publisher = SnapshotPublisher(world.rounds, world.api, world.store, lease, world.clock, "test")
+    publisher = SnapshotPublisher(
+        world.rounds,
+        world.api,
+        world.store,
+        lease,
+        world.clock,
+        "test",
+        packets=PassthroughPackets(),
+    )
     runtime = MediaRuntime(publisher, world.handler, world.api)
 
     await runtime.start()
@@ -346,7 +371,15 @@ async def test_a_media_outage_does_not_block_runtime_startup_or_shutdown() -> No
     world = PresenceWorld()
     world.api.unavailable = True
     lease = FakeLease()
-    publisher = SnapshotPublisher(world.rounds, world.api, world.store, lease, world.clock, "test")
+    publisher = SnapshotPublisher(
+        world.rounds,
+        world.api,
+        world.store,
+        lease,
+        world.clock,
+        "test",
+        packets=PassthroughPackets(),
+    )
     runtime = MediaRuntime(publisher, world.handler, world.api)
 
     await runtime.start()
@@ -406,13 +439,17 @@ async def test_lease_loss_after_removal_leaves_effect_for_the_successor() -> Non
             lease.session.alive = False
 
     old_api = LosingLeaseApi()
-    old = SnapshotPublisher(reader, old_api, store, lease, clock, "test")
+    old = SnapshotPublisher(
+        reader, old_api, store, lease, clock, "test", packets=PassthroughPackets()
+    )
     with pytest.raises(ConnectionError):
         await old.publish_once()
     assert store.delivered == []
     assert 1 in store.effects
     successor_api = FakeApi()
-    successor = SnapshotPublisher(reader, successor_api, store, FakeLease(), clock, "test")
+    successor = SnapshotPublisher(
+        reader, successor_api, store, FakeLease(), clock, "test", packets=PassthroughPackets()
+    )
 
     await successor.publish_once()
 
@@ -458,7 +495,9 @@ async def test_lease_loss_cancels_in_flight_sdk_before_releasing_the_lease() -> 
             finally:
                 cancelled.set()
 
-    publisher = SnapshotPublisher(reader, WaitingApi(), store, LostLease(), clock, "test")
+    publisher = SnapshotPublisher(
+        reader, WaitingApi(), store, LostLease(), clock, "test", packets=PassthroughPackets()
+    )
     task = asyncio.create_task(publisher.run())
     try:
         await asyncio.wait_for(started.wait(), 1)
@@ -485,8 +524,10 @@ async def test_lease_loss_during_state_delivery_stops_the_old_metadata_write() -
                 await replacement.publish_once()
 
     api = FailoverApi()
-    replacement = SnapshotPublisher(reader, api, store, FakeLease(), clock, "test")
-    old = SnapshotPublisher(reader, api, store, lease, clock, "test")
+    replacement = SnapshotPublisher(
+        reader, api, store, FakeLease(), clock, "test", packets=PassthroughPackets()
+    )
+    old = SnapshotPublisher(reader, api, store, lease, clock, "test", packets=PassthroughPackets())
 
     await finish_batch(old, lease)
 
@@ -506,8 +547,10 @@ async def test_periodic_refresh_repairs_a_stale_metadata_rpc_that_crossed_lease_
             await super().update_metadata(round_id, metadata)
 
     api = FailoverApi()
-    replacement = SnapshotPublisher(reader, api, store, FakeLease(), clock, "test")
-    old = SnapshotPublisher(reader, api, store, lease, clock, "test")
+    replacement = SnapshotPublisher(
+        reader, api, store, FakeLease(), clock, "test", packets=PassthroughPackets()
+    )
+    old = SnapshotPublisher(reader, api, store, lease, clock, "test", packets=PassthroughPackets())
 
     await finish_batch(old, lease)
     assert [json.loads(metadata)["version"] for metadata in api.metadata] == [2, 1]

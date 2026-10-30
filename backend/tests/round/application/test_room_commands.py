@@ -35,7 +35,7 @@ class RoomWorld(World):
     def __init__(self) -> None:
         super().__init__()
         self.execute = ExecuteRoundCommand(
-            self.rounds, self.media, self.rounds, self.clock, self.limits
+            self.rounds, self.media, self.rounds, self.clock, self.limits, self.random
         )
         self.admin = AdministerRound(self.rounds, self.rounds, self.clock)
         self.connect = ConnectParticipant(self.rounds, self.clock)

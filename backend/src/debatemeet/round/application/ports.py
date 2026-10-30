@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from debatemeet.round.domain.ids import ParticipantId as ParticipantId
 from debatemeet.round.domain.ids import RoundId as RoundId
@@ -52,6 +52,12 @@ class ParticipantArchive(Protocol):
         self, round_id: RoundId, participant_id: ParticipantId
     ) -> ArchivedParticipant | None: ...
 
+    async def find_shared(
+        self, round_id: RoundId, participant_id: ParticipantId
+    ) -> ArchivedParticipant | None:
+        """Keep the author and credential decision stable until a chat transaction commits."""
+        ...
+
     async def add(
         self,
         round_id: RoundId,
@@ -72,6 +78,17 @@ class ParticipantArchive(Protocol):
         ...
 
 
+type PacketTopic = Literal["chat", "chat_deleted"]
+
+
+class ChatPacketReader(Protocol):
+    async def current_packet(
+        self, round_id: RoundId, topic: PacketTopic, payload: bytes
+    ) -> bytes | None:
+        """Resolve pending content against current history; None means obsolete, not retry."""
+        ...
+
+
 class MediaOutbox(Protocol):
     async def remove_participant(
         self, round_id: RoundId, participant_id: ParticipantId, now: datetime
@@ -79,10 +96,28 @@ class MediaOutbox(Protocol):
         """Queue an idempotent media removal in the caller-owned transaction."""
         ...
 
+    async def publish_packet(
+        self, round_id: RoundId, topic: PacketTopic, payload: bytes, now: datetime
+    ) -> None:
+        """Queue a bounded server packet on the caller's connection and transaction."""
+        ...
+
 
 class ChangeNotifier(Protocol):
     async def round_changed(self, round_id: RoundId) -> None:
         """NOTIFY for the publisher; Postgres delivers it only when the transaction commits."""
+        ...
+
+
+class SystemMessages(Protocol):
+    async def prepare(self, round_id: RoundId) -> None:
+        """Acquire the chat writer guard before taking the round row lock for a draw."""
+        ...
+
+    async def position_drawn(
+        self, round_id: RoundId, position: str, draw_no: int, now: datetime, round_version: int
+    ) -> None:
+        """Persist the system message, event and packet on this caller-owned transaction."""
         ...
 
 
@@ -107,6 +142,9 @@ class RoundTransaction(Protocol):
 
     @property
     def media_outbox(self) -> MediaOutbox: ...
+
+    @property
+    def system_messages(self) -> SystemMessages: ...
 
 
 class RoundTransactions(Protocol):

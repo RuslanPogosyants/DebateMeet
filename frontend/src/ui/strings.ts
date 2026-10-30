@@ -151,6 +151,10 @@ export const strings = {
 } as const
 
 const errors: Record<string, string> = {
+  invalid_motion: 'Проверьте длину и символы резолюции и инфослайда.',
+  invalid_drum: 'Проверьте настройки жребия.',
+  invalid_message: 'Введите от 1 до 1000 символов без управляющих символов.',
+  drum_empty: 'Барабан пуст — сбросьте его или измените настройки.',
   invalid_name: 'Введите имя: от 1 до 40 символов, без управляющих знаков.',
   invalid_request: 'Проверьте имя и повторите вход.',
   round_full: 'В раунде 30 человек. Попробуйте войти позже.',
@@ -180,6 +184,47 @@ const errors: Record<string, string> = {
   speech_undo_unavailable: 'Отменять пока нечего: следующая речь ещё не начиналась.',
   command_unavailable: 'Эта команда временно недоступна. Звонок продолжается.',
 }
+
+export const contentStrings = {
+  motion: 'Резолюция',
+  motionEmpty: 'Резолюция не задана',
+  infoslide: 'Инфослайд',
+  editMotion: 'Изменить резолюцию',
+  fullMotion: 'Полностью',
+  save: 'Сохранить',
+  motionChanged: 'Резолюция изменена',
+  invalidMotion: 'Проверьте длину текста и допустимые символы.',
+  drum: 'Жребий',
+  draw: 'Тянуть',
+  configure: 'Настроить жребий',
+  reset: 'Сбросить барабан',
+  drumMenu: 'Меню жребия',
+  removeDrawn: 'Убирать выпавшее',
+  inDrum: 'в барабане',
+  drawn: 'выпала',
+  disabled: 'выкл.',
+  noDraw: 'Позиции ещё не тянули',
+  allDisabled: 'Все позиции выключены. Включите нужные в настройках.',
+  drumEmpty: 'Барабан пуст — сбросьте его.',
+  enabledPositions: 'Включённые позиции',
+  resetDescription: 'Выпавшие позиции и последний результат будут очищены.',
+  returning: 'Вернутся в барабан',
+  none: 'нет',
+  chat: 'Общий чат',
+  chatButton: 'Чат',
+  message: 'Сообщение в общий чат',
+  send: 'Отправить',
+  retrySend: 'Повторить отправку',
+  earlier: 'Более ранние',
+  loading: 'Загружаем сообщения…',
+  loadingEarlier: 'Загружаем историю…',
+  chatEmpty: 'Сообщений пока нет',
+  generalNotice: 'видят все, включая другие команды',
+  uncertainSend: 'Исход отправки неизвестен. Повтор сохранит то же сообщение.',
+  newMessages: 'Новых сообщений',
+  retryHistory: 'Повторить загрузку',
+  characters: 'символов',
+} as const
 
 export function errorText(code: string | null): string {
   return (code === null ? undefined : errors[code]) ?? errors.network ?? ''

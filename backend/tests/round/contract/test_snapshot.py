@@ -1,8 +1,11 @@
 from datetime import UTC, datetime
 
 from debatemeet.round.contract.snapshot import RoundSnapshot, snapshot_of
+from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
 from debatemeet.round.domain.ids import ParticipantId
 from debatemeet.round.domain.judge import FormerHolder, JudgeFlag, ReleaseReason
+from debatemeet.round.domain.motion import Motion
+from debatemeet.round.domain.position import Position
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import MAX_PARTICIPANTS
 from debatemeet.round.domain.timer import JS_MAX_SAFE_INTEGER, SpeechUndo, Timer, TimerStatus
@@ -83,6 +86,14 @@ def test_the_snapshot_speaks_camel_case_and_epoch_milliseconds() -> None:
         },
         "speechNo": 1,
         "speechUndo": None,
+        "motion": {"text": "", "infoslide": ""},
+        "drum": {
+            "enabled": ["og", "oo", "cg", "co"],
+            "drawn": [],
+            "removeDrawn": True,
+            "last": None,
+            "drawCount": 0,
+        },
     }
 
 
@@ -95,17 +106,26 @@ def test_no_session_id_leaves_the_server() -> None:
 
 
 def test_the_largest_snapshot_fits_a_data_packet() -> None:
-    # 40 participants with 40-character names of 80 bytes, the flag with the longest name.
+    # Quotes and backslashes consume the maximum serialized space under the text bounds.
     builder = a_round()
     for n in range(MAX_PARTICIPANTS):
-        builder.with_participant(f"{n:012d}", name="Ж" * 40, room=Room.JUDGES)
+        builder.with_participant(f"{n:012d}", name='\\"' * 20, room=Room.JUDGES)
     round_ = builder.with_judge(f"{0:012d}").build()
     round_.judge_flag = JudgeFlag(
-        last_holder=FormerHolder(ParticipantId("x" * 12), "Ж" * 40),
+        last_holder=FormerHolder(ParticipantId("x" * 12), '\\"' * 20),
         released_reason=ReleaseReason.HOLDER_DISCONNECTED,
         released_at=at(0),
     )
-    round_.version = 2**40
+    round_.version = JS_MAX_SAFE_INTEGER
+    round_.motion = Motion('\\"' * 150, '\\"' * 750)
+    round_.drum = Drum(
+        drawn=tuple(
+            DrawnPosition(position, JS_MAX_SAFE_INTEGER - 3 + index)
+            for index, position in enumerate(Position)
+        ),
+        last=DrawResult(Position.CO, JS_MAX_SAFE_INTEGER, datetime.max.replace(tzinfo=UTC)),
+        draw_count=JS_MAX_SAFE_INTEGER,
+    )
     round_.prep_timer = Timer(1800000, TimerStatus.PAUSED, None, -JS_MAX_SAFE_INTEGER)
     round_.speech_timer = Timer(900000, TimerStatus.PAUSED, None, JS_MAX_SAFE_INTEGER)
     round_.speech_no = JS_MAX_SAFE_INTEGER
@@ -115,7 +135,7 @@ def test_the_largest_snapshot_fits_a_data_packet() -> None:
     )
 
     snapshot = snapshot_of(
-        round_, epoch=2**31, committed_at=at(0), app_version="2026.09.29-0123456789ab"
+        round_, epoch=JS_MAX_SAFE_INTEGER, committed_at=at(0), app_version="2026.09.29-0123456789ab"
     )
 
     assert len(snapshot_json(snapshot).encode()) <= SNAPSHOT_LIMIT_BYTES
@@ -165,3 +185,32 @@ def test_a_deadline_before_the_epoch_stays_a_signed_millisecond_value() -> None:
     snapshot = snapshot_of(round_, epoch=1, committed_at=at(0), app_version="A")
 
     assert snapshot.timers.speech.ends_at == -315619200000
+
+
+def test_motion_and_drum_are_in_the_shared_snapshot_without_chat_or_domain_datetime() -> None:
+    round_ = a_round().build()
+    round_.motion = Motion('Эта палата\nвыбирает "прямую речь"', "Инфослайд\tотдельно")
+    round_.drum = Drum(
+        enabled=(Position.CG,),
+        drawn=(DrawnPosition(Position.OG, 1), DrawnPosition(Position.OO, 2)),
+        remove_drawn=False,
+        last=DrawResult(Position.OO, 2, datetime(1960, 1, 1, tzinfo=UTC)),
+        draw_count=2,
+    )
+
+    data = snapshot_of(round_, epoch=1, committed_at=at(0), app_version="A4").model_dump(
+        mode="json", by_alias=True
+    )
+
+    assert data["motion"] == {
+        "text": 'Эта палата\nвыбирает "прямую речь"',
+        "infoslide": "Инфослайд\tотдельно",
+    }
+    assert data["drum"] == {
+        "enabled": ["cg"],
+        "drawn": [{"position": "og", "drawNo": 1}, {"position": "oo", "drawNo": 2}],
+        "removeDrawn": False,
+        "last": {"position": "oo", "drawNo": 2, "at": -315619200000},
+        "drawCount": 2,
+    }
+    assert "messages" not in data

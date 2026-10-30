@@ -318,7 +318,8 @@
   accent-color: var(--foreground);
 }
 .meeting-shell {
-  min-height: 100svh;
+  height: 100dvh;
+  min-height: 0;
   padding: 24px 32px;
   display: flex;
   flex-direction: column;
@@ -436,13 +437,42 @@
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 24px;
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
 }
 .meeting-scene {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.meeting-scene > .meeting-stage {
+  flex: 1 0 auto;
+}
+.meeting-workspace > .room-map {
+  min-height: 0;
+  overflow: auto;
+}
+.meeting-heading,
+.meeting-navigation,
+.meeting-controls,
+.timer-health,
+.round-timers,
+.scene-heading,
+.back-to-base {
+  flex-shrink: 0;
+}
+.meeting-notices {
+  flex-shrink: 0;
+  max-height: 15dvh;
+  overflow: auto;
+}
+.meeting-notices:empty {
+  display: none;
 }
 .room-map-heading,
 .room-card-heading {
@@ -955,7 +985,6 @@ dialog select {
   }
   .meeting-workspace-compact {
     min-height: 0;
-    overflow: auto;
   }
   .meeting-workspace-compact .meeting-stage {
     min-height: 140px;
@@ -1005,4 +1034,297 @@ dialog select {
   .sheet-pinned .timer-description {
     max-width: 150px;
   }
+}
+
+/* Shared round content uses the existing room, sheet and call-control boundaries. */
+.motion-heading {
+  min-width: 0;
+}
+.motion-text,
+.plain-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.motion-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.motion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+.motion-full {
+  display: inline;
+}
+.meeting-heading > :first-child {
+  min-width: 0;
+  flex: 1;
+}
+.scene-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.meeting-workspace {
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+}
+.meeting-workspace-compact {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+.meeting-navigation {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.meeting-navigation > .room-navigation {
+  flex: 1;
+  min-width: 0;
+}
+.round-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.round-sidebar [role='tablist'] {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1.5px solid var(--foreground);
+  flex-shrink: 0;
+}
+.round-sidebar [role='tab'] {
+  flex: 1;
+  padding: 10px 8px;
+  min-height: 44px;
+}
+.round-sidebar [role='tab'][aria-selected='true'] {
+  color: var(--background);
+  background: var(--foreground);
+}
+.drum-panel {
+  border-block: 1px solid var(--border);
+  padding-block: 12px;
+}
+.drum-last {
+  padding-block: 12px;
+}
+.drum-last strong {
+  font-size: 28px;
+}
+.drum-positions {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.drum-position {
+  border: 1px solid var(--foreground);
+  padding: 8px;
+}
+.drum-position span {
+  display: block;
+  font-size: 13px;
+}
+.drum-drawn {
+  background: var(--secondary);
+}
+.drum-disabled {
+  border-style: dashed;
+}
+.drum-menu {
+  position: relative;
+}
+.drum-menu summary {
+  min-height: 44px;
+  padding-block: 10px;
+}
+.drum-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.drum-menu button {
+  display: block;
+  margin-top: 8px;
+  min-height: 36px;
+}
+.check-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 44px;
+}
+.check-row input {
+  width: 20px;
+  height: 20px;
+}
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: auto;
+}
+.chat-panel > :not(.chat-log) {
+  flex-shrink: 0;
+}
+.chat-log {
+  min-height: 120px;
+  flex: 1 1 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.chat-message + .chat-message {
+  margin-top: 16px;
+}
+.chat-system {
+  color: var(--muted-foreground);
+}
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-panel > .chat-composer {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.chat-composer > :not(textarea) {
+  flex-shrink: 0;
+}
+.chat-composer textarea,
+.dialog-content textarea {
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  font-size: 15px;
+}
+.chat-composer textarea {
+  flex: 1 1 auto;
+  min-height: 44px;
+  height: 56px;
+  max-height: 120px;
+}
+.chat-compose-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.phone-chat-button {
+  display: none;
+}
+.chat-sheet .sheet-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.chat-sheet .round-sidebar {
+  flex: 1;
+}
+.chat-sheet .chat-log {
+  max-height: none;
+}
+.chat-sheet .drum-panel {
+  overflow: auto;
+}
+@media (max-width: 959px) {
+  .meeting-workspace-compact {
+    display: flex;
+    flex-direction: column;
+  }
+  .meeting-navigation .chat-trigger-narrow {
+    align-self: center;
+    min-height: 44px;
+  }
+  .chat-composer textarea {
+    resize: none;
+  }
+}
+@media (max-width: 600px) {
+  .meeting-navigation .chat-trigger-narrow {
+    display: none;
+  }
+  .phone-chat-button {
+    display: block;
+  }
+  .meeting-controls {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .meeting-controls .action {
+    min-width: 0;
+    min-height: 44px;
+    padding: 8px 4px;
+    overflow-wrap: anywhere;
+  }
+  .chat-composer textarea {
+    font-size: 16px;
+  }
+  .motion-actions button,
+  .drum-menu button {
+    min-height: 44px;
+  }
+}
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.round-sidebar:not(.round-sidebar-tabs) .drum-panel {
+  flex-shrink: 0;
+}
+.round-sidebar:not(.round-sidebar-tabs) .drum-panel-judge {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  flex: 0 0 40%;
+  min-height: 120px;
+  max-height: 180px;
+  padding-block: 8px;
+}
+.round-sidebar:not(.round-sidebar-tabs) .drum-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.round-sidebar:not(.round-sidebar-tabs) .drum-last {
+  padding: 0;
+}
+.round-sidebar:not(.round-sidebar-tabs) .drum-options {
+  min-height: 0;
+  overflow: auto;
+}
+.round-sidebar:not(.round-sidebar-tabs) .drum-positions {
+  margin: 0;
+}
+.round-sidebar:not(.round-sidebar-tabs) .drum-menu-content {
+  position: absolute;
+  z-index: 3;
+  top: 100%;
+  right: 0;
+  min-width: max-content;
+  padding: 0 12px 8px;
+  border: 1px solid var(--foreground);
+  background: var(--background);
 }

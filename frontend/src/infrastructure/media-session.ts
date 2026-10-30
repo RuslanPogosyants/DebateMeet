@@ -11,6 +11,7 @@ import {
 import type { RemoteTrack } from 'livekit-client'
 import type { DeviceSelection, EndReason, MediaEvents, MediaSession } from '@/application/ports'
 import { record, subscriptions, type Snapshot } from '@/domain/snapshot'
+import { readChatEvent } from '@/domain/chat'
 
 function ended(reason: DisconnectReason | undefined): EndReason {
   if (reason === DisconnectReason.DUPLICATE_IDENTITY) return 'replaced'
@@ -87,11 +88,24 @@ export class LiveKitMediaSession implements MediaSession {
       this.metadata(metadata)
     })
     this.room.on(RoomEvent.DataReceived, (payload, participant, _, topic) => {
-      if (topic !== 'state' || participant !== undefined || payload.byteLength > 15 * 1024) return
+      if (
+        !['state', 'chat', 'chat_deleted'].includes(topic ?? '') ||
+        participant !== undefined ||
+        payload.byteLength > 15 * 1024
+      )
+        return
       try {
-        const value: unknown = JSON.parse(new TextDecoder().decode(payload))
-        if (record(value) && value.topic === 'state' && typeof value.nonce === 'string') {
+        const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(payload))
+        if (
+          topic === 'state' &&
+          record(value) &&
+          value.topic === 'state' &&
+          typeof value.nonce === 'string'
+        ) {
           this.events?.snapshot(value.snapshot)
+        } else if (topic !== 'state') {
+          const event = readChatEvent(value, this.snapshot?.roundId ?? '')
+          if (event !== null && event.topic === topic) this.events?.chat(event)
         }
       } catch {
         /* A malformed packet cannot change state. */

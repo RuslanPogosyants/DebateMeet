@@ -51,7 +51,7 @@ def commands() -> CommandApp:
             LeaveRound(store, clock, store, limiter),
             ReadSnapshot(store),
         ),
-        room_commands=ExecuteRoundCommand(store, media, store, clock, limiter),
+        room_commands=ExecuteRoundCommand(store, media, store, clock, limiter, random),
     )
     return CommandApp(app, store, limiter)
 

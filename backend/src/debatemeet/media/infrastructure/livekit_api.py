@@ -7,7 +7,7 @@ import aiohttp
 from livekit import api
 
 from debatemeet.media.application.ports import MediaRoom, MediaRoomMissingError
-from debatemeet.round.application.ports import ParticipantId, RoundId, SessionId
+from debatemeet.round.application.ports import PacketTopic, ParticipantId, RoundId, SessionId
 from debatemeet.shared.application.errors import MediaUnavailableError
 
 
@@ -66,10 +66,16 @@ class LiveKitApiAdapter:
         }
 
     async def send_state(self, round_id: RoundId, packet: bytes) -> None:
+        await self._send_data(round_id, "state", packet)
+
+    async def send_packet(self, round_id: RoundId, topic: PacketTopic, packet: bytes) -> None:
+        await self._send_data(round_id, topic, packet)
+
+    async def _send_data(self, round_id: RoundId, topic: str, packet: bytes) -> None:
         try:
             await self._api().room.send_data(
                 api.SendDataRequest(
-                    room=round_id, data=packet, topic="state", kind=api.DataPacket.RELIABLE
+                    room=round_id, data=packet, topic=topic, kind=api.DataPacket.RELIABLE
                 )
             )
         except api.TwirpError as error:

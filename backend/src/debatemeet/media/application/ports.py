@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from debatemeet.round.application.ports import ParticipantId, RoundId, SessionId
+from debatemeet.round.application.ports import PacketTopic, ParticipantId, RoundId, SessionId
 
 
 class MediaRoomMissingError(Exception):
@@ -37,6 +37,16 @@ class RemovalEffect:
     revision: int = 1
 
 
+@dataclass(frozen=True, slots=True)
+class PacketEffect:
+    id: int
+    round_id: RoundId
+    topic: PacketTopic
+    payload: bytes
+    attempts: int
+    revision: int = 1
+
+
 class LiveKitApi(Protocol):
     async def create_room(self, round_id: RoundId, metadata: str) -> MediaRoom: ...
 
@@ -45,6 +55,10 @@ class LiveKitApi(Protocol):
     async def participants(self, round_id: RoundId) -> Mapping[ParticipantId, SessionId]: ...
 
     async def send_state(self, round_id: RoundId, packet: bytes) -> None: ...
+
+    async def send_packet(self, round_id: RoundId, topic: PacketTopic, packet: bytes) -> None:
+        """Reliable server data to the entire MediaRoom, independently of logical rooms."""
+        ...
 
     async def update_metadata(self, round_id: RoundId, metadata: str) -> None: ...
 
@@ -76,9 +90,15 @@ class MediaStore(Protocol):
 
     async def pending_effects(self, now: datetime) -> Sequence[RemovalEffect]: ...
 
-    async def effect_delivered(self, effect: RemovalEffect, at: datetime) -> None: ...
+    async def packet_heads(self, now: datetime) -> Sequence[PacketEffect]:
+        """Eligible first undelivered packet per round; a waiting retry blocks its successors."""
+        ...
 
-    async def effect_failed(self, effect: RemovalEffect, at: datetime) -> None: ...
+    async def effect_delivered(
+        self, effect: RemovalEffect | PacketEffect, at: datetime
+    ) -> None: ...
+
+    async def effect_failed(self, effect: RemovalEffect | PacketEffect, at: datetime) -> None: ...
 
 
 class PublisherWakeup(Protocol):

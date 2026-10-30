@@ -3,6 +3,7 @@ import json
 from collections.abc import AsyncIterator, Mapping
 from contextlib import suppress
 from datetime import datetime
+from functools import partial
 
 import pytest
 from livekit import api, rtc
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from bots import dev
 from bots.bot import delete_media_room, livekit_api
 from debatemeet.media.application.gateway import RoundMediaGateway
-from debatemeet.media.application.ports import MediaRoom, RemovalEffect
+from debatemeet.media.application.ports import MediaRoom, PacketEffect, RemovalEffect
 from debatemeet.media.application.publisher import SnapshotPublisher
 from debatemeet.media.application.webhooks import HandleMediaEvent
 from debatemeet.media.infrastructure.livekit_api import LiveKitApiAdapter
@@ -33,6 +34,7 @@ from debatemeet.round.application.presence import (
     DisconnectParticipant,
     SyncPresence,
 )
+from debatemeet.round.chat.infrastructure.transactions import PostgresSystemMessages
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
 from debatemeet.round.domain.round import Round
 from debatemeet.round.infrastructure.postgres import PostgresRounds
@@ -45,7 +47,7 @@ from debatemeet.shared.infrastructure.clock import SystemClock
 from debatemeet.shared.infrastructure.database import create_engine
 from debatemeet.shared.infrastructure.randomness import SecureRandom
 from tests.fakes import FixedClock
-from tests.media.fakes import FakeApi, FakeLease
+from tests.media.fakes import FakeApi, FakeLease, PassthroughPackets
 from tests.media.livekit import eventually
 from tests.round.application.fakes import CountingRateLimiter
 from tests.round.builders import T0, at
@@ -66,7 +68,11 @@ async def media_engine(database_url: str) -> AsyncIterator[AsyncEngine]:
 
 
 async def seed(engine: AsyncEngine) -> tuple[RoundId, PostgresRounds]:
-    rounds = PostgresRounds(engine, PostgresMediaOutbox)
+    rounds = PostgresRounds(
+        engine,
+        PostgresMediaOutbox,
+        system_messages_factory=partial(PostgresSystemMessages, outbox_factory=PostgresMediaOutbox),
+    )
     round_id = RoundId(SecureRandom().token(16))
     async with rounds.begin() as tx:
         await tx.rounds.add(Round.create(round_id, SystemClock().now()), SystemClock().now())
@@ -157,7 +163,13 @@ async def test_real_state_delivery_and_leader_change(media_engine: AsyncEngine) 
             dev.URL, gateway.token(round_id, ParticipantId("sender000001"), "Alice")
         )
         publisher = SnapshotPublisher(
-            reader, adapter, store, PostgresPublisherLease(media_engine), clock, "integration"
+            reader,
+            adapter,
+            store,
+            PostgresPublisherLease(media_engine),
+            clock,
+            "integration",
+            packets=PassthroughPackets(),
         )
         await publisher.publish_once()
 
@@ -179,7 +191,13 @@ async def test_real_state_delivery_and_leader_change(media_engine: AsyncEngine) 
             assert round_ is not None
             await tx.rounds.save(round_, clock.now())
         replacement = SnapshotPublisher(
-            reader, adapter, store, PostgresPublisherLease(media_engine), clock, "integration"
+            reader,
+            adapter,
+            store,
+            PostgresPublisherLease(media_engine),
+            clock,
+            "integration",
+            packets=PassthroughPackets(),
         )
         await replacement.publish_once()
 
@@ -274,7 +292,13 @@ async def test_restart_delivers_other_round_removal_despite_unreadable_state(
         SyncPresence(rounds, gateway, clock),
     )
     publisher = SnapshotPublisher(
-        rounds, sdk, store, PostgresPublisherLease(media_engine), clock, "test"
+        rounds,
+        sdk,
+        store,
+        PostgresPublisherLease(media_engine),
+        clock,
+        "test",
+        packets=PassthroughPackets(),
     )
     runtime = MediaRuntime(publisher, handler, sdk)
     try:
@@ -366,7 +390,15 @@ async def test_startup_retries_a_busy_round_without_stopping_healthy_delivery(
         ObservedSync(rounds, gateway, clock),
     )
     runtime = MediaRuntime(
-        SnapshotPublisher(rounds, sdk, store, PostgresPublisherLease(media_engine), clock, "test"),
+        SnapshotPublisher(
+            rounds,
+            sdk,
+            store,
+            PostgresPublisherLease(media_engine),
+            clock,
+            "test",
+            packets=PassthroughPackets(),
+        ),
         handler,
         sdk,
     )
@@ -416,12 +448,20 @@ async def test_crash_between_sdk_removal_and_ack_is_replayed_on_restart(
         await tx.media_outbox.remove_participant(round_id, participant, T0)
 
     class CrashBeforeAck(PostgresMediaStore):
-        async def effect_delivered(self, effect: RemovalEffect, at: datetime) -> None:
+        async def effect_delivered(
+            self, effect: RemovalEffect | PacketEffect, at: datetime
+        ) -> None:
             raise RuntimeError("crash before ack")
 
     sdk, clock = FakeApi(), FixedClock(T0)
     crashed = SnapshotPublisher(
-        rounds, sdk, CrashBeforeAck(media_engine), FakeLease(), clock, "test"
+        rounds,
+        sdk,
+        CrashBeforeAck(media_engine),
+        FakeLease(),
+        clock,
+        "test",
+        packets=PassthroughPackets(),
     )
     with pytest.raises(RuntimeError, match="crash before ack"):
         await crashed.publish_once()
@@ -432,6 +472,7 @@ async def test_crash_between_sdk_removal_and_ack_is_replayed_on_restart(
         PostgresPublisherLease(media_engine),
         clock,
         "test",
+        packets=PassthroughPackets(),
     )
 
     await recovered.publish_once()
@@ -446,7 +487,11 @@ async def test_real_remove_and_restart_reconciliation_kick_a_revoked_old_jwt(
     media_engine: AsyncEngine,
 ) -> None:
     clock, random, limits = SystemClock(), SecureRandom(), CountingRateLimiter()
-    rounds = PostgresRounds(media_engine, PostgresMediaOutbox)
+    rounds = PostgresRounds(
+        media_engine,
+        PostgresMediaOutbox,
+        system_messages_factory=partial(PostgresSystemMessages, outbox_factory=PostgresMediaOutbox),
+    )
     adapter = LiveKitApiAdapter(dev.URL, dev.API_KEY, dev.API_SECRET)
     store = PostgresMediaStore(media_engine)
     gateway = RoundMediaGateway(rounds, adapter, store, clock, dev.URL, "integration")
@@ -457,7 +502,13 @@ async def test_real_remove_and_restart_reconciliation_kick_a_revoked_old_jwt(
     credentials = Credentials(joined.participant_id, joined.secret)
     initial, returning = rtc.Room(), rtc.Room()
     publisher = SnapshotPublisher(
-        rounds, adapter, store, PostgresPublisherLease(media_engine), clock, "integration"
+        rounds,
+        adapter,
+        store,
+        PostgresPublisherLease(media_engine),
+        clock,
+        "integration",
+        packets=PassthroughPackets(),
     )
     try:
         await initial.connect(dev.URL, joined.token)
