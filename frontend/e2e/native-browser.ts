@@ -16,7 +16,7 @@ export type NativeBrowser = {
 export async function launchNativeBrowser(args: string[] = []): Promise<NativeBrowser> {
   const profile = await mkdtemp(join(tmpdir(), 'debatemeet-native-browser-'))
   const child = spawn(
-    chromium.executablePath(),
+    process.env['DM_E2E_CHROME_EXECUTABLE'] ?? chromium.executablePath(),
     [
       '--headless=new',
       '--mute-audio',
