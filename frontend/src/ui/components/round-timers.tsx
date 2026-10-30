@@ -469,6 +469,7 @@ export function TimerHealth({ controller }: { controller: RoundController }) {
   const clock = useStore(controller.timers.store)
   const playbackBlocked = useStore(controller.store, (state) => state.playbackBlocked)
   const approximate = !clock.synchronized || clock.degraded || (clock.uncertaintyMs ?? 0) > 250
+  if (!approximate && !playbackBlocked && clock.audio !== 'blocked') return null
   return (
     <div className="timer-health">
       {approximate && (

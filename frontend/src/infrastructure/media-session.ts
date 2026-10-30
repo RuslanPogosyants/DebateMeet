@@ -7,6 +7,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  TrackEvent,
   setLogLevel,
 } from 'livekit-client'
 import type { LocalTrack, RemoteTrack, TrackPublication } from 'livekit-client'
@@ -68,6 +69,11 @@ export class LiveKitMediaSession implements MediaSession {
   private readonly video = new Map<string, VideoRegistration>()
   private readonly volumes = new Map<string, number>()
   private readonly context: AudioContext
+  private recordingMic: ((track: MediaStreamTrack | null) => void) | null = null
+  private recordingTrack: LocalTrack | null = null
+  private recordingMicSuppressed = false
+  private microphoneRevision = 0
+  private readonly adaptiveSettings = { pauseVideoInBackground: true }
   private readonly stats: MediaStats
   private devices: MediaDevices | null = null
   private closed = false
@@ -79,7 +85,7 @@ export class LiveKitMediaSession implements MediaSession {
     const retries = new DefaultReconnectPolicy()
     this.context = new AudioContext()
     this.room = new Room({
-      adaptiveStream: true,
+      adaptiveStream: this.adaptiveSettings,
       dynacast: true,
       webAudioMix: { audioContext: this.context },
       reconnectPolicy: {
@@ -119,6 +125,7 @@ export class LiveKitMediaSession implements MediaSession {
     this.room.on(RoomEvent.LocalTrackUnpublished, () => {
       this.refresh()
     })
+    this.room.on(RoomEvent.ActiveDeviceChanged, () => this.recordingMicChanged())
     this.room.on(RoomEvent.ActiveSpeakersChanged, () => {
       this.people()
     })
@@ -192,6 +199,8 @@ export class LiveKitMediaSession implements MediaSession {
     })
     this.room.on(RoomEvent.Disconnected, (reason) => {
       this.closed = true
+      this.recordingMic?.(null)
+      this.watchRecordingTrack(null)
       void this.stopScreen()
       this.stats.close()
       this.clearTracks()
@@ -256,6 +265,8 @@ export class LiveKitMediaSession implements MediaSession {
   async disconnect(): Promise<void> {
     this.intentional = true
     this.closed = true
+    this.recordingMic?.(null)
+    this.watchRecordingTrack(null)
     // Fence pending display capture and stop its raw track before disconnect yields.
     const screenStopped = this.stopScreen()
     this.stats.close()
@@ -325,8 +336,63 @@ export class LiveKitMediaSession implements MediaSession {
   }
 
   async microphone(enabled: boolean): Promise<void> {
-    await this.devices?.microphone(enabled)
-    this.refresh()
+    const revision = ++this.microphoneRevision
+    this.recordingMicSuppressed = !enabled
+    if (!enabled) this.recordingMic?.(null)
+    try {
+      await this.devices?.microphone(enabled)
+    } finally {
+      if (revision === this.microphoneRevision) this.recordingMicSuppressed = false
+      this.refresh()
+    }
+  }
+
+  recordingMicrophone(listener: (track: MediaStreamTrack | null) => void): () => void {
+    this.recordingMic = listener
+    this.recordingMicChanged()
+    return () => {
+      if (this.recordingMic === listener) {
+        this.recordingMic = null
+        this.watchRecordingTrack(null)
+      }
+    }
+  }
+  recordingBackground(enabled: boolean): void {
+    const settings = this.room.options.adaptiveStream
+    if (typeof settings === 'object') settings.pauseVideoInBackground = !enabled
+  }
+  private recordingMicChanged(): void {
+    if (this.recordingMic === null) return
+    if (this.closed) {
+      this.watchRecordingTrack(null)
+      this.recordingMic(null)
+      return
+    }
+    const local = this.room.localParticipant
+    const publication = [...local.audioTrackPublications.values()].find(
+      (item) => item.source === Track.Source.Microphone,
+    )
+    const track = publication?.track ?? null
+    this.watchRecordingTrack(track)
+    const raw = track?.mediaStreamTrack
+    this.recordingMic?.(
+      !this.closed &&
+        !this.recordingMicSuppressed &&
+        local.isMicrophoneEnabled &&
+        !publication?.isMuted &&
+        raw?.readyState === 'live'
+        ? raw
+        : null,
+    )
+  }
+  private readonly recordingTrackRestarted = (): void => this.recordingMicChanged()
+  private watchRecordingTrack(track: LocalTrack | null): void {
+    if (track === this.recordingTrack) return
+    this.recordingTrack?.off(TrackEvent.Restarted, this.recordingTrackRestarted)
+    this.recordingTrack?.off(TrackEvent.Ended, this.recordingTrackRestarted)
+    this.recordingTrack = track
+    track?.on(TrackEvent.Restarted, this.recordingTrackRestarted)
+    track?.on(TrackEvent.Ended, this.recordingTrackRestarted)
   }
 
   async camera(enabled: boolean): Promise<void> {
@@ -412,9 +478,11 @@ export class LiveKitMediaSession implements MediaSession {
       Promise.resolve({ available: [], selected: {}, outputSupported: false })
     )
   }
-  selectDevice(kind: DeviceKind, id: string) {
+  async selectDevice(kind: DeviceKind, id: string) {
     if (this.devices === null) return Promise.reject(new Error('Media unavailable'))
-    return this.devices.select(kind, id)
+    const state = await this.devices.select(kind, id)
+    this.recordingMicChanged()
+    return state
   }
   subscribedVideoIds(): readonly string[] {
     return [...this.room.remoteParticipants.values()]
@@ -545,6 +613,7 @@ export class LiveKitMediaSession implements MediaSession {
   }
 
   private people(): void {
+    this.recordingMicChanged()
     const people = [this.room.localParticipant, ...this.room.remoteParticipants.values()]
     const priority = new Map(
       (this.room.activeSpeakers ?? []).map((speaker, index) => [speaker.identity, index]),

@@ -48,14 +48,15 @@ test('personal scene and runtime devices preserve real remote media and pass axe
       .poll(() => video.evaluate((element: HTMLVideoElement) => element.videoWidth))
       .toBeGreaterThan(0)
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
-    await tile.getByRole('button', { name: 'Действия — Спикер сцены', exact: true }).click()
-    await page.getByRole('dialog').getByRole('button', { name: 'Закрепить', exact: true }).click()
+    await tile.hover()
+    await tile.getByRole('button', { name: 'Закрепить — Спикер сцены', exact: true }).click()
     await expect(tile).toHaveAttribute('data-primary', 'true')
     await video.evaluate((element) => element.setAttribute('data-owned-element', 'original'))
     await page.getByRole('button', { name: 'Сетка', exact: true }).click()
     await expect(page.locator('.participant-grid')).toHaveAttribute('data-layout', 'grid')
     await expect(video).toHaveAttribute('data-owned-element', 'original')
-    await page.getByRole('button', { name: 'Крупный спикер', exact: true }).click()
+    await tile.hover()
+    await tile.getByRole('button', { name: 'Закрепить — Спикер сцены', exact: true }).click()
     await expect(tile).toHaveAttribute('data-primary', 'true')
     await page.getByRole('button', { name: 'Камера выключена', exact: true }).click()
     const remoteSelf = speaker
@@ -78,9 +79,12 @@ test('personal scene and runtime devices preserve real remote media and pass axe
     ]) {
       await page.setViewportSize(size)
       if (size.width < 960) {
+        const minimum = await page.evaluate(() =>
+          matchMedia('(pointer: coarse)').matches ? 44 : 32,
+        )
         for (const selector of ['.scene-choice', '.self-view-choice']) {
           for (const target of await page.locator(selector).all()) {
-            expect((await target.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+            expect((await target.boundingBox())?.height).toBeGreaterThanOrEqual(minimum)
           }
         }
       }
@@ -107,6 +111,23 @@ test('personal scene and runtime devices preserve real remote media and pass axe
     await expect(page.getByRole('button', { name: 'Звук и устройства', exact: true })).toBeFocused()
     await page.keyboard.press('Escape')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
+    const touchContext = await browser.newContext({
+      permissions: ['camera', 'microphone'],
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+    })
+    try {
+      const touch = await touchContext.newPage()
+      await touch.goto(page.url())
+      await join(touch, 'Сенсорный наблюдатель')
+      expect(await touch.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      for (const target of await touch.locator('.scene-choice, .self-view-choice').all()) {
+        expect((await target.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+      }
+      await accessible(touch, info, 'round-touch-phone')
+    } finally {
+      await touchContext.close()
+    }
   } finally {
     await context.close()
   }

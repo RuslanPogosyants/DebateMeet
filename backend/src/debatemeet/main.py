@@ -28,6 +28,7 @@ from debatemeet.media.infrastructure.runtime import MediaRuntime
 from debatemeet.round.api.diagnostics import diagnostics_router
 from debatemeet.round.api.entry import RoundEndpoints, entry_router
 from debatemeet.round.api.reactions import reaction_router
+from debatemeet.round.api.recordings import recording_router
 from debatemeet.round.api.rooms import room_router
 from debatemeet.round.application.commands import CreateRound, JoinRound, LeaveRound, ReadSnapshot
 from debatemeet.round.application.diagnostics import ReceiveDiagnostics
@@ -37,6 +38,7 @@ from debatemeet.round.application.presence import (
     SyncPresence,
 )
 from debatemeet.round.application.reactions import SendReaction
+from debatemeet.round.application.recordings import ManageRecordings
 from debatemeet.round.application.room_commands import ExecuteRoundCommand
 from debatemeet.round.chat.api.messages import message_router
 from debatemeet.round.chat.application.post_message import PostMessage
@@ -56,6 +58,7 @@ from debatemeet.round.infrastructure.diagnostics import (
 )
 from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
 from debatemeet.round.infrastructure.reaction_limits import SlidingReactionLimiter
+from debatemeet.round.infrastructure.recordings import PostgresRecordings
 from debatemeet.shared.api.errors import install_error_handlers
 from debatemeet.shared.api.health import health_router
 from debatemeet.shared.api.metrics import metrics_router
@@ -92,6 +95,7 @@ def build_app(
     reactions: SendReaction | None = None,
     diagnostics: ReceiveDiagnostics | None = None,
     diagnostic_reader: DiagnosticReader | None = None,
+    recordings: ManageRecordings | None = None,
 ) -> FastAPI:
     """The HTTP app over ports; tests call it with fakes."""
     app = FastAPI(
@@ -111,6 +115,7 @@ def build_app(
     app.include_router(room_router(room_commands, version))
     app.include_router(message_router(messages, post_message))
     app.include_router(reaction_router(reactions))
+    app.include_router(recording_router(recordings))
     app.include_router(diagnostics_router(diagnostics))
     app.include_router(metrics_router(diagnostic_reader, clock))
     # Data packets travel through LiveKit, but their schema belongs to the same public contract.
@@ -220,4 +225,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             SlidingDiagnosticLimiter(),
         ),
         diagnostic_reader=diagnostic_store,
+        recordings=ManageRecordings(PostgresRecordings(engine), clock),
     )

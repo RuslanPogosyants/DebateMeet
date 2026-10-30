@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router'
 import { useStore } from 'zustand'
 import { RoundController } from '@/application/round-controller'
 import type { DeviceSelection } from '@/application/ports'
-import { RoomMap, RoomNavigation, JudgeControl } from '@/ui/components/round-tools'
+import { RoomMap, JudgeControl } from '@/ui/components/round-tools'
 import {
   HandButton,
   HandQueue,
@@ -20,8 +20,13 @@ import { DevicePreview } from '@/ui/components/device-preview'
 import { RoundTimers, TimerHealth } from '@/ui/components/round-timers'
 import { MotionDisplay } from '@/ui/components/round-motion'
 import { RoundSidebar } from '@/ui/components/round-sidebar'
+import { RoomsPanelToggle } from '@/ui/components/rooms-panel-toggle'
+import {
+  RecordingIndicator,
+  RecordingsLibrary,
+  LocalRecordingsButton,
+} from '@/ui/components/recordings'
 import { RoundStage } from '@/ui/components/round-stage'
-import { RoomRosterButton } from '@/ui/components/participant-roster'
 import { Sheet } from '@/ui/components/sheet'
 import {
   ConnectionNotice,
@@ -186,11 +191,15 @@ function Meeting({ controller }: { controller: RoundController }) {
   const state = useStore(controller.store)
   const [judgeLeave, setJudgeLeave] = useState(false)
   const [transferAndLeave, setTransferAndLeave] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const chatButton = useRef<HTMLButtonElement>(null)
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false)
+  const [chatRequest, setChatRequest] = useState(0)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const roomsPanelId = useId()
   const [moreOpen, setMoreOpen] = useState(false)
   const [utilityPanel, setUtilityPanel] = useState<'diagnostics' | 'report' | null>(null)
+  const [recordingsOpen, setRecordingsOpen] = useState(false)
+  const [recordingLeave, setRecordingLeave] = useState(false)
+  const recordingState = useStore(controller.recording.store)
   const moreButton = useRef<HTMLButtonElement>(null)
   function openUtility(panel: 'diagnostics' | 'report') {
     setMoreOpen(false)
@@ -211,6 +220,11 @@ function Meeting({ controller }: { controller: RoundController }) {
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
   }, [])
+  const [previousLayout, setPreviousLayout] = useState(layout)
+  if (previousLayout !== layout) {
+    setPreviousLayout(layout)
+    if (layout !== 'narrow') setMobilePanelOpen(false)
+  }
   const unread = useStore(controller.chat.store, (chat) => chat.unread)
   const chatLabel =
     unread > 0 ? `${contentStrings.chatButton} — ${unread} новых` : contentStrings.chatButton
@@ -244,9 +258,13 @@ function Meeting({ controller }: { controller: RoundController }) {
           : strings.round.cameraOff
   const room =
     state.snapshot?.participants.find((person) => person.id === state.self)?.room ?? 'base'
+  const recordingOccupied =
+    !recordingState.statusUnavailable &&
+    recordingState.leases.some((lease) => lease.room === room && lease.participantId !== state.self)
   function leave() {
     setMoreOpen(false)
-    if (state.snapshot?.judgeFlag.holder === state.self) setJudgeLeave(true)
+    if (recordingState.phase !== 'idle') setRecordingLeave(true)
+    else if (state.snapshot?.judgeFlag.holder === state.self) setJudgeLeave(true)
     else void controller.leave()
   }
   const callControls = (
@@ -300,15 +318,18 @@ function Meeting({ controller }: { controller: RoundController }) {
         )}
         <HandButton controller={controller} />
         <ReactionControls controller={controller} />
-        <RoomRosterButton controller={controller} />
         <button
-          ref={chatButton}
           className="action icon-control chat-toggle"
           type="button"
           title={chatLabel}
           aria-label={chatLabel}
-          aria-expanded={layout === 'narrow' ? chatOpen : sidebarOpen}
-          onClick={() => (layout === 'narrow' ? setChatOpen(true) : setSidebarOpen(!sidebarOpen))}
+          aria-expanded={layout === 'narrow' ? mobilePanelOpen : !sidebarCollapsed}
+          aria-controls={roomsPanelId}
+          onClick={() => {
+            setChatRequest((request) => request + 1)
+            if (layout === 'narrow') setMobilePanelOpen(true)
+            else setSidebarCollapsed(false)
+          }}
         >
           <ControlIcon kind="chat" />
           {unread > 0 && (
@@ -328,15 +349,32 @@ function Meeting({ controller }: { controller: RoundController }) {
         >
           <ControlIcon kind="more" />
         </button>
+        <button
+          className="action call-leave"
+          type="button"
+          aria-label={strings.round.leave}
+          title={strings.round.leave}
+          onClick={leave}
+        >
+          <ControlIcon kind="leave-call" />
+          <span>{strings.round.leave}</span>
+        </button>
       </div>
     </footer>
   )
   return (
     <main className="meeting-shell">
-      <div className="meeting-notices">
+      <div
+        className="meeting-notices"
+        role="region"
+        aria-label="Уведомления раунда"
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- A bounded stack of notices must remain scrollable with the keyboard.
+        tabIndex={0}
+      >
         <VersionNotice controller={controller} />
         <ConnectionNotice controller={controller} />
         <SocialNotices controller={controller} />
+        <TimerHealth controller={controller} />
         {state.motionChanged && (
           <div className="meeting-banner" role="status">
             <span>{contentStrings.motionChanged}</span>
@@ -404,64 +442,54 @@ function Meeting({ controller }: { controller: RoundController }) {
           </div>
         )}
       </div>
-      {layout !== 'full' && (
-        <div className="meeting-navigation">
-          <RoomNavigation controller={controller} layout={layout} />
-        </div>
-      )}
       <div
-        className={`meeting-workspace${layout !== 'full' ? ' meeting-workspace-compact' : ''}${layout !== 'narrow' && !sidebarOpen ? ' meeting-workspace-sidebar-closed' : ''}`}
+        className={`meeting-workspace${layout === 'narrow' || sidebarCollapsed ? ' meeting-workspace-panel-closed' : ''}`}
       >
-        {layout === 'full' && <RoomMap controller={controller} />}
+        {layout !== 'narrow' && (
+          <aside
+            className="meeting-side-panel"
+            id={roomsPanelId}
+            aria-label="Комнаты и чат"
+            hidden={sidebarCollapsed}
+          >
+            <RoomMap controller={controller} />
+            {!sidebarCollapsed && (
+              <RoundSidebar controller={controller} tabs chatRequest={chatRequest} />
+            )}
+          </aside>
+        )}
         <div className="meeting-center">
-          <TimerHealth controller={controller} />
+          <div className="scene-toolbar">
+            <div className="scene-heading">
+              <RoomsPanelToggle
+                expanded={layout === 'narrow' ? mobilePanelOpen : !sidebarCollapsed}
+                controls={roomsPanelId}
+                onToggle={() => {
+                  if (layout === 'narrow') setMobilePanelOpen((open) => !open)
+                  else setSidebarCollapsed((collapsed) => !collapsed)
+                }}
+              />
+              <h1 className="font-display text-title font-bold" data-testid="current-room-heading">
+                {roomNames[room]}
+              </h1>
+              <HandQueue controller={controller} compact />
+              <JudgeControl controller={controller} panel compact />
+              <p>{strings.round.hearing}</p>
+            </div>
+            <SceneControls controller={controller} />
+          </div>
           <div className="scene-round-header">
             <MotionDisplay controller={controller} editable={layout !== 'narrow'} />
             <RoundTimers controller={controller} layout={layout} />
           </div>
           <div className="meeting-scene">
-            <div className="scene-toolbar">
-              <div className="scene-heading">
-                <h1
-                  className="font-display text-title font-bold"
-                  data-testid="current-room-heading"
-                >
-                  {roomNames[room]}
-                </h1>
-                <HandQueue controller={controller} compact />
-                <JudgeControl controller={controller} panel compact />
-                <p>{strings.round.hearing}</p>
-                {room !== 'base' && (
-                  <button
-                    className="text-link back-to-base"
-                    type="button"
-                    disabled={state.commandPending || state.commandUncertain}
-                    onClick={() => {
-                      void controller.command({ type: 'enter', room: 'base' })
-                    }}
-                  >
-                    {strings.round.backToBase}
-                  </button>
-                )}
-              </div>
-              <SceneControls controller={controller} />
-            </div>
+            <RecordingIndicator controller={controller} onLibrary={() => setRecordingsOpen(true)} />
             <div className="meeting-call-area">
               <RoundStage key={room} controller={controller} layout={layout} />
               {callControls}
             </div>
           </div>
         </div>
-        {layout !== 'narrow' && sidebarOpen && (
-          <RoundSidebar
-            controller={controller}
-            tabs
-            onClose={() => {
-              setSidebarOpen(false)
-              chatButton.current?.focus()
-            }}
-          />
-        )}
       </div>
 
       {moreOpen && (
@@ -473,6 +501,42 @@ function Meeting({ controller }: { controller: RoundController }) {
           <div className="more-controls">
             <div className="utility-actions">
               <CopyLink labeled />
+              <button
+                className="action"
+                type="button"
+                disabled={
+                  recordingState.phase !== 'idle' ||
+                  !controller.recording.platform.supported() ||
+                  recordingOccupied
+                }
+                onClick={() => {
+                  setMoreOpen(false)
+                  void controller.startRecording()
+                }}
+              >
+                Начать запись комнаты
+              </button>
+              {controller.recording.platform.supported() &&
+                !recordingOccupied &&
+                recordingState.phase === 'idle' && (
+                  <p className="text-caption">
+                    Выберите эту вкладку со звуком. Ваш включенный микрофон тоже попадет в запись.
+                  </p>
+                )}
+              {!controller.recording.platform.supported() && (
+                <p className="text-caption">Запись вкладки недоступна в этом браузере.</p>
+              )}
+              {recordingOccupied && <p className="text-caption">В этой комнате уже идет запись.</p>}
+              <button
+                className="action"
+                type="button"
+                onClick={() => {
+                  setMoreOpen(false)
+                  setRecordingsOpen(true)
+                }}
+              >
+                Записи на этом компьютере
+              </button>
               <SoundControls controller={controller} />
               <button
                 className="action"
@@ -487,24 +551,49 @@ function Meeting({ controller }: { controller: RoundController }) {
               </button>
             </div>
             <ReactionPreference controller={controller} />
-            <button className="action menu-leave" type="button" onClick={leave}>
-              <ControlIcon kind="leave-call" />
-              {strings.round.leave}
-            </button>
           </div>
         </Sheet>
       )}
-      {chatOpen && layout === 'narrow' && (
+      {mobilePanelOpen && layout === 'narrow' && (
         <Sheet
-          title={contentStrings.chat}
-          className="chat-sheet"
-          onClose={() => setChatOpen(false)}
+          title="Комнаты и чат"
+          closeLabel="Свернуть боковую панель"
+          className="meeting-panel-sheet"
+          onClose={() => setMobilePanelOpen(false)}
         >
-          <RoundSidebar controller={controller} tabs controls={false} />
+          <div className="meeting-side-panel" id={roomsPanelId}>
+            <RoomMap controller={controller} onEntered={() => setMobilePanelOpen(false)} />
+            <RoundSidebar controller={controller} tabs chatRequest={chatRequest} />
+          </div>
         </Sheet>
       )}
       {utilityPanel === 'diagnostics' && (
         <DiagnosticsPanel controller={controller} onClose={closeUtility} />
+      )}
+      {recordingsOpen && (
+        <RecordingsLibrary
+          onClose={() => {
+            setRecordingsOpen(false)
+            moreButton.current?.focus()
+          }}
+        />
+      )}
+      {recordingLeave && (
+        <ConfirmDialog
+          title="Завершить запись и выйти?"
+          confirm="Завершить запись и выйти"
+          cancel="Остаться"
+          onCancel={() => setRecordingLeave(false)}
+          onConfirm={() => {
+            setRecordingLeave(false)
+            void controller.leave()
+          }}
+        >
+          <p>Видео останется доступно для скачивания на экране выхода.</p>
+          {state.snapshot?.judgeFlag.holder === state.self && (
+            <p>{strings.round.judgeLeaveDescription}</p>
+          )}
+        </ConfirmDialog>
       )}
       {utilityPanel === 'report' && (
         <ProblemReport controller={controller} onClose={closeUtility} />
@@ -594,6 +683,7 @@ export function RoundPage() {
       <main className="entry-shell">
         <VersionNotice controller={controller} canReload />
         <h1 className="font-display text-display font-bold">{endedText[state.ended ?? 'left']}</h1>
+        <LocalRecordingsButton />
         {state.ended !== 'removed' && state.ended !== 'deleted' && (
           <button
             className="action-primary"

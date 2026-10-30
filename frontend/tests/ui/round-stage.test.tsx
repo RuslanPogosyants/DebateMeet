@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RoundController } from '@/application/round-controller'
 import type { Snapshot } from '@/domain/snapshot'
 import { RoundStage } from '@/ui/components/round-stage'
+import { SceneControls } from '@/ui/components/round-resilience'
 import { RoomRosterButton } from '@/ui/components/participant-roster'
 import { participantActions, resilienceStrings } from '@/ui/strings'
 import { ROUND_ID, SELF, fixture, snapshot } from '../fixtures'
@@ -45,10 +46,35 @@ async function setup(count = 40) {
 function showSnapshot(controller: RoundController, value: Snapshot) {
   const state = controller.store.getState()
   controller.store.setState({ snapshot: value })
-  controller.scene.update(value, SELF, state.people, [])
+  controller.scene.update(value, SELF, state.people)
 }
 
 describe('fixed participant stage', () => {
+  it('switches between equal grid and a manually enlarged participant without replacing video', async () => {
+    const { controller, api } = await setup(3)
+    const command = vi.spyOn(api, 'command')
+    render(
+      <>
+        <SceneControls controller={controller} />
+        <RoundStage controller={controller} layout="full" />
+      </>,
+    )
+    const remote = screen.getByRole('article', { name: 'Участник 2' })
+    const video = remote.querySelector('video')
+    const large = screen.getByRole('button', { name: 'Крупный спикер' })
+    const grid = screen.getByRole('button', { name: 'Сетка' })
+    expect(grid).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(large)
+    expect(large).toHaveAttribute('aria-pressed', 'true')
+    expect(remote).toHaveAttribute('data-primary', 'true')
+    await userEvent.click(large)
+    expect(remote).toHaveAttribute('data-primary', 'true')
+    await userEvent.click(grid)
+    expect(grid).toHaveAttribute('aria-pressed', 'true')
+    expect(remote).not.toHaveAttribute('data-primary')
+    expect(remote.querySelector('video')).toBe(video)
+    expect(command).not.toHaveBeenCalled()
+  })
   it('pins a participant directly from the grid and makes that person the large speaker', async () => {
     const { controller, api } = await setup(3)
     const command = vi.spyOn(api, 'command')
@@ -83,7 +109,7 @@ describe('fixed participant stage', () => {
       within(remote).getByRole('button', { name: 'Скрыть камеру для вас — Участник 2' }),
     )
     expect(session.videos.has(remoteId)).toBe(false)
-    expect(within(remote).getByText('Видео скрыто для вас')).toBeVisible()
+    expect(within(remote).getByRole('img', { name: 'Видео скрыто для вас' })).toBeVisible()
     expect(remote.querySelector('video')).toBe(video)
     await userEvent.click(
       within(remote).getByRole('button', { name: 'Показать камеру для вас — Участник 2' }),
@@ -99,7 +125,7 @@ describe('fixed participant stage', () => {
     const owner = value.participants[1]
     const selected = value.participants[2]
     if (!owner || !selected) throw new Error('Missing screen candidates')
-    const { container } = render(<RoundStage controller={controller} layout="full" />)
+    render(<RoundStage controller={controller} layout="full" />)
     const ownerCamera = session.videos.get(owner.id)
     act(() => {
       controller.scene.setLayout('speaker')
@@ -114,10 +140,14 @@ describe('fixed participant stage', () => {
       )
     })
     const presentation = screen.getByRole('article', { name: `Экран — ${owner.name}` })
+    expect(presentation).not.toHaveAttribute('data-primary')
+    await userEvent.click(
+      within(presentation).getByRole('button', { name: `Показать экран крупно — ${owner.name}` }),
+    )
     expect(presentation).toHaveAttribute('data-primary', 'true')
     expect(session.videos.get(owner.id)).toBe(ownerCamera)
     expect(session.videos.get(`screen:${owner.id}`)).toBe(presentation.querySelector('video'))
-    expect(container.querySelectorAll('video')).toHaveLength(12)
+    expect(session.videos.size).toBe(12)
     act(() => controller.scene.pin(selected.id))
     expect(screen.getByRole('article', { name: selected.name })).toHaveAttribute(
       'data-primary',
@@ -189,7 +219,7 @@ describe('fixed participant stage', () => {
     expect(screen.queryByRole('article', { name: 'Экран — Участник 1' })).not.toBeInTheDocument()
   })
 
-  it('keeps remote names and microphone state without repeating the self caption', async () => {
+  it('shows a compact microphone status on both self and remote tiles', async () => {
     const { controller, session, value } = await setup(2)
     act(() =>
       session.events?.people(
@@ -206,7 +236,7 @@ describe('fixed participant stage', () => {
     const own = screen.getByRole('article', { name: 'Участник 1' })
     const remote = screen.getByRole('article', { name: 'Участник 2' })
     expect(within(own).queryByText('Участник 1')).not.toBeInTheDocument()
-    expect(within(own).queryByRole('img', { name: 'Микрофон выключен' })).not.toBeInTheDocument()
+    expect(within(own).getByRole('img', { name: 'Микрофон выключен' })).toBeVisible()
     expect(within(own).queryByRole('img', { name: 'Плохая связь' })).not.toBeInTheDocument()
     expect(within(remote).getByText('Участник 2')).toBeVisible()
     expect(within(remote).getByRole('img', { name: 'Микрофон выключен' })).toBeVisible()
@@ -229,7 +259,7 @@ describe('fixed participant stage', () => {
     const command = vi.spyOn(api, 'command')
     const { container } = render(<RoundStage controller={controller} layout="full" />)
     expect(screen.getAllByRole('article')).toHaveLength(6)
-    expect(container.querySelectorAll('.participant-tile')).toHaveLength(12)
+    expect(container.querySelectorAll('.participant-tile')).toHaveLength(40)
     const videos = [...container.querySelectorAll('video')]
     expect(attach).toHaveBeenCalledTimes(12)
     await userEvent.click(screen.getByRole('button', { name: 'Следующая страница видео' }))
@@ -248,6 +278,36 @@ describe('fixed participant stage', () => {
     expect(attach).toHaveBeenCalledTimes(12)
   })
 
+  it('reaches all 40 people through video pages without a roster and bounds actual registrations', async () => {
+    const { controller, session, api } = await setup()
+    const original = session.attachVideo.bind(session)
+    let peak = 0
+    vi.spyOn(session, 'attachVideo').mockImplementation((...args) => {
+      const stop = original(...args)
+      peak = Math.max(peak, session.videos.size)
+      return stop
+    })
+    const commands = vi.spyOn(api, 'command')
+    render(<RoundStage controller={controller} layout="full" />)
+    const seen = new Set<string>()
+    for (;;) {
+      for (const article of screen.getAllByRole('article'))
+        seen.add(article.getAttribute('aria-label') ?? '')
+      expect(session.videos.size).toBeLessThanOrEqual(12)
+      const next = screen.getByRole('button', { name: 'Следующая страница видео' })
+      if (next.hasAttribute('disabled')) break
+      await userEvent.click(next)
+    }
+    expect(seen.size).toBe(40)
+    expect(peak).toBe(12)
+    const last = screen.getByRole('article', { name: 'Участник 40' })
+    await userEvent.click(within(last).getByRole('button', { name: 'Закрепить — Участник 40' }))
+    expect(last).toHaveAttribute('data-primary', 'true')
+    expect(session.videos.size).toBeLessThanOrEqual(12)
+    expect(screen.queryByRole('button', { name: /^Действия — /u })).not.toBeInTheDocument()
+    expect(commands).not.toHaveBeenCalled()
+  })
+
   it('uses four grid slots on narrow screens and keeps a changing primary visible in speaker view', async () => {
     const { controller } = await setup(12)
     const { rerender } = render(<RoundStage controller={controller} layout="narrow" />)
@@ -257,7 +317,7 @@ describe('fixed participant stage', () => {
     expect(screen.getAllByRole('article')).toHaveLength(4)
     const primaryId = controller.scene.store.getState().videoIds[11]
     if (!primaryId) throw new Error('Missing primary candidate')
-    act(() => controller.scene.store.setState({ primaryId }))
+    act(() => controller.scene.pin(primaryId))
     expect(screen.getByRole('article', { name: 'Участник 12' })).toHaveAttribute(
       'data-primary',
       'true',
@@ -267,7 +327,7 @@ describe('fixed participant stage', () => {
     expect(screen.getByRole('article', { name: 'Участник 12' })).toBeVisible()
   })
 
-  it('can promote a camera-on speaker from a hidden page without reattaching its video', async () => {
+  it('does not promote a speaking person until explicitly pinned and keeps its video element', async () => {
     const { controller, session, services, value } = await setup(12)
     controller.scene.setLayout('speaker')
     const attach = vi.spyOn(session, 'attachVideo')
@@ -287,6 +347,8 @@ describe('fixed participant stage', () => {
     act(() => session.events?.people(speaking))
     now += 900
     act(() => session.events?.people(speaking))
+    expect(screen.queryByRole('article', { name: candidate.name })).not.toBeInTheDocument()
+    act(() => controller.scene.pin(candidate.id))
     expect(screen.getByRole('article', { name: candidate.name })).toHaveAttribute(
       'data-primary',
       'true',
@@ -365,7 +427,7 @@ describe('fixed participant stage', () => {
     expect(within(own).queryByText('Участник 1')).not.toBeInTheDocument()
   })
 
-  it('makes people beyond the video budget reachable through the eight-person roster and existing pin action', async () => {
+  it('keeps the dormant roster implementation available without mounting it in the meeting', async () => {
     const { controller } = await setup()
     render(
       <>

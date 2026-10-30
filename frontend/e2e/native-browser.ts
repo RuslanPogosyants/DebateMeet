@@ -19,7 +19,7 @@ export async function launchNativeBrowser(args: string[] = []): Promise<NativeBr
     process.env['DM_E2E_CHROME_EXECUTABLE'] ?? chromium.executablePath(),
     [
       '--headless=new',
-      '--mute-audio',
+      '--disable-audio-output',
       '--remote-debugging-port=0',
       `--user-data-dir=${profile}`,
       '--no-first-run',

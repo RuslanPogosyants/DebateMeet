@@ -10,12 +10,19 @@ import {
 import { claimJudge, command, createRound, enter, join, sendServerPacket, snapshot } from './round'
 import { flushView, observeSocialPackets, socialPackets } from './social-packets'
 
-async function openActions(page: Page, name: string) {
+async function openJudgeControls(page: Page) {
   const panel = page.getByRole('dialog', { name: 'Вы судья', exact: true })
   if ((await panel.count()) === 0)
     await page.getByRole('button', { name: 'Вы судья', exact: true }).click()
-  await panel.getByRole('button', { name: `Действия — ${name}`, exact: true }).click()
-  return page.getByRole('dialog', { name: `Действия — ${name}`, exact: true })
+  return panel
+}
+async function openVolume(page: Page, name: string) {
+  const trigger = page.getByRole('article', { name, exact: true }).locator('.tile-volume-control')
+  await trigger.focus()
+  await trigger.press('ArrowUp')
+  const popup = page.getByRole('dialog', { name: `Громкость для вас — ${name}`, exact: true })
+  await expect(popup).toBeVisible()
+  return popup
 }
 
 async function sameRound(page: Page, url: string, name: string) {
@@ -73,10 +80,9 @@ test('hands travel with their room and only an explicit owner action unmutes a j
     await expect.poll(async () => (await outputBands(listener, [440]))[0]).toBeGreaterThan(0.005)
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeLessThan(0.001)
 
-    let actions = await openActions(page, 'Спикер')
+    let actions = await openJudgeControls(page)
     await actions.getByRole('button', { name: 'Опустить руку — Спикер', exact: true }).click()
     await expect(source.getByRole('button', { name: 'Поднять руку', exact: true })).toBeEnabled()
-    await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await source.getByRole('button', { name: 'Поднять руку', exact: true }).click()
     await listener.getByRole('button', { name: 'Поднять руку', exact: true }).click()
     await expect(listener.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 2')
@@ -94,7 +100,7 @@ test('hands travel with their room and only an explicit owner action unmutes a j
     await queueDialog.getByRole('button', { name: 'Закрыть', exact: true }).click()
     expect((await outputBands(listener, [440]))[0]).toBeGreaterThan(0.005)
 
-    actions = await openActions(page, 'Спикер')
+    actions = await openJudgeControls(page)
     await actions.getByRole('button', { name: 'Выключить микрофон — Спикер', exact: true }).click()
     await expect.poll(async () => (await outputBands(listener, [440]))[0]).toBeLessThan(0.001)
     await expect(
@@ -240,7 +246,7 @@ test('real reaction packets stay in their room, respect hidden preference and re
       .click()
     await enter(reader, 'OG')
     await expect(reader.getByTestId('current-room-heading')).toHaveText('OG')
-    await reader.getByRole('button', { name: '← В базу', exact: true }).click()
+    await enter(reader, 'База')
     await expect(reader.getByTestId('current-room-heading')).toHaveText('База')
     const current = await snapshot(reader)
     expect(current.version).toBeGreaterThan(original.version)
@@ -258,9 +264,10 @@ test('real reaction packets stay in their room, respect hidden preference and re
     await reader.setViewportSize({ width: 390, height: 844 })
     const more = reader.getByRole('button', { name: 'Ещё', exact: true })
     await expect(more).toBeInViewport({ ratio: 1 })
+    await expect(reader.getByRole('button', { name: 'Выйти', exact: true })).toBeInViewport()
     await more.click()
     const menu = reader.getByRole('dialog', { name: 'Ещё', exact: true })
-    await expect(menu.getByRole('button', { name: 'Выйти', exact: true })).toBeInViewport()
+    await expect(menu.getByRole('button', { name: 'Выйти', exact: true })).toHaveCount(0)
     const sound = menu.getByRole('button', { name: 'Звук и устройства', exact: true })
     await sound.click()
     await reader
@@ -309,8 +316,8 @@ test('personal volume changes real output and survives publications and reconnec
     await source.getByRole('button', { name: 'Микрофон выключен', exact: true }).click()
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
     const full = await meanBand(page, 440)
-    let actions = await openActions(page, 'Спикер')
-    let range = actions.getByRole('slider', { name: 'Громкость — Спикер', exact: true })
+    let actions = await openVolume(page, 'Спикер')
+    let range = actions.getByRole('slider', { name: 'Громкость для вас — Спикер', exact: true })
     await expect(range).toHaveAttribute('max', '200')
     await range.press('Home')
     await expect(range).toHaveValue('0')
@@ -320,7 +327,7 @@ test('personal volume changes real output and survives publications and reconnec
     const half = await meanBand(page, 440)
     expect(half / full).toBeGreaterThan(0.35)
     expect(half / full).toBeLessThan(0.65)
-    await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await page.keyboard.press('Escape')
     await source.reload()
     await join(source, 'Спикер')
     await source.getByRole('button', { name: 'Микрофон выключен', exact: true }).click()
@@ -331,8 +338,8 @@ test('personal volume changes real output and survives publications and reconnec
     await page.reload()
     await join(page, 'Слушатель')
     await command(page, 'judge/claim')
-    actions = await openActions(page, 'Спикер')
-    range = actions.getByRole('slider', { name: 'Громкость — Спикер', exact: true })
+    actions = await openVolume(page, 'Спикер')
+    range = actions.getByRole('slider', { name: 'Громкость для вас — Спикер', exact: true })
     await expect(range).toHaveValue('50')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
     const reconnected = await meanBand(page, 440)
@@ -340,7 +347,7 @@ test('personal volume changes real output and survives publications and reconnec
     expect(reconnected / full).toBeLessThan(0.65)
     await range.press('Home')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeLessThan(0.001)
-    await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await page.keyboard.press('Escape')
     await startOutputRecording(page, [440, 660])
     // Cross the start of the final protected minute; reaching zero has no cue.
     await command(page, 'timers/speech/set', { remainingMs: 62500 })
@@ -356,24 +363,21 @@ test('personal volume changes real output and survives publications and reconnec
       .toBeGreaterThan(0.001)
     const cue = await stopOutputRecording(page)
     expect(Math.max(...cue.map((frame) => frame.bands[0] ?? 0))).toBeLessThan(0.001)
-    actions = await openActions(page, 'Спикер')
-    range = actions.getByRole('slider', { name: 'Громкость — Спикер', exact: true })
+    actions = await openVolume(page, 'Спикер')
+    range = actions.getByRole('slider', { name: 'Громкость для вас — Спикер', exact: true })
     await range.press('End')
     await expect(range).toHaveValue('200')
-    await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await page.keyboard.press('Escape')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
-    await page.getByRole('button', { name: 'Закрыть судейскую панель', exact: true }).click()
     await enter(page, 'OG')
     await expect(page.getByTestId('current-room-heading')).toHaveText('OG')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeLessThan(0.001)
-    actions = await openActions(page, 'Спикер')
-    range = actions.getByRole('slider', { name: 'Громкость — Спикер', exact: true })
-    await range.press('Home')
-    await range.press('End')
-    await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await expect(page.getByRole('article', { name: 'Спикер', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Действия — Спикер', exact: true })).toHaveCount(
+      0,
+    )
     expect((await outputBands(page, [440]))[0]).toBeLessThan(0.001)
-    await page.getByRole('button', { name: 'Закрыть судейскую панель', exact: true }).click()
-    await page.getByRole('button', { name: '← В базу', exact: true }).click()
+    await enter(page, 'База')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
     await page.screenshot({ path: testInfo.outputPath('social-desktop.png'), fullPage: true })
     await testInfo.attach('real-volume', {

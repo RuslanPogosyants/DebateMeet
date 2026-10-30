@@ -178,7 +178,7 @@ test('logical rooms isolate actual speaker output and recall restores it without
     await page.screenshot({ path: testInfo.outputPath('judge-mobile.png'), fullPage: true })
     await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: 'Вы судья', exact: true })).toBeFocused()
-    await page.getByRole('button', { name: 'Комнаты', exact: true }).click()
+    await page.getByRole('button', { name: 'Показать боковую панель', exact: true }).click()
     await page.screenshot({ path: testInfo.outputPath('rooms-drawer-mobile.png'), fullPage: true })
     await page.getByRole('button', { name: 'Всех в базу', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Вернуть участников в базу?', exact: true })

@@ -69,7 +69,6 @@ export const strings = {
     emptyRoom: 'пусто',
     currentRoom: 'Ваша комната',
     enter: 'Перейти',
-    backToBase: '← В базу',
     noConnection: 'нет связи',
     noJudge: 'Судьи нет',
     flagAvailable: 'Флаг свободен',

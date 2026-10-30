@@ -96,9 +96,12 @@ class Bot:
         self._sources: list[rtc.AudioSource | rtc.VideoSource] = []
         self._tasks: list[asyncio.Task[None]] = []
 
-    async def start(self) -> None:
+    async def start(self, *, url: str | None = None, token: str | None = None) -> None:
         self._room = rtc.Room()
-        await self._room.connect(dev.URL, dev_token(self.identity, self.media_room))
+        await self._room.connect(
+            url if url is not None else dev.URL,
+            token if token is not None else dev_token(self.identity, self.media_room),
+        )
         participant = self._room.local_participant
         audio = rtc.AudioSource(SAMPLE_RATE, 1)
         self._sources = [audio]

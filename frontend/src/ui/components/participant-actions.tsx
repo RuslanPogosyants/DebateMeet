@@ -21,6 +21,56 @@ export function HandBadge({ position }: { position: number }) {
   ) : null
 }
 
+export function JudgeParticipantActions({
+  controller,
+  participant,
+}: {
+  controller: RoundController
+  participant: Participant
+}) {
+  const state = useStore(controller.store)
+  const own = state.snapshot?.participants.find((person) => person.id === state.self)
+  const media = state.people.find((person) => person.id === participant.id)
+  if (state.snapshot?.judgeFlag.holder !== state.self || own?.presence.status !== 'connected')
+    return null
+  const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
+  return (
+    <div className="judge-participant-controls">
+      {participant.handRaisedAt !== null && (
+        <button
+          className="action-primary icon-control"
+          type="button"
+          aria-label={lowerHandOf(participant.name)}
+          title={lowerHandOf(participant.name)}
+          disabled={busy}
+          onClick={() => {
+            void controller.command({ type: 'hands/lower-of', participantId: participant.id })
+          }}
+        >
+          <ControlIcon kind="hand" off />
+        </button>
+      )}
+      {participant.id !== state.self && (
+        <button
+          className="action-primary icon-control"
+          type="button"
+          aria-label={microphoneAction(participant.name, media?.microphone ?? false)}
+          title={microphoneAction(participant.name, media?.microphone ?? false)}
+          disabled={busy || participant.presence.status !== 'connected' || !media}
+          onClick={() => {
+            void controller.command({
+              type: media?.microphone ? 'mute' : 'request-unmute',
+              participantId: participant.id,
+            })
+          }}
+        >
+          <ControlIcon kind="microphone" off={media?.microphone ?? false} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function ParticipantActions({
   controller,
   participant,
@@ -38,11 +88,7 @@ export function ParticipantActions({
   const [open, setOpen] = useState(false)
   const volumeId = useId()
   const own = state.snapshot?.participants.find((person) => person.id === state.self)
-  const judge =
-    state.snapshot?.judgeFlag.holder === state.self && own?.presence.status === 'connected'
   const self = participant.id === state.self
-  const media = state.people.find((person) => person.id === participant.id)
-  const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
   const volume = Math.round(
     (volumes[participant.id] ?? controller.social.volume(participant.id)) * 100,
   )
@@ -117,33 +163,7 @@ export function ParticipantActions({
                 </button>
               </>
             )}
-            {judge && participant.handRaisedAt !== null && (
-              <button
-                className="action-primary"
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  void controller.command({ type: 'hands/lower-of', participantId: participant.id })
-                }}
-              >
-                {lowerHandOf(participant.name)}
-              </button>
-            )}
-            {judge && !self && (
-              <button
-                className="action-primary"
-                type="button"
-                disabled={busy || participant.presence.status !== 'connected' || !media}
-                onClick={() => {
-                  void controller.command({
-                    type: media?.microphone ? 'mute' : 'request-unmute',
-                    participantId: participant.id,
-                  })
-                }}
-              >
-                {microphoneAction(participant.name, media?.microphone ?? false)}
-              </button>
-            )}
+            <JudgeParticipantActions controller={controller} participant={participant} />
           </div>
         </Sheet>
       )}

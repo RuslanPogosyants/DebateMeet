@@ -9,9 +9,24 @@ import type { MeetingLayout } from '@/ui/use-meeting-layout'
 import { ControlIcon } from './control-icon'
 import { connectedRoomParticipants } from '@/ui/room-participants'
 import { QualityMark } from './round-resilience'
-import { HandBadge, ParticipantActions } from './participant-actions'
+import { HandBadge } from './participant-actions'
 import { ReactionDisplay } from './round-social'
 import { TileControls } from './tile-controls'
+
+function ParticipantAvatar({ name, label }: { name: string; label: string }) {
+  const initials = name
+    .trim()
+    .split(/\s+/u)
+    .slice(0, 2)
+    .map((part) => Array.from(part)[0] ?? '')
+    .join('')
+    .toLocaleUpperCase('ru')
+  return (
+    <div className="tile-placeholder participant-avatar" role="img" aria-label={label}>
+      <span aria-hidden="true">{initials}</span>
+    </div>
+  )
+}
 
 function ParticipantTile({
   participant,
@@ -22,6 +37,7 @@ function ParticipantTile({
   primary,
   pinned,
   hidden,
+  subscribed,
 }: {
   participant: Participant
   media: MediaPerson | undefined
@@ -31,15 +47,16 @@ function ParticipantTile({
   primary: boolean
   pinned: boolean
   hidden: boolean
+  subscribed: boolean
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const cameraHidden = useStore(controller.scene.store, (scene) =>
     scene.hiddenCameraIds.includes(participant.id),
   )
   useEffect(() => {
-    if (video.current === null || cameraHidden) return () => {}
+    if (video.current === null || cameraHidden || !subscribed) return () => {}
     return controller.attachVideo(participant.id, video.current, 'camera')
-  }, [controller, participant.id, cameraHidden])
+  }, [controller, participant.id, cameraHidden, subscribed])
   return (
     <article
       className={`participant-tile${self ? ' own-tile' : ''}${primary ? ' primary-tile' : ''}`}
@@ -48,12 +65,16 @@ function ParticipantTile({
       aria-label={participant.name}
       hidden={hidden}
     >
-      <div className="tile-actions">
+      <div className="tile-badges">
         <HandBadge position={hand} />
-        {self && pinned && (
-          <span className="text-caption own-pin-status">{resilienceStrings.pinned}</span>
-        )}
-        <ParticipantActions controller={controller} participant={participant} />
+      </div>
+      <div className="tile-actions">
+        <TileControls
+          controller={controller}
+          participant={participant}
+          self={self}
+          hidden={hidden}
+        />
       </div>
       <div className="tile-media">
         <video
@@ -64,44 +85,31 @@ function ParticipantTile({
           className={media?.camera && !cameraHidden ? '' : 'video-hidden'}
         />
         {cameraHidden ? (
-          <div className="tile-placeholder silhouette-placeholder">
-            <ControlIcon kind="person" />
-          </div>
+          <ParticipantAvatar name={participant.name} label="Видео скрыто для вас" />
         ) : (
-          !media?.camera && (
-            <div className="tile-placeholder silhouette-placeholder" aria-label="Камера выключена">
-              <ControlIcon kind="person" />
-            </div>
-          )
+          !media?.camera && <ParticipantAvatar name={participant.name} label="Камера выключена" />
         )}
-        <TileControls
-          controller={controller}
-          participant={participant}
-          self={self}
-          hidden={hidden}
-        />
       </div>
-      {!self && (
-        <div className="tile-caption">
-          <p>{participant.name}</p>
-          {!media?.microphone && (
-            <span
-              className="muted-microphone"
-              role="img"
-              aria-label={strings.round.microphoneOff}
-              title={strings.round.microphoneOff}
-            >
-              <ControlIcon kind="microphone" off />
-            </span>
-          )}
-          {cameraHidden ? (
-            <span className="camera-hidden-label">Видео скрыто для вас</span>
-          ) : (
-            <QualityMark quality={media?.quality ?? 'unknown'} />
-          )}
-          {pinned && <span className="text-caption">{resilienceStrings.pinned}</span>}
-        </div>
-      )}
+      <div className="tile-caption">
+        <span
+          className="tile-microphone"
+          role="img"
+          aria-label={media?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+          title={media?.microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+        >
+          <ControlIcon kind="microphone" off={!media?.microphone} />
+        </span>
+        <p>
+          {participant.name}
+          {self ? ' · вы' : ''}
+        </p>
+        {cameraHidden ? (
+          <span className="camera-hidden-label">Видео скрыто для вас</span>
+        ) : (
+          !self && <QualityMark quality={media?.quality ?? 'unknown'} />
+        )}
+        {pinned && <span className="text-caption">{resilienceStrings.pinned}</span>}
+      </div>
     </article>
   )
 }
@@ -185,25 +193,19 @@ export function RoundStage({
   const participants = roomParticipants.filter(
     (person) => person.id !== state.self || scene.showSelf,
   )
-  const tiles = participants.filter((person) => scene.videoIds.includes(person.id))
   const screenParticipant = roomParticipants.find((person) => person.id === scene.screenId)
   const screenKey = screenParticipant ? `screen:${screenParticipant.id}` : null
   const cards = [
     ...(screenParticipant
       ? [{ key: screenKey ?? '', participant: screenParticipant, source: 'screen' as const }]
       : []),
-    ...tiles.map((participant) => ({
+    ...participants.map((participant) => ({
       key: participant.id,
       participant,
       source: 'camera' as const,
     })),
   ]
-  const primaryId =
-    scene.layout === 'speaker'
-      ? scene.pinnedId === null
-        ? (screenKey ?? scene.primaryId)
-        : scene.primaryId
-      : null
+  const primaryId = scene.layout === 'speaker' ? (scene.pinnedId ?? screenKey) : null
   const paginated = cards.filter((card) => card.key !== primaryId)
   const pageSize = scene.layout === 'speaker' ? 3 : layout === 'narrow' ? 4 : 6
   const pages = Math.max(1, Math.ceil(paginated.length / pageSize))
@@ -214,6 +216,14 @@ export function RoundStage({
   if (primaryId !== null) visibleIds.add(primaryId)
   const queue = state.snapshot ? handQueue(state.snapshot, room) : []
   if (page !== currentPage) setPage(currentPage)
+  const visibleCameraKey = cards
+    .filter((card) => card.source === 'camera' && visibleIds.has(card.key))
+    .map((card) => card.key)
+    .join(',')
+  useEffect(() => {
+    controller.scene.setVisibleVideoIds(visibleCameraKey === '' ? [] : visibleCameraKey.split(','))
+  }, [controller, visibleCameraKey])
+  useEffect(() => () => controller.scene.setVisibleVideoIds([]), [controller])
 
   return (
     <section className="meeting-stage" aria-label={strings.round.people}>
@@ -259,6 +269,7 @@ export function RoundStage({
                 hand={queue.findIndex((person) => person.id === participant.id) + 1}
                 primary={key === primaryId}
                 pinned={participant.id === scene.pinnedId}
+                subscribed={scene.videoIds.includes(participant.id)}
                 hidden={!visibleIds.has(key)}
               />
             ),

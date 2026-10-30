@@ -47,6 +47,27 @@ function participant(id = BOB, room: 'base' | 'og' = 'base', raisedAt: number | 
 }
 
 describe('hands in the scene and room roster', () => {
+  it('keeps judge actions directly in the hand queue without a general participant menu', async () => {
+    const value = snapshot()
+    value.participants.push(participant())
+    const { controller, api, media } = await setup(true, value)
+    act(() =>
+      media[0]?.events?.people([
+        { id: SELF, microphone: false, camera: false, speaking: false },
+        { id: BOB, microphone: true, camera: false, speaking: false },
+      ]),
+    )
+    render(<HandQueue controller={controller} compact />)
+    await userEvent.click(screen.getByRole('button', { name: 'Очередь рук: 1' }))
+    const queue = screen.getByRole('dialog', { name: 'Очередь рук' })
+    expect(within(queue).queryByRole('button', { name: /^Действия — /u })).not.toBeInTheDocument()
+    expect(within(queue).queryByRole('button', { name: 'Закрепить' })).not.toBeInTheDocument()
+    await userEvent.click(within(queue).getByRole('button', { name: 'Выключить микрофон — Борис' }))
+    expect(api.commands.at(-1)?.intent).toEqual({ type: 'mute', participantId: BOB })
+    await userEvent.click(within(queue).getByRole('button', { name: 'Опустить руку — Борис' }))
+    expect(api.commands.at(-1)?.intent).toEqual({ type: 'hands/lower-of', participantId: BOB })
+  })
+
   it('waits for the command snapshot before changing the hand button and prevents a second pending click', async () => {
     const { controller, api, value } = await setup(false)
     let finish: ((value: Snapshot) => void) | undefined
@@ -128,40 +149,12 @@ describe('hands in the scene and room roster', () => {
     const map = screen.getByRole('complementary', { name: 'Комнаты' })
     const og = within(map).getByRole('region', { name: 'OG' })
     expect(within(og).queryByTestId('hand-badge')).not.toBeInTheDocument()
-    await userEvent.click(within(og).getByRole('button', { name: 'Все 3' }))
-    const ogRoster = screen.getByRole('dialog', { name: 'OG · участники' })
-    expect(
-      within(ogRoster)
-        .getAllByTestId('hand-badge')
-        .map((badge) => badge.getAttribute('aria-label')),
-    ).toEqual(['Рука — 1', 'Рука — 2', 'Рука — 3'])
-    expect(within(ogRoster).getByText('Борис')).toBeVisible()
-    await userEvent.click(within(ogRoster).getByRole('button', { name: 'Закрыть' }))
+    expect(within(og).getByText('Еще 1')).toBeVisible()
     const base = within(map).getByRole('region', { name: 'База' })
     expect(within(base).getAllByRole('listitem')).toHaveLength(2)
-    const all = within(base).getByRole('button', { name: 'Все 26' })
-    await userEvent.click(all)
-    const roster = screen.getByRole('dialog', { name: 'База · участники' })
-    expect(within(roster).getAllByRole('listitem')).toHaveLength(8)
-    expect(within(roster).getByLabelText('Рука — 1')).toBeVisible()
-    const seen: string[] = []
-    const next = within(roster).getByRole('button', { name: 'Следующая страница участников' })
-    for (;;) {
-      seen.push(
-        ...within(roster)
-          .getAllByRole('button', { name: /^Действия — /u })
-          .map((button) => button.getAttribute('aria-label') ?? ''),
-      )
-      if (next.hasAttribute('disabled')) break
-      await userEvent.click(next)
-    }
-    expect(seen).toHaveLength(26)
-    expect(new Set(seen).size).toBe(26)
-    expect(within(roster).getByLabelText('Рука — 24')).toBeVisible()
-    expect(within(roster).getByText('d'.repeat(12))).toBeVisible()
-    expect(within(roster).queryByText('Борис')).not.toBeInTheDocument()
-    await userEvent.click(within(roster).getByRole('button', { name: 'Закрыть' }))
-    expect(all).toHaveFocus()
+    expect(within(base).getByText('Еще 24')).toBeVisible()
+    expect(within(map).queryByRole('button', { name: /^Все \d+/u })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('retains the same compact queue trigger as hands arrive and leave without an inline queue', async () => {

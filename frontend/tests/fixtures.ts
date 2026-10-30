@@ -331,6 +331,23 @@ export function fixture() {
   const ownership = new FakeOwnership()
   const timerAudio: FakeTimerAudio[] = []
   const services: Services = {
+    recording: {
+      supported: () => false,
+      capture: () => Promise.reject(new Error('Recording unavailable in this fixture')),
+      record: () => Promise.reject(new Error('Recording unavailable in this fixture')),
+      storage: {
+        prepare: () => Promise.resolve({ persistent: true, availableBytes: 10 ** 9 }),
+        list: () => Promise.resolve([]),
+        file: () => Promise.reject(new Error('Recording not found')),
+        remove: () => Promise.resolve(),
+      },
+    },
+    recordingApi: {
+      status: () => Promise.resolve([]),
+      reserve: () => Promise.reject(new Error('Recording unavailable in this fixture')),
+      renew: () => Promise.reject(new Error('Recording unavailable in this fixture')),
+      stop: () => Promise.resolve(),
+    },
     appVersion: 'test',
     versions: new VersionSession('test'),
     diagnostics: { telemetry: () => Promise.resolve(), errors: () => Promise.resolve() },

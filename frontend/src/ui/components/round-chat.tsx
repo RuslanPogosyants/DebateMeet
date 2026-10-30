@@ -11,6 +11,8 @@ export function ChatPanel({ controller }: { controller: RoundController }) {
   )
   const active = useStore(controller.store, (round) => round.stage === 'connected')
   const log = useRef<HTMLDivElement>(null)
+  const end = useRef<HTMLDivElement>(null)
+  const endVisible = useRef(typeof IntersectionObserver !== 'function')
   const initial = useRef(false)
   const following = useRef(false)
   const before = useRef<{
@@ -25,12 +27,26 @@ export function ChatPanel({ controller }: { controller: RoundController }) {
       const element = log.current
       controller.chat.setReading(
         document.visibilityState === 'visible' &&
+          endVisible.current &&
           element !== null &&
           element.scrollTop + element.clientHeight >= element.scrollHeight - 8,
       )
     }
+    const observer =
+      typeof IntersectionObserver === 'function'
+        ? new IntersectionObserver(
+            ([entry]) => {
+              endVisible.current =
+                entry !== undefined && entry.isIntersecting && entry.intersectionRatio === 1
+              visibility()
+            },
+            { threshold: [0, 1] },
+          )
+        : null
+    if (end.current) observer?.observe(end.current)
     document.addEventListener('visibilitychange', visibility)
     return () => {
+      observer?.disconnect()
       document.removeEventListener('visibilitychange', visibility)
       controller.chat.setReading(false)
     }
@@ -42,7 +58,7 @@ export function ChatPanel({ controller }: { controller: RoundController }) {
       element.scrollTop = element.scrollHeight
       initial.current = true
       following.current = true
-      controller.chat.setReading(document.visibilityState === 'visible')
+      controller.chat.setReading(document.visibilityState === 'visible' && endVisible.current)
     }
     if (before.current !== null && !state.loadingBefore) {
       const anchor =
@@ -100,11 +116,15 @@ export function ChatPanel({ controller }: { controller: RoundController }) {
         role="log"
         aria-label={s.chat}
         aria-live="off"
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Message history must be scrollable with the keyboard, including in Safari.
+        tabIndex={state.messages.length > 0 ? 0 : undefined}
         onScroll={() => {
           const element = log.current
           if (element !== null) {
             following.current = element.scrollTop + element.clientHeight >= element.scrollHeight - 8
-            controller.chat.setReading(document.visibilityState === 'visible' && following.current)
+            controller.chat.setReading(
+              document.visibilityState === 'visible' && endVisible.current && following.current,
+            )
           }
         }}
       >
@@ -138,6 +158,7 @@ export function ChatPanel({ controller }: { controller: RoundController }) {
             )}
           </article>
         ))}
+        <div ref={end} className="chat-reading-end" aria-hidden="true" />
       </div>
       {state.error !== null && (
         <div role="status">

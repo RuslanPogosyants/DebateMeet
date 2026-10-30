@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { ClientError } from '@/application/ports'
 import { useServices } from '@/ui/services'
 import { errorText, strings } from '@/ui/strings'
+import { LocalRecordingsButton } from '@/ui/components/recordings'
 
 export function StartPage() {
   const services = useServices()
@@ -47,6 +48,7 @@ export function StartPage() {
             {creating ? strings.start.creating : strings.start.create}
           </button>
           <p className="text-caption text-muted-foreground">{strings.start.access}</p>
+          <LocalRecordingsButton />
           {error !== null && <p role="alert">{errorText(error)}</p>}
         </section>
         <section className="recent-rounds" aria-labelledby="recent-heading">

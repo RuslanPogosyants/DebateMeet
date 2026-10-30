@@ -330,7 +330,7 @@ test('long multiline motion preserves visible controls at every supported layout
     })
   }
   await page.getByRole('button', { name: 'Чат', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Общий чат', exact: true })
+  const sheet = page.getByRole('dialog', { name: 'Комнаты и чат', exact: true })
   await expect(sheet.getByLabel('Сообщение в общий чат', { exact: true })).toBeInViewport()
   await page.screenshot({ path: testInfo.outputPath('content-phone-chat.png'), fullPage: true })
 })

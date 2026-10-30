@@ -14,7 +14,7 @@ import {
 import { ControlIcon } from './control-icon'
 import { Sheet } from './sheet'
 import { ParticipantRoster } from './participant-roster'
-import { HandBadge, ParticipantActions } from './participant-actions'
+import { HandBadge, JudgeParticipantActions } from './participant-actions'
 export { HandBadge, ParticipantActions } from './participant-actions'
 import { RuntimeDevices } from './round-resilience'
 
@@ -105,6 +105,9 @@ export function HandQueue({
             controller={controller}
             participants={queue}
             title={socialStrings.queue}
+            renderActions={(person) => (
+              <JudgeParticipantActions controller={controller} participant={person} />
+            )}
             emptyText={socialStrings.queueEmpty}
             onClose={() => setRosterOpen(false)}
           />
@@ -153,7 +156,7 @@ export function JudgeSocialPanel({ controller }: { controller: RoundController }
             <span>
               {person.name} · {roomNames[person.room]}
             </span>
-            <ParticipantActions controller={controller} participant={person} />
+            <JudgeParticipantActions controller={controller} participant={person} />
           </li>
         ))}
       </ul>
