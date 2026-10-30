@@ -23,7 +23,7 @@ def test_participant_tokens_cannot_spoof_state_or_change_metadata() -> None:
     assert claims.video.room == ROUND_ID
     assert claims.video.can_publish_data is False
     assert claims.video.can_update_own_metadata is False
-    assert claims.video.can_publish_sources == ["camera", "microphone"]
+    assert claims.video.can_publish_sources == ["camera", "microphone", "screen_share"]
     assert claims.room_config is not None
     assert claims.room_config.max_participants == 30
     assert payload["exp"] - payload["nbf"] == 600

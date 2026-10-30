@@ -532,10 +532,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/rounds/{round_id}/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Telemetry */
+        post: operations["telemetry_api_rounds__round_id__telemetry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rounds/{round_id}/client-errors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Client Errors */
+        post: operations["client_errors_api_rounds__round_id__client_errors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Format: uuid4 */
+        BatchId: string;
+        /** ClientErrorView */
+        ClientErrorView: {
+            code: components["schemas"]["ErrorCode"];
+            phase: components["schemas"]["Phase"];
+            class: components["schemas"]["ErrorClass"];
+            /** Frames */
+            frames: components["schemas"]["CodeFrameView"][];
+        };
+        /** ClientErrorsBody */
+        ClientErrorsBody: {
+            /**
+             * Schemaversion
+             * @constant
+             */
+            schemaVersion: 1;
+            batchId: components["schemas"]["BatchId"];
+            clientSessionId: components["schemas"]["BatchId"];
+            /** Appversion */
+            appVersion: string;
+            /** Errors */
+            errors: components["schemas"]["ClientErrorView"][];
+            report: components["schemas"]["ProblemReportView"] | null;
+        };
+        /** CodeFrameView */
+        CodeFrameView: {
+            /** Asset */
+            asset: string;
+            /** Line */
+            line: number;
+            /** Column */
+            column: number;
+        };
         /** ConfigureDrumBody */
         ConfigureDrumBody: {
             /** Enabled */
@@ -556,6 +624,15 @@ export interface components {
             id: components["schemas"]["RoundCode"];
         };
         Cursor: string;
+        /** DiagnosticClockView */
+        DiagnosticClockView: {
+            /** Synchronized */
+            synchronized: boolean;
+            /** Degraded */
+            degraded: boolean;
+            ageMs: components["schemas"]["SessionDuration"] | null;
+            uncertaintyMs: components["schemas"]["Duration"] | null;
+        };
         /** DrawResultView */
         DrawResultView: {
             position: components["schemas"]["Position"];
@@ -570,6 +647,12 @@ export interface components {
             /** Drawno */
             drawNo: number;
         };
+        /** DroppedView */
+        DroppedView: {
+            records: components["schemas"]["SafeInt"];
+            errors: components["schemas"]["SafeInt"];
+            events: components["schemas"]["SafeInt"];
+        };
         /** DrumView */
         DrumView: {
             /** Enabled */
@@ -582,12 +665,17 @@ export interface components {
             /** Drawcount */
             drawCount: number;
         };
+        Duration: number;
         /** EmptyCommandBody */
         EmptyCommandBody: Record<string, never>;
         /** EnterBody */
         EnterBody: {
             room: components["schemas"]["Room"];
         };
+        /** @enum {string} */
+        ErrorClass: "Error" | "TypeError" | "RangeError" | "DOMException" | "unknown";
+        /** @enum {string} */
+        ErrorCode: "unexpected_error" | "unhandled_rejection" | "preload_error" | "media_unavailable" | "device_unavailable" | "playback_blocked" | "control_unavailable" | "diagnostics_unavailable";
         /** ErrorResponse */
         ErrorResponse: {
             /** Code */
@@ -647,6 +735,41 @@ export interface components {
             /** Sid */
             sid: string;
         };
+        /** MediaRecordView */
+        MediaRecordView: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "media";
+            elapsedMs: components["schemas"]["SessionDuration"];
+            /** Observedms */
+            observedMs: number;
+            unknownMs: components["schemas"]["SessionDuration"];
+            quality: components["schemas"]["Quality"];
+            /** Playbackallowed */
+            playbackAllowed: boolean;
+            /** Wantedaudio */
+            wantedAudio: number;
+            /** Attachedaudio */
+            attachedAudio: number;
+            /** Decodedactiveaudio */
+            decodedActiveAudio: number | null;
+            jitterMs: components["schemas"]["Rtt"] | null;
+            audioRtcpRttMs: components["schemas"]["Rtt"] | null;
+            iceRttMs: components["schemas"]["Rtt"] | null;
+            receivedPacketsDelta: components["schemas"]["SafeInt"] | null;
+            lostPacketsDelta: components["schemas"]["SafeInt"] | null;
+            receivedBytesDelta: components["schemas"]["SafeInt"] | null;
+            /** Bitratebps */
+            bitrateBps: number | null;
+            /** Candidatetype */
+            candidateType: ("host" | "srflx" | "prflx" | "relay") | null;
+            /** Protocol */
+            protocol: ("udp" | "tcp" | "tls") | null;
+            /** Qualitylimitation */
+            qualityLimitation: ("none" | "cpu" | "bandwidth" | "other") | null;
+        };
         MessageId: string;
         /**
          * MessageKind
@@ -685,6 +808,8 @@ export interface components {
             /** Infoslide */
             infoslide: string;
         };
+        /** @enum {string} */
+        Outcome: "observed" | "empty_room" | "not_observed" | "cancelled" | "superseded" | "unknown";
         /** ParticipantBody */
         ParticipantBody: {
             participantId: components["schemas"]["ParticipantCode"];
@@ -702,11 +827,13 @@ export interface components {
             /** Handraisedat */
             handRaisedAt: number | null;
         };
+        /** @enum {string} */
+        Phase: "prejoin" | "joining" | "connected" | "reconnecting" | "left";
         /**
          * Position
          * @enum {string}
          */
-        Position: "og" | "oo" | "cg" | "co";
+        Position: "og" | "oo" | "cg" | "co" | "og1" | "og2" | "oo1" | "oo2" | "cg1" | "cg2" | "co1" | "co2";
         /** PostMessageBody */
         PostMessageBody: {
             /** Text */
@@ -729,7 +856,20 @@ export interface components {
             /** Since */
             since: number;
         };
+        /** ProblemReportView */
+        ProblemReportView: {
+            phase: components["schemas"]["Phase"];
+            epoch: components["schemas"]["SafeInt"] | null;
+            version: components["schemas"]["SafeInt"] | null;
+            clock: components["schemas"]["DiagnosticClockView"];
+            media: components["schemas"]["MediaRecordView"] | null;
+            /** Events */
+            events: components["schemas"]["SafeEvent"][];
+            dropped: components["schemas"]["DroppedView"];
+        };
         PublicId: string;
+        /** @enum {string} */
+        Quality: "excellent" | "good" | "poor" | "lost" | "unknown";
         /** ReactionBody */
         ReactionBody: {
             reaction: components["schemas"]["ReactionCode"];
@@ -782,6 +922,11 @@ export interface components {
             motion: components["schemas"]["MotionView"];
             drum: components["schemas"]["DrumView"];
         };
+        Rtt: number;
+        /** @enum {string} */
+        SafeEvent: "join_started" | "join_connected" | "join_cancelled" | "room_switch_started" | "room_switch_completed" | "reconnect_started" | "reconnect_completed" | "snapshot_applied" | "clock_synchronized" | "clock_degraded" | "media_quality_changed" | "playback_blocked" | "playback_resumed" | "device_changed" | "device_failed" | "control_failed" | "diagnostics_dropped" | "preload_failed" | "call_left";
+        SafeInt: number;
+        SessionDuration: number;
         /** SetMotionBody */
         SetMotionBody: {
             /** Text */
@@ -794,11 +939,42 @@ export interface components {
             /** Remainingms */
             remainingMs: number;
         };
+        /** @enum {string} */
+        SliName: "join_decoded_playback_ms" | "room_switch_decoded_playback_ms" | "reconnect_media_ms" | "snapshot_delivery_ms" | "clock_offset_uncertainty_ms";
+        /** SliRecordView */
+        SliRecordView: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "sli";
+            name: components["schemas"]["SliName"];
+            outcome: components["schemas"]["Outcome"];
+            elapsedMs: components["schemas"]["Duration"] | null;
+            /** Resolutionms */
+            resolutionMs: number | null;
+            clockUncertaintyMs: components["schemas"]["Duration"] | null;
+        };
         /** SpeechUndoView */
         SpeechUndoView: {
             /** Speechno */
             speechNo: number;
             timer: components["schemas"]["TimerView"];
+        };
+        /** TelemetryBatchBody */
+        TelemetryBatchBody: {
+            /**
+             * Schemaversion
+             * @constant
+             */
+            schemaVersion: 1;
+            batchId: components["schemas"]["BatchId"];
+            clientSessionId: components["schemas"]["BatchId"];
+            /** Appversion */
+            appVersion: string;
+            /** Records */
+            records: (components["schemas"]["SliRecordView"] | components["schemas"]["MediaRecordView"])[];
+            droppedRecords: components["schemas"]["SafeInt"];
         };
         /** TimeResponse */
         TimeResponse: {
@@ -3587,6 +3763,162 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    telemetry_api_rounds__round_id__telemetry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelemetryBatchBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Content Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    client_errors_api_rounds__round_id__client_errors_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientErrorsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Content Too Large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

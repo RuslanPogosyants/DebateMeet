@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { strings } from '@/ui/strings'
+import { ControlIcon } from './control-icon'
 
 export function Sheet({
   title,
@@ -36,6 +37,7 @@ export function Sheet({
       aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault()
+        event.stopPropagation()
         onClose()
       }}
     >
@@ -45,12 +47,13 @@ export function Sheet({
         </h2>
         <button
           ref={close}
-          className="action"
+          className="action icon-control"
           type="button"
           aria-label={closeLabel}
+          title={closeLabel}
           onClick={onClose}
         >
-          {strings.round.closePanel}
+          <ControlIcon kind="close" />
         </button>
       </header>
       {pinned && <div className="sheet-pinned">{pinned}</div>}

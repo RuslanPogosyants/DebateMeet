@@ -3,6 +3,7 @@ import { newerSnapshot, type Snapshot } from '@/domain/snapshot'
 import { futureSpeechCues } from '@/domain/timer'
 import { ClockSync, type ClockState } from './clock-sync'
 import type { ClientClock, RoundApi, TimerAudio, TimerAudioEvents, TimerAudioState } from './ports'
+import type { DiagnosticClock } from '@/domain/diagnostics'
 
 export type TimerSessionState = ClockState & { snapshot: Snapshot | null; audio: TimerAudioState }
 
@@ -38,6 +39,17 @@ export class TimerSession {
 
   serverNow(): number {
     return this.clock.serverNow()
+  }
+  diagnostic(): DiagnosticClock {
+    return this.clock.diagnostic()
+  }
+  usableClock(): boolean {
+    return this.clock.usable()
+  }
+  output(id: string): Promise<string> {
+    if (this.audio === null)
+      return id === '' ? Promise.resolve('') : Promise.reject(new Error('Audio unavailable'))
+    return this.audio.output(id)
   }
 
   start(): void {
@@ -88,8 +100,12 @@ export class TimerSession {
   resync(): Promise<void> {
     return this.active ? this.clock.sync() : Promise.resolve()
   }
-  foreground(): void {
+  foreground(gap = false): void {
     if (this.active) {
+      if (gap) {
+        this.audio?.silence()
+        this.clock.invalidate()
+      }
       this.replan()
       void this.resync()
     }
@@ -117,7 +133,8 @@ export class TimerSession {
     const state = this.store.getState()
     if (!this.active || this.audio === null) return
     this.audio.replace(
-      state.synchronized && state.audio === 'running' && state.snapshot !== null
+      // A transient time-service failure keeps this lifecycle's anchor; gaps invalidate it.
+      this.clock.state.synchronized && state.audio === 'running' && state.snapshot !== null
         ? futureSpeechCues(state.snapshot, this.serverNow())
         : [],
     )

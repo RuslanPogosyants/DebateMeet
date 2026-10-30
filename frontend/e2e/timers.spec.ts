@@ -3,7 +3,7 @@ import { test } from './test'
 import { measureRenderedAudio, startOutputRecording, stopOutputRecording } from './media'
 import { passiveBands } from './passive-audio'
 import { launchNativeBrowser } from './native-browser'
-import { claimJudge, createRound, enter, join, snapshot } from './round'
+import { claimJudge, command, createRound, enter, join, snapshot } from './round'
 
 type Tick = { text: string; at: number }
 declare global {
@@ -33,17 +33,23 @@ async function clockProbe(page: Page, skewMs: number) {
 }
 
 async function recordTicks(page: Page) {
-  await page.getByRole('timer', { name: 'Таймер речи', exact: true }).evaluate((element) => {
+  await page.getByRole('timer', { name: 'Таймер', exact: true }).evaluate((element) => {
     window.debatemeetTimerTicks = []
-    let previous = element.textContent
+    const read = () => element.querySelector('input')?.value ?? element.textContent ?? ''
+    let previous = read()
     const observer = new MutationObserver(() => {
-      const text = element.textContent ?? ''
+      const text = read()
       if (text !== previous) {
         previous = text
         window.debatemeetTimerTicks.push({ text, at: performance.timeOrigin + performance.now() })
       }
     })
-    observer.observe(element, { childList: true, characterData: true, subtree: true })
+    observer.observe(element, {
+      childList: true,
+      characterData: true,
+      attributes: true,
+      subtree: true,
+    })
   })
 }
 
@@ -71,62 +77,56 @@ async function maxBand(session: CDPSession, milliseconds: number): Promise<numbe
   return peak
 }
 
-test('judge timer edits and exact speech undo persist across reload and logical rooms', async ({
+test('one editable countdown persists across reload and logical rooms', async ({
   browser,
   page,
 }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await createRound(page, 'Судья')
   await claimJudge(page)
-  const otherContext = await browser.newContext({ permissions: ['camera', 'microphone'] })
+  const context = await browser.newContext({ permissions: ['camera', 'microphone'] })
   try {
-    const other = await otherContext.newPage()
+    const other = await context.newPage()
     await other.goto(page.url())
     await join(other, 'Участник')
     await enter(other, 'OO')
-    await expect(other.getByRole('button', { name: 'Запустить речь', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Изменить длительность речи', exact: true }).click()
-    const configure = page.getByRole('dialog', { name: 'Изменить длительность речи', exact: true })
-    await expect(configure.getByRole('button', { name: 'Отмена', exact: true })).toBeFocused()
-    await configure.getByLabel('Длительность, мм:сс').fill('1:00')
-    await configure.getByRole('button', { name: 'Изменить и сбросить', exact: true }).click()
-    await page.getByRole('button', { name: 'Выставить время речи', exact: true }).click()
-    const edit = page.getByRole('dialog', { name: 'Выставить время речи', exact: true })
-    await edit.getByLabel('Прошедшее время, мм:сс').fill('0:10')
-    await edit.getByRole('button', { name: 'Выставить', exact: true }).click()
-    await expect(other.getByRole('timer', { name: 'Таймер речи', exact: true })).toHaveText('0:10')
-    await page.getByRole('button', { name: 'Запустить речь', exact: true }).click()
-    await page.getByRole('button', { name: 'Запустить подготовку', exact: true }).click()
-    await expect.poll(async () => (await snapshot(page)).timers.prep.status).toBe('running')
-    const before = await snapshot(page)
-    expect(before.timers.speech.status).toBe('running')
-    expect(before.timers.prep.status).toBe('running')
-    await page.getByRole('button', { name: 'Следующая речь', exact: true }).click()
-    await expect.poll(async () => (await snapshot(other)).speechNo).toBe(2)
-    await expect(page.getByRole('button', { name: 'Следующая речь', exact: true })).toBeDisabled()
-    await page.getByRole('button', { name: /^Отменить: речь 1,/u }).click()
-    await expect
-      .poll(async () => (await snapshot(other)).timers.speech.endsAt)
-      .toBe(before.timers.speech.endsAt)
-    expect((await snapshot(other)).speechNo).toBe(1)
-    await page.setViewportSize({ width: 1366, height: 650 })
-    await page.screenshot({ path: testInfo.outputPath('timers-desktop.png'), fullPage: true })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.getByRole('button', { name: 'Вы судья', exact: true }).click()
-    const readout = await page
-      .getByRole('dialog', { name: 'Вы судья', exact: true })
-      .getByRole('timer', { name: 'Таймер речи', exact: true })
-      .boundingBox()
-    if (readout === null) throw new Error('Judge sheet hides the running timer')
-    expect(readout.y).toBeGreaterThanOrEqual(0)
-    expect(readout.y + readout.height).toBeLessThanOrEqual(844)
-    await page.screenshot({ path: testInfo.outputPath('timers-judge-mobile.png'), fullPage: true })
-    await page.keyboard.press('Escape')
+    await expect(other.getByRole('timer', { name: 'Таймер', exact: true })).toHaveText('15:00')
+    await expect(other.getByRole('textbox', { name: 'Время, мм:сс', exact: true })).toHaveCount(0)
+    const input = page.getByRole('textbox', { name: 'Время, мм:сс', exact: true })
+    await input.fill('7:00')
+    await page.getByRole('button', { name: 'Запустить таймер', exact: true }).click()
+    await expect.poll(async () => (await snapshot(other)).timers.prep.status).toBe('running')
+    await input.fill('6:13')
+    await input.press('Enter')
+    await expect.poll(async () => (await snapshot(other)).timers.prep.status).toBe('running')
+    const changed = (await snapshot(page)).timers.prep
+    expect(changed.durationMs).toBe(420000)
+    await page.getByRole('button', { name: 'Пауза таймера', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Запустить таймер', exact: true })).toBeEnabled()
+    await expect(other.getByRole('timer', { name: 'Таймер', exact: true })).toHaveText(/6:1[23]/u)
+    const originalId = (await snapshot(page)).participants.find(
+      (person) => person.name === 'Судья',
+    )?.id
+    expect(originalId).toBeDefined()
     await page.reload()
     await join(page, 'Судья')
-    expect((await snapshot(page)).timers.speech.endsAt).toBe(before.timers.speech.endsAt)
-    expect((await snapshot(page)).speechNo).toBe(1)
+    const restored = await snapshot(page)
+    expect(restored.participants.find((person) => person.name === 'Судья')?.id).toBe(originalId)
+    expect(restored.timers.prep.status).toBe('paused')
+    // A disconnect releases the flag; identity restoration does not reclaim it automatically.
+    if (restored.judgeFlag.holder === null) await claimJudge(page)
+    expect((await snapshot(page)).judgeFlag.holder).toBe(originalId)
+    await page.getByRole('button', { name: 'Сбросить таймер', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'Сбросить таймер?', exact: true })).toHaveCount(0)
+    await expect(other.getByRole('timer', { name: 'Таймер', exact: true })).toHaveText('7:00')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(input).toBeInViewport()
+    await expect(
+      page.getByRole('button', { name: 'Запустить таймер', exact: true }),
+    ).toBeInViewport()
+    await page.screenshot({ path: testInfo.outputPath('single-timer-mobile.png'), fullPage: true })
   } finally {
-    await otherContext.close()
+    await context.close()
   }
 })
 
@@ -149,7 +149,7 @@ test('visible timer boundaries stay within 500 ms despite different browser wall
       expect(await person.evaluate(() => document.visibilityState)).toBe('visible')
       await recordTicks(person)
     }
-    await page.getByRole('button', { name: 'Запустить речь', exact: true }).click()
+    await page.getByRole('button', { name: 'Запустить таймер', exact: true }).click()
     await expect
       .poll(async () => (await matchingTicks(page, other)).length, {
         timeout: 12000,
@@ -175,16 +175,15 @@ test('visible timer boundaries stay within 500 ms despite different browser wall
   }
 })
 
+// Position the existing backend clock near an audio mark without waiting a full minute.
 async function setSpeechElapsed(page: Page, value: string) {
-  await page.getByRole('button', { name: 'Выставить время речи', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Выставить время речи', exact: true })
-  await dialog.getByLabel('Прошедшее время, мм:сс').fill(value)
-  const response = page.waitForResponse((reply) => reply.url().endsWith('/timers/speech/set'))
-  await dialog.getByRole('button', { name: 'Выставить', exact: true }).click()
-  expect((await response).status()).toBe(200)
-  await expect(
-    page.getByRole('button', { name: 'Выставить время речи', exact: true }),
-  ).toBeEnabled()
+  await page.getByRole('button', { name: 'Речь', exact: true }).click()
+  const [minutes, seconds] = value.split(':').map(Number)
+  const timer = (await snapshot(page)).timers.speech
+  await command(page, 'timers/speech/set', {
+    remainingMs: timer.durationMs - ((minutes ?? 0) * 60 + (seconds ?? 0)) * 1000,
+  })
+  await expect(page.getByRole('textbox', { name: 'Время, мм:сс', exact: true })).toBeEnabled()
 }
 
 async function pendingSpeechMilestone(page: Page): Promise<number> {
@@ -230,8 +229,8 @@ test('native speech cues play in a hidden tab without animation frames and cance
     }
     await page.bringToFront()
     await setSpeechElapsed(page, '0:57')
-    await page.getByRole('button', { name: 'Запустить речь', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Пауза речи', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: 'Запустить таймер', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Пауза таймера', exact: true })).toBeEnabled()
     await hide()
     await expect
       .poll(async () => (await passiveBands(passive, [660]))[0], { intervals: [20], timeout: 5000 })
@@ -255,7 +254,7 @@ test('native speech cues play in a hidden tab without animation frames and cance
       // A future cue proves that silence during the entire join was not a dead output graph.
       await page.bringToFront()
       await setSpeechElapsed(page, '0:57')
-      await expect(page.getByRole('button', { name: 'Пауза речи', exact: true })).toBeEnabled()
+      await expect(page.getByRole('button', { name: 'Пауза таймера', exact: true })).toBeEnabled()
       expect(await maxBand(passiveLate, 4500)).toBeGreaterThan(0.005)
     } finally {
       await lateContext.close()
@@ -263,8 +262,8 @@ test('native speech cues play in a hidden tab without animation frames and cance
     await page.bringToFront()
     await setSpeechElapsed(page, '0:57')
     const pausedMilestone = await pendingSpeechMilestone(page)
-    await page.getByRole('button', { name: 'Пауза речи', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Запустить речь', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: 'Пауза таймера', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Запустить таймер', exact: true })).toBeEnabled()
     expect(Date.now()).toBeLessThan(pausedMilestone)
     await hide()
     expect(Date.now()).toBeLessThan(pausedMilestone)
@@ -272,15 +271,12 @@ test('native speech cues play in a hidden tab without animation frames and cance
       0.001,
     )
     await page.bringToFront()
-    await page.getByRole('button', { name: 'Запустить речь', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Пауза речи', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: 'Запустить таймер', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Пауза таймера', exact: true })).toBeEnabled()
     const resetMilestone = await pendingSpeechMilestone(page)
-    await page.getByRole('button', { name: 'Сбросить речь', exact: true }).click()
-    await page
-      .getByRole('dialog', { name: 'Сбросить таймер речи?', exact: true })
-      .getByRole('button', { name: 'Сбросить', exact: true })
-      .click()
-    await expect(page.getByRole('button', { name: 'Запустить речь', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: 'Сбросить таймер', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'Сбросить таймер?', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Запустить таймер', exact: true })).toBeEnabled()
     expect(Date.now()).toBeLessThan(resetMilestone)
     await hide()
     expect(Date.now()).toBeLessThan(resetMilestone)

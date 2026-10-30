@@ -26,8 +26,18 @@ test('two participants join with muted microphones, hear a remote tone and retur
   try {
     await second.goto(link)
     await join(second, 'Борис')
-    await expect(page.getByText('Борис', { exact: true }).first()).toBeVisible()
-    await expect(second.getByText('Алиса', { exact: true }).first()).toBeVisible()
+    await expect(
+      page
+        .getByRole('article', { name: 'Борис', exact: true })
+        .locator('.tile-caption')
+        .getByText('Борис', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      second
+        .getByRole('article', { name: 'Алиса', exact: true })
+        .locator('.tile-caption')
+        .getByText('Алиса', { exact: true }),
+    ).toBeVisible()
     expect(await outputLevel(page)).toBeLessThan(0.001)
 
     await second.getByRole('button', { name: 'Микрофон выключен', exact: true }).click()
@@ -44,7 +54,11 @@ test('two participants join with muted microphones, hear a remote tone and retur
     await page.screenshot({ path: testInfo.outputPath('round-desktop.png'), fullPage: true })
     await page.setViewportSize({ width: 390, height: 844 })
     await page.screenshot({ path: testInfo.outputPath('round-mobile.png'), fullPage: true })
-    await second.getByRole('button', { name: 'Выйти', exact: true }).click()
+    await second.getByRole('button', { name: 'Ещё', exact: true }).click()
+    await second
+      .getByRole('dialog', { name: 'Ещё', exact: true })
+      .getByRole('button', { name: 'Выйти', exact: true })
+      .click()
     await expect.poll(() => outputLevel(page)).toBeLessThan(0.001)
 
     await page.reload()

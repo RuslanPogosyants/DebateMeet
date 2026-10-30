@@ -168,6 +168,115 @@ describe('entry and state', () => {
     expect(api.leaves).toEqual([])
   })
 
+  it.each(['replaced', 'removed', 'deleted'] as const)(
+    'releases adapter resources exactly once after an external %s disconnect',
+    async (reason) => {
+      const { controller, api, media, ownership } = setup()
+      await controller.join('Вика', false)
+      const session = media[0]
+      if (!session) throw new Error('No media')
+      const disconnect = vi.spyOn(session, 'disconnect')
+
+      session.events?.ended(reason)
+
+      await vi.waitFor(() => expect(disconnect).toHaveBeenCalledOnce())
+      expect(controller.store.getState()).toMatchObject({ stage: 'left', ended: reason })
+      expect(ownership.held).toBe(false)
+      expect(api.joins).toHaveLength(1)
+      expect(api.leaves).toEqual([])
+      controller.dispose()
+      expect(disconnect).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('finishes an external disconnect even when adapter cleanup rejects', async () => {
+    const { controller, api, media } = setup()
+    await controller.join('Вика', false)
+    const session = media[0]
+    if (!session) throw new Error('No media')
+    const disconnect = vi
+      .spyOn(session, 'disconnect')
+      .mockRejectedValue(new Error('Cleanup failed'))
+
+    session.events?.ended('removed')
+
+    await vi.waitFor(() => expect(disconnect).toHaveBeenCalledOnce())
+    expect(controller.store.getState()).toMatchObject({ stage: 'left', ended: 'removed' })
+    expect(api.joins).toHaveLength(1)
+    expect(api.leaves).toEqual([])
+  })
+
+  it('releases the old adapter when network recovery discovers another owner', async () => {
+    const { controller, api, media, ownership } = setup()
+    await controller.join('Вика', false)
+    const session = media[0]
+    if (!session) throw new Error('No media')
+    const disconnect = vi.spyOn(session, 'disconnect')
+    ownership.held = false
+
+    session.events?.ended('network')
+
+    await vi.waitFor(() => expect(controller.store.getState().ended).toBe('replaced'))
+    expect(disconnect).toHaveBeenCalledOnce()
+    expect(api.joins).toHaveLength(1)
+    expect(api.leaves).toEqual([])
+  })
+
+  it('does not close a fresh join when old adapter cleanup completes late', async () => {
+    const { controller, media } = setup()
+    await controller.join('Вика', false)
+    const previous = media[0]
+    if (!previous) throw new Error('No media')
+    let finish: () => void = vi.fn<() => void>()
+    const disconnect = vi.spyOn(previous, 'disconnect').mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        }),
+    )
+
+    previous.events?.ended('replaced')
+    expect(controller.store.getState().stage).toBe('left')
+    await controller.join('Вика', false)
+    const current = media[1]
+    if (!current) throw new Error('No new media')
+    expect(controller.store.getState().stage).toBe('connected')
+    expect(disconnect).toHaveBeenCalledOnce()
+
+    finish()
+    await Promise.resolve()
+    expect(controller.store.getState().stage).toBe('connected')
+    expect(current.stopped).toBe(0)
+  })
+
+  it('ignores an old ownership check after a fresh join replaces network recovery', async () => {
+    const { controller, media, ownership } = setup()
+    await controller.join('Вика', false)
+    const previous = media[0]
+    if (!previous) throw new Error('No media')
+    let finish: (current: boolean) => void = vi.fn<(current: boolean) => void>()
+    vi.spyOn(ownership, 'current').mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve
+        }),
+    )
+
+    previous.events?.ended('network')
+    await controller.leave()
+    await controller.join('Вика', false)
+    const current = media[1]
+    if (!current) throw new Error('No new media')
+    expect(controller.store.getState().stage).toBe('connected')
+
+    finish(false)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(controller.store.getState().stage).toBe('connected')
+    expect(previous.stopped).toBe(1)
+    expect(current.stopped).toBe(0)
+  })
+
   it('re-enters after a full network disconnect and ignores callbacks of the old session', async () => {
     const { controller, api, media } = setup()
     await controller.join('Вика', false)
@@ -465,7 +574,7 @@ it('applies accepted timer state before a delayed room subscription transition',
     expect(controller.timers.store.getState().snapshot?.version).toBe(2)
   })
   expect(controller.store.getState().snapshot?.version).toBe(1)
-  expect(timerAudio[0]?.plans.at(-1)).toHaveLength(4)
+  expect(timerAudio[0]?.plans.at(-1)).toHaveLength(2)
   await controller.leave()
   pending.resolve?.()
   await sending

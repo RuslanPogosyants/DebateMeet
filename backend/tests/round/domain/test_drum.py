@@ -5,7 +5,7 @@ from typing import cast
 import pytest
 
 from debatemeet.round.domain.drum import DrawnPosition, DrawResult, Drum
-from debatemeet.round.domain.position import Position
+from debatemeet.round.domain.position import TEAM_POSITIONS, Position
 from debatemeet.round.domain.round import Round
 from debatemeet.round.domain.timer import JS_MAX_SAFE_INTEGER
 from tests.round.builders import ROUND_ID, T0, refused_with
@@ -13,7 +13,7 @@ from tests.round.builders import ROUND_ID, T0, refused_with
 
 def test_drum_defaults_are_bounded_and_belong_to_each_new_round() -> None:
     drum = Drum()
-    assert drum.enabled == tuple(Position)
+    assert drum.enabled == TEAM_POSITIONS
     assert drum.drawn == ()
     assert drum.remove_drawn is True
     assert drum.last is None

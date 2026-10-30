@@ -9,8 +9,10 @@ import json
 import sys
 from collections.abc import Sequence
 from functools import partial
+from uuid import UUID
 
 from debatemeet.media.infrastructure.postgres import PostgresMediaOutbox
+from debatemeet.round.api.diagnostic_reports import diagnostic_report, diagnostic_summary
 from debatemeet.round.application.admin import AdministerRound
 from debatemeet.round.application.ports import CommittedRound
 from debatemeet.round.chat.application.admin import AdministerMessages
@@ -24,11 +26,15 @@ from debatemeet.round.chat.infrastructure.transactions import (
 )
 from debatemeet.round.contract.snapshot import snapshot_of
 from debatemeet.round.domain.ids import ParticipantId, RoundId, is_participant_id, is_round_id
+from debatemeet.round.infrastructure.deletion import PostgresRoundDeletions
 from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
+from debatemeet.shared.api.schemas import epoch_ms
+from debatemeet.shared.application.diagnostics import DiagnosticReader
 from debatemeet.shared.application.errors import NotFoundError, RoundBusyError, UnreadableRoundError
 from debatemeet.shared.domain.errors import DomainError
 from debatemeet.shared.infrastructure.clock import SystemClock
 from debatemeet.shared.infrastructure.database import create_engine
+from debatemeet.shared.infrastructure.diagnostics import PostgresDiagnostics, purge_diagnostics
 from debatemeet.shared.infrastructure.logs import configure_logging
 from debatemeet.shared.infrastructure.settings import Settings
 
@@ -55,10 +61,28 @@ def _message_id(value: str) -> int:
     return number
 
 
+def _report_id(value: str) -> UUID:
+    try:
+        identifier = UUID(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected a UUIDv4 report id") from None
+    if identifier.version != 4:
+        raise argparse.ArgumentTypeError("expected a UUIDv4 report id")
+    return identifier
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description="Administer a round on this server")
     commands = result.add_subparsers(dest="command", required=True)
-    for command in ("show", "release-judge", "remove-participant", "close-entry", "open-entry"):
+    for command in (
+        "show",
+        "release-judge",
+        "remove-participant",
+        "close-entry",
+        "open-entry",
+        "delete-round",
+        "diagnostics-summary",
+    ):
         subcommand = commands.add_parser(command)
         subcommand.add_argument("round_id", type=_round_id)
         if command == "remove-participant":
@@ -72,7 +96,20 @@ def parser() -> argparse.ArgumentParser:
             subcommand.add_argument("message_id", type=_message_id)
         else:
             subcommand.add_argument("participant_id", type=_participant_id)
+    diagnostic = commands.add_parser("diagnostic-report")
+    diagnostic.add_argument("report_id", type=_report_id)
     return result
+
+
+async def execute_diagnostics(
+    arguments: argparse.Namespace, reader: DiagnosticReader
+) -> dict[str, object]:
+    if arguments.command == "diagnostics-summary":
+        return diagnostic_summary(await reader.summary(arguments.round_id))
+    stored = await reader.report(arguments.report_id)
+    if stored is None:
+        raise NotFoundError
+    return diagnostic_report(stored)
 
 
 async def execute(arguments: argparse.Namespace, admin: AdministerRound) -> CommittedRound:
@@ -118,6 +155,26 @@ async def _run(arguments: argparse.Namespace, settings: Settings) -> None:
             ),
         )
         clock = SystemClock()
+        if arguments.command in {"diagnostics-summary", "diagnostic-report"}:
+            print(json.dumps(await execute_diagnostics(arguments, PostgresDiagnostics(engine))))
+            return
+        if arguments.command == "delete-round":
+            receipt = await AdministerRound(
+                rounds,
+                rounds,
+                clock,
+                PostgresRoundDeletions(engine, purge_diagnostics, PostgresMediaOutbox),
+            ).delete_round(RoundId(arguments.round_id))
+            print(
+                json.dumps(
+                    {
+                        "deleted": True,
+                        "mediaCleanup": "background",
+                        "deletedAt": epoch_ms(receipt.deleted_at),
+                    }
+                )
+            )
+            return
         if arguments.command in {"messages", "delete-message", "delete-messages-of"}:
             messages = PostgresMessages(engine)
             transactions = PostgresChatTransactions(

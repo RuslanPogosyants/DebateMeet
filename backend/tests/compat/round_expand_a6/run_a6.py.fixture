@@ -1,0 +1,326 @@
+"""Current harness; source/ contains the immutable actual A6 implementation."""
+
+import asyncio
+import inspect
+import json
+import sys
+from collections import Counter
+from datetime import datetime
+from functools import partial
+from pathlib import Path
+
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from debatemeet.main import build_app
+from debatemeet.media.application.gateway import RoundMediaGateway
+from debatemeet.media.application.ports import LiveKitApi, MediaRoom, MicrophoneTarget
+from debatemeet.media.application.publisher import SnapshotPublisher
+from debatemeet.media.application.webhooks import HandleMediaEvent
+from debatemeet.media.infrastructure.postgres import (
+    PostgresMediaOutbox,
+    PostgresMediaStore,
+    PostgresPublisherLease,
+)
+from debatemeet.round.api.entry import RoundEndpoints
+from debatemeet.round.application.admin import AdministerRound
+from debatemeet.round.application.commands import JoinRound, ReadSnapshot
+from debatemeet.round.application.credentials import Credentials
+from debatemeet.round.application.diagnostics import ReceiveDiagnostics
+from debatemeet.round.application.presence import (
+    ConnectParticipant,
+    DisconnectParticipant,
+    SyncPresence,
+)
+from debatemeet.round.application.room_commands import Enter, ExecuteRoundCommand, PauseTimer
+from debatemeet.round.chat.application.read_messages import ReadMessages
+from debatemeet.round.chat.infrastructure.postgres import PostgresMessages
+from debatemeet.round.chat.infrastructure.transactions import PostgresSystemMessages
+from debatemeet.round.contract.microphone import MicrophonePacket
+from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
+from debatemeet.round.domain.room import Room
+from debatemeet.round.domain.timer import TimerKind
+from debatemeet.round.infrastructure.diagnostics import (
+    PostgresDiagnosticTransactions,
+    SlidingDiagnosticLimiter,
+)
+from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive, PostgresRounds
+from debatemeet.shared.infrastructure.diagnostics import PostgresDiagnostics
+from debatemeet.shared.infrastructure.persistence import PostgresRateLimiter
+from debatemeet.shared.infrastructure.randomness import SecureRandom
+
+stage = "imports"
+
+
+def assert_a6_only(source):
+    for name, module in tuple(sys.modules.items()):
+        if name == "debatemeet" or name.startswith("debatemeet."):
+            assert Path(module.__file__).resolve().is_relative_to(source), name
+    assert not hasattr(AdministerRound, "delete_round"), "B6 producer leaked into A6"
+
+
+class Clock:
+    def __init__(self, value):
+        self.value = value
+
+    def now(self):
+        return self.value
+
+
+class Forbidden:
+    async def __call__(self, *args, **kwargs):
+        raise AssertionError("outside the compatibility exercise")
+
+    def verify(self, *args):
+        raise AssertionError("HTTP webhook is outside the compatibility exercise")
+
+
+class Health:
+    async def is_healthy(self):
+        return True
+
+
+class Boundary:
+    """Exact SDK protocol, with observable terminal-room cleanup and no mutating replay."""
+
+    def __init__(self, request):
+        self.request = request
+        self.controls, self.mutes, self.deletions = [], [], []
+        self.states, self.metadata, self.chat, self.removals = [], [], [], []
+        self.inventory = [
+            MediaRoom(RoundId(value), "RM_before_cleanup") for value in request["deleted_ids"]
+        ]
+        self.inventory.append(MediaRoom(RoundId(request["foreign"]), "RM_foreign"))
+
+    async def microphone_target(self, round_id, participant_id):
+        target = self.request["sdk_targets"].get(round_id)
+        assert target is not None
+        assert target["target_id"] == participant_id
+        return MicrophoneTarget(SessionId(target["sid"]), target["track_sid"])
+
+    async def mute_microphone(self, round_id, participant_id, track_sid):
+        self.mutes.append((round_id, participant_id, track_sid))
+        raise AssertionError("an already attempted or confirmed mute cannot run again")
+
+    async def send_control(self, round_id, topic, packet, target_id):
+        value = MicrophonePacket.model_validate_json(packet)
+        assert value.round_id == round_id and value.target_id == target_id and value.topic == topic
+        self.controls.append(value.model_dump(mode="json", by_alias=True))
+
+    async def send_reaction(self, round_id, packet, destinations):
+        raise AssertionError("no reactions in this exercise")
+
+    async def create_room(self, round_id, metadata):
+        raise AssertionError("a deleted join must not create any MediaRoom")
+
+    async def rooms(self, round_ids=None):
+        return [room for room in self.inventory if round_ids is None or room.name in round_ids]
+
+    async def delete_room(self, round_id):
+        assert round_id in self.request["deleted_ids"]
+        self.deletions.append(str(round_id))
+        self.inventory = [room for room in self.inventory if room.name != round_id]
+
+    async def participants(self, round_id):
+        return {}
+
+    async def send_state(self, round_id, packet):
+        self.states.append(json.loads(packet)["snapshot"])
+
+    async def send_packet(self, round_id, topic, packet):
+        self.chat.append(json.loads(packet))
+
+    async def update_metadata(self, round_id, metadata):
+        self.metadata.append(json.loads(metadata))
+
+    async def remove_participant(self, round_id, participant_id):
+        self.removals.append((round_id, participant_id))
+
+    def token(self, round_id, participant_id, name):
+        raise AssertionError("a deleted join must not issue a token")
+
+
+async def run(request, source):
+    global stage
+    assert_a6_only(source)
+    for name, method in LiveKitApi.__dict__.items():
+        if not name.startswith("_") and inspect.isfunction(method):
+            assert tuple(inspect.signature(method).parameters) == tuple(
+                inspect.signature(getattr(Boundary, name)).parameters
+            ), name
+    engine = create_async_engine(
+        request["database_url"], pool_size=2, max_overflow=0, hide_parameters=True
+    )
+    try:
+        rid = RoundId(request["round_id"])
+        alice = Credentials(ParticipantId(request["alice"]), request["alice_secret"])
+        bob = Credentials(ParticipantId(request["bob"]), request["bob_secret"])
+        clock = Clock(datetime.fromisoformat(request["now"]))
+        rounds = PostgresRounds(
+            engine,
+            PostgresMediaOutbox,
+            partial(PostgresSystemMessages, outbox_factory=PostgresMediaOutbox),
+        )
+        sdk, store, limits = (
+            Boundary(request),
+            PostgresMediaStore(engine),
+            PostgresRateLimiter(engine),
+        )
+        gateway = RoundMediaGateway(rounds, sdk, store, clock, "ws://unused.invalid", "test")
+        execute = ExecuteRoundCommand(rounds, gateway, rounds, clock, limits, SecureRandom())
+        stage = "ordinary-writes"
+        await execute(rid, bob, request["enter_key"], Enter(Room.OO))
+        await execute(rid, alice, request["timer_key"], PauseTimer(TimerKind.PREP))
+        messages, diagnostics = PostgresMessages(engine), PostgresDiagnostics(engine)
+        receiver = ReceiveDiagnostics(
+            PostgresDiagnosticTransactions(engine, PostgresParticipantArchive),
+            clock,
+            SlidingDiagnosticLimiter(),
+        )
+        endpoints = RoundEndpoints(
+            Forbidden(),
+            JoinRound(rounds, gateway, rounds, clock, SecureRandom(), limits, rounds),
+            Forbidden(),
+            ReadSnapshot(rounds),
+        )
+        app = build_app(
+            clock=clock,
+            health_probe=Health(),
+            webhook_verifier=Forbidden(),
+            media_events=Forbidden(),
+            version="test",
+            round_commands=endpoints,
+            room_commands=execute,
+            messages=ReadMessages(messages, rounds),
+            diagnostics=receiver,
+            diagnostic_reader=diagnostics,
+        )
+        stage = "authenticated-http"
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://127.0.0.1"
+        ) as client:
+            headers = {"Authorization": f"Bearer {alice.participant_id}.{alice.secret}"}
+            snapshot = await client.get(f"/api/rounds/{rid}/snapshot", headers=headers)
+            assert snapshot.status_code == 200 and snapshot.headers["x-app-version"] == "test"
+            history = await client.get(
+                f"/api/rounds/{rid}/messages", params={"after": 0}, headers=headers
+            )
+            assert history.status_code == 200
+            for deleted in request["deleted_ids"]:
+                assert (
+                    await client.get(f"/api/rounds/{deleted}/snapshot", headers=headers)
+                ).status_code == 401
+                assert (
+                    await client.post(f"/api/rounds/{deleted}/join", json={"name": "Late join"})
+                ).status_code == 404
+                assert (
+                    await client.post(
+                        f"/api/rounds/{deleted}/mute",
+                        json={"participantId": bob.participant_id},
+                        headers={**headers, "Idempotency-Key": request["enter_key"]},
+                    )
+                ).status_code == 401
+                assert (
+                    await client.post(
+                        f"/api/rounds/{deleted}/telemetry",
+                        json=request["telemetry"],
+                        headers=headers,
+                    )
+                ).status_code == 401
+            for body in (request["telemetry"], request["telemetry"], request["fresh_telemetry"]):
+                response = await client.post(
+                    f"/api/rounds/{rid}/telemetry", json=body, headers=headers
+                )
+                assert (
+                    response.status_code == 204 and response.headers["cache-control"] == "no-store"
+                )
+            metrics = await client.get("/metrics")
+            assert metrics.status_code == 200
+            assert str(rid) not in metrics.text and str(alice.participant_id) not in metrics.text
+        stage = "cleanup-and-publisher"
+        for live in request["wake_rounds"]:
+            assert await store.started(RoundId(live), "RM_live", clock.now())
+        publisher = SnapshotPublisher(
+            rounds, sdk, store, PostgresPublisherLease(engine), clock, "test", messages
+        )
+        await publisher.publish_once()
+        assert Counter(sdk.deletions) == Counter(request["deleted_ids"])
+        assert sdk.mutes == [] and len(sdk.controls) == 2
+        # A server-side CreateRoom can finish after DeleteRoom→ack and before a SQL postcheck.
+        late = RoundId(request["late_room"])
+        sdk.inventory.append(MediaRoom(late, "RM_late_after_ack"))
+        recovery = HandleMediaEvent(
+            store,
+            sdk,
+            ConnectParticipant(rounds, clock),
+            DisconnectParticipant(rounds, clock),
+            SyncPresence(rounds, gateway, clock),
+        )
+        await recovery.reconcile_deleted()
+        # A delayed gateway postcheck races the inventory and re-arms its revision.
+        assert not await store.started(late, "RM_late_after_ack", clock.now())
+        await publisher.publish_once()
+        assert Counter(sdk.deletions) == Counter([*request["deleted_ids"], str(late)])
+        assert [room.name for room in sdk.inventory] == [request["foreign"]]
+        stage = "maintenance"
+        clock.value = datetime.fromisoformat(request["maintenance_now"])
+        await store.maintain(clock.now())
+        await diagnostics.maintain(clock.now())
+        async with engine.connect() as connection:
+            receipts = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT round_id,participant_id,key,request_hash,retained FROM command_keys WHERE retained ORDER BY round_id,key"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            markers = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT round_id,version,deleted_at FROM deleted_rounds ORDER BY round_id"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            control_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM media_outbox WHERE operation IN ('mute','request_unmute')"
+                )
+            )
+            diagnostic_count = await connection.scalar(
+                text("SELECT count(*) FROM diagnostics_batches")
+            )
+        assert len(receipts) == request["retained_count"] and control_count == 0
+        assert_a6_only(source)
+        return {
+            "snapshot": snapshot.json(),
+            "history": history.json(),
+            "controls": sdk.controls,
+            "deletions": sdk.deletions,
+            "mute_calls": len(sdk.mutes),
+            "receipts": [dict(row) for row in receipts],
+            "markers": [
+                {**dict(row), "deleted_at": row["deleted_at"].isoformat()} for row in markers
+            ],
+            "diagnostic_count": diagnostic_count,
+        }
+    finally:
+        await engine.dispose()
+
+
+if __name__ == "__main__":
+    try:
+        request = json.load(sys.stdin)
+        result = asyncio.run(run(request, Path(sys.argv[1]).resolve()))
+        json.dump(result, sys.stdout, ensure_ascii=False)
+    except Exception as error:
+        sys.stderr.write(f"A6_FAILURE:{stage}:{type(error).__name__}\n")
+        raise SystemExit(1) from None

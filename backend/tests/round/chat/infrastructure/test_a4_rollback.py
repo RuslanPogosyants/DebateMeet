@@ -43,7 +43,7 @@ from debatemeet.round.chat.infrastructure.transactions import (
 )
 from debatemeet.round.contract.snapshot import RoundSnapshot
 from debatemeet.round.domain.ids import ParticipantId, RoundId, SessionId
-from debatemeet.round.domain.position import Position
+from debatemeet.round.domain.position import TEAM_POSITIONS, Position
 from debatemeet.round.domain.room import Room
 from debatemeet.round.domain.round import Round
 from debatemeet.round.domain.timer import TimerKind, TimerStatus
@@ -139,7 +139,7 @@ async def build_b_state(engine: AsyncEngine) -> BState:
         (4, ConfigureDrum((Position.CO, Position.OG), False)),
         (5, Draw()),
         (6, ResetDrum()),
-        (6, ConfigureDrum(tuple(Position), True)),
+        (6, ConfigureDrum(TEAM_POSITIONS, True)),
         (7, Draw()),
         (8, ConfigureDrum((Position.OG, Position.OO), False)),
     )

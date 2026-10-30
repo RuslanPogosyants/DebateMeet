@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from debatemeet.shared.api.schemas import ApiModel
+from debatemeet.shared.api.version import validate_app_version
 from debatemeet.shared.application.errors import (
     MediaUnavailableError,
     NotFoundError,
@@ -121,11 +122,21 @@ async def _application_error(_: Request, error: Exception) -> JSONResponse:
     raise error
 
 
-def install_error_handlers(app: FastAPI) -> None:
+def install_error_handlers(app: FastAPI, *, version: str | None = None) -> None:
+    if version is not None:
+        validate_app_version(version)
+
+    async def unexpected(request: Request, error: Exception) -> JSONResponse:
+        response = await _unexpected_error(request, error)
+        # Starlette sends unexpected failures outside user middleware, including VersionHeaders.
+        if version is not None and request.url.path.startswith("/api/"):
+            response.headers["X-App-Version"] = version
+        return response
+
     app.add_exception_handler(ApiError, _api_error)
     app.add_exception_handler(HTTPException, _http_error)
     app.add_exception_handler(RequestValidationError, _validation_error)
-    app.add_exception_handler(Exception, _unexpected_error)
+    app.add_exception_handler(Exception, unexpected)
     app.add_exception_handler(DomainError, _domain_error)
     for error_type in (
         UnauthorizedError,

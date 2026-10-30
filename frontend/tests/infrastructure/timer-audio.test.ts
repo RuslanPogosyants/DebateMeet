@@ -34,6 +34,11 @@ class Context extends EventTarget {
   static contexts: Context[] = []
   state: 'running' | 'suspended' | 'closed' = Context.suspended ? 'suspended' : 'running'
   currentTime = 10
+  sinkId = ''
+  setSinkId = vi.fn<(id: string) => Promise<void>>((id) => {
+    this.sinkId = id
+    return Promise.resolve()
+  })
   destination = {}
   sources: Source[] = []
   gains: Gain[] = []
@@ -93,6 +98,49 @@ function setup() {
 }
 
 describe('timer audio boundary', () => {
+  it('routes its own context without resuming or changing scheduled timer cues', async () => {
+    const { audio } = setup()
+    expect(await audio.output('headphones')).toBe('headphones')
+    const context = Context.contexts[0]
+    if (!context) throw new Error('No context')
+    expect(context.resumeCalls).toBe(0)
+    await audio.resume()
+    audio.replace([{ id: 'future', delayMs: 1000 }])
+    const source = context.sources[0]
+    expect(await audio.output('speaker')).toBe('speaker')
+    expect(source?.starts).toEqual([11])
+    expect(source?.stops).toEqual([11.12])
+    expect(context.resumeCalls).toBe(1)
+    audio.close()
+  })
+
+  it('serializes sink changes and rejects a late result after its context is closed', async () => {
+    const { audio } = setup()
+    await audio.output('old')
+    const context = Context.contexts[0]
+    if (!context) throw new Error('No context')
+    let finish: (() => void) | undefined
+    context.setSinkId.mockImplementationOnce(
+      (id) =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            context.sinkId = id
+            resolve()
+          }
+        }),
+    )
+    const first = audio.output('late')
+    const settled = first.then(
+      () => null,
+      (error: unknown) => error,
+    )
+    await vi.waitFor(() => expect(context.setSinkId).toHaveBeenCalledWith('late'))
+    audio.close()
+    finish?.()
+    await expect(settled).resolves.toMatchObject({ name: 'AbortError' })
+    expect(context.state).toBe('closed')
+    await expect(audio.output('new')).rejects.toMatchObject({ name: 'InvalidStateError' })
+  })
   it('schedules a quiet envelope on the audio clock without waiting for JS timers', async () => {
     const { audio } = setup()
     await audio.resume()

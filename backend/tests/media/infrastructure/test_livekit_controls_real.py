@@ -17,6 +17,7 @@ from debatemeet.round.application.ports import ParticipantId, RoundId
 from debatemeet.round.contract.microphone import ControlTopic, MicrophonePacket
 from debatemeet.round.contract.reaction import ReactionPacket
 from debatemeet.round.domain.room import Room
+from tests.media.livekit import eventually
 
 pytestmark = [pytest.mark.livekit, pytest.mark.usefixtures("livekit")]
 TARGET = ParticipantId("target000001")
@@ -212,6 +213,15 @@ async def test_replacing_t1_with_t2_does_not_confirm_or_mute_the_new_microphone(
     await asyncio.wait_for(replacement.wait_for_subscription(), 5)
     await source.capture_frame(rtc.AudioFrame(bytes(480 * 2), 48000, 1, 480))
     assert replacement.sid != world.mic.sid
+
+    async def microphone_replaced() -> bool:
+        state = await world.participant()
+        return {track.sid for track in state.tracks if track.source == TrackSource.MICROPHONE} == {
+            replacement.sid
+        }
+
+    # Subscription readiness does not guarantee that RoomService's track list has converged.
+    await eventually(microphone_replaced, seconds=5)
     current = await world.adapter.microphone_target(world.name, TARGET)
     assert current is not None
     assert current.sid == target.sid

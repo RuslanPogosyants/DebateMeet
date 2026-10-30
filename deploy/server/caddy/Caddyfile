@@ -37,6 +37,11 @@
 	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://{$DM_LIVEKIT_DOMAIN} wss://{$DM_LIVEKIT_DOMAIN}; media-src 'self' blob:; img-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 	encode zstd gzip
 
+	# Prometheus reads the backend on loopback; gauges are never exposed by the public site.
+	handle /metrics {
+		respond 404
+	}
+
 	# The API. /internal/ is never proxied: LiveKit sends webhooks to the backend directly.
 	handle /api/* {
 		reverse_proxy 127.0.0.1:8000 {

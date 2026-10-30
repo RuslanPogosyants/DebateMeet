@@ -11,10 +11,10 @@ import { claimJudge, command, createRound, enter, join, sendServerPacket, snapsh
 import { flushView, observeSocialPackets, socialPackets } from './social-packets'
 
 async function openActions(page: Page, name: string) {
-  await page
-    .getByRole('button', { name: `Действия — ${name}`, exact: true })
-    .first()
-    .click()
+  const panel = page.getByRole('dialog', { name: 'Вы судья', exact: true })
+  if ((await panel.count()) === 0)
+    await page.getByRole('button', { name: 'Вы судья', exact: true }).click()
+  await panel.getByRole('button', { name: `Действия — ${name}`, exact: true }).click()
   return page.getByRole('dialog', { name: `Действия — ${name}`, exact: true })
 }
 
@@ -51,13 +51,22 @@ test('hands travel with their room and only an explicit owner action unmutes a j
     await source.getByRole('button', { name: 'Микрофон выключен', exact: true }).click()
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
     await source.getByRole('button', { name: 'Поднять руку', exact: true }).click()
-    await expect(page.getByTestId('hand-queue')).toContainText('Спикер')
+    await expect(page.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 1')
+    await page.getByTestId('hand-queue').click()
+    let queueDialog = page.getByRole('dialog', { name: 'Очередь рук', exact: true })
+    await expect(queueDialog).toContainText('Спикер')
+    await queueDialog.getByRole('button', { name: 'Закрыть', exact: true }).click()
     const before = (await snapshot(source)).participants.find((person) => person.name === 'Спикер')
     if (!before) throw new Error('The source participant is unavailable')
     await enter(source, 'OG')
     await enter(listener, 'OG')
-    await expect(listener.getByTestId('hand-queue')).toContainText('Спикер')
-    await expect(page.getByTestId('hand-queue')).not.toContainText('Спикер')
+    await expect(listener.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 1')
+    await listener.getByTestId('hand-queue').click()
+    queueDialog = listener.getByRole('dialog', { name: 'Очередь рук', exact: true })
+    await expect(queueDialog).toContainText('Спикер')
+    await queueDialog.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await expect(page.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 0')
+    await expect(page.getByTestId('hand-queue')).toBeEnabled()
     expect(
       (await snapshot(source)).participants.find((person) => person.id === before.id)?.handRaisedAt,
     ).toBe(before.handRaisedAt)
@@ -70,12 +79,19 @@ test('hands travel with their room and only an explicit owner action unmutes a j
     await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await source.getByRole('button', { name: 'Поднять руку', exact: true }).click()
     await listener.getByRole('button', { name: 'Поднять руку', exact: true }).click()
-    const queue = listener.getByTestId('hand-queue').locator('li')
+    await expect(listener.getByTestId('hand-queue')).toHaveAccessibleName('Очередь рук: 2')
+    await listener.getByTestId('hand-queue').click()
+    queueDialog = listener.getByRole('dialog', { name: 'Очередь рук', exact: true })
+    const queue = queueDialog.locator('li')
     await expect(queue).toHaveCount(2)
     await expect(queue.nth(0)).toContainText('Спикер')
     await expect(queue.nth(1)).toContainText('Слушатель')
-    await page.getByRole('button', { name: 'Опустить все руки', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: 'Вы судья', exact: true })
+      .getByRole('button', { name: 'Опустить все руки', exact: true })
+      .click()
     await expect(queue).toHaveCount(0)
+    await queueDialog.getByRole('button', { name: 'Закрыть', exact: true }).click()
     expect((await outputBands(listener, [440]))[0]).toBeGreaterThan(0.005)
 
     actions = await openActions(page, 'Спикер')
@@ -143,9 +159,6 @@ test('hands travel with their room and only an explicit owner action unmutes a j
 })
 
 async function react(page: Page, symbol: string): Promise<void> {
-  const summary = page.locator('details.reaction-controls > summary')
-  if (!(await page.getByRole('button', { name: `Реакция — ${symbol}`, exact: true }).isVisible()))
-    await summary.click()
   const accepted = page.waitForResponse(
     (response) => response.url().endsWith('/reactions') && response.request().method() === 'POST',
   )
@@ -200,8 +213,12 @@ test('real reaction packets stay in their room, respect hidden preference and re
       .toBeGreaterThanOrEqual(350)
     await expect(outside.getByTestId('reaction-item')).toHaveCount(0)
 
-    await reader.locator('details.reaction-controls > summary').click()
+    await reader.getByRole('button', { name: 'Ещё', exact: true }).click()
     await reader.getByRole('checkbox', { name: 'Скрыть реакции', exact: true }).check()
+    await reader
+      .getByRole('dialog', { name: 'Ещё', exact: true })
+      .getByRole('button', { name: 'Закрыть', exact: true })
+      .click()
     await expect(reader.getByTestId('reaction-item')).toHaveCount(0)
     const beforeHidden = (await socialPackets(reader, 'reaction')).length
     await react(page, '❤️')
@@ -212,11 +229,15 @@ test('real reaction packets stay in their room, respect hidden preference and re
     await expect(reader.getByTestId('reaction-item')).toHaveCount(0)
     await reader.reload()
     await join(reader, 'Читатель')
-    await reader.locator('details.reaction-controls > summary').click()
+    await reader.getByRole('button', { name: 'Ещё', exact: true }).click()
     await expect(
       reader.getByRole('checkbox', { name: 'Скрыть реакции', exact: true }),
     ).toBeChecked()
     await reader.getByRole('checkbox', { name: 'Скрыть реакции', exact: true }).uncheck()
+    await reader
+      .getByRole('dialog', { name: 'Ещё', exact: true })
+      .getByRole('button', { name: 'Закрыть', exact: true })
+      .click()
     await enter(reader, 'OG')
     await expect(reader.getByTestId('current-room-heading')).toHaveText('OG')
     await reader.getByRole('button', { name: '← В базу', exact: true }).click()
@@ -290,7 +311,7 @@ test('personal volume changes real output and survives publications and reconnec
     const full = await meanBand(page, 440)
     let actions = await openActions(page, 'Спикер')
     let range = actions.getByRole('slider', { name: 'Громкость — Спикер', exact: true })
-    await expect(range).toHaveAttribute('max', '100')
+    await expect(range).toHaveAttribute('max', '200')
     await range.press('Home')
     await expect(range).toHaveValue('0')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeLessThan(0.001)
@@ -321,7 +342,8 @@ test('personal volume changes real output and survives publications and reconnec
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeLessThan(0.001)
     await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await startOutputRecording(page, [440, 660])
-    await command(page, 'timers/speech/set', { remainingMs: 2500 })
+    // Cross the start of the final protected minute; reaching zero has no cue.
+    await command(page, 'timers/speech/set', { remainingMs: 62500 })
     await command(page, 'timers/speech/start')
     await expect
       .poll(
@@ -337,9 +359,10 @@ test('personal volume changes real output and survives publications and reconnec
     actions = await openActions(page, 'Спикер')
     range = actions.getByRole('slider', { name: 'Громкость — Спикер', exact: true })
     await range.press('End')
-    await expect(range).toHaveValue('100')
+    await expect(range).toHaveValue('200')
     await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
+    await page.getByRole('button', { name: 'Закрыть судейскую панель', exact: true }).click()
     await enter(page, 'OG')
     await expect(page.getByTestId('current-room-heading')).toHaveText('OG')
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeLessThan(0.001)
@@ -349,6 +372,7 @@ test('personal volume changes real output and survives publications and reconnec
     await range.press('End')
     await actions.getByRole('button', { name: 'Закрыть', exact: true }).click()
     expect((await outputBands(page, [440]))[0]).toBeLessThan(0.001)
+    await page.getByRole('button', { name: 'Закрыть судейскую панель', exact: true }).click()
     await page.getByRole('button', { name: '← В базу', exact: true }).click()
     await expect.poll(async () => (await outputBands(page, [440]))[0]).toBeGreaterThan(0.005)
     await page.screenshot({ path: testInfo.outputPath('social-desktop.png'), fullPage: true })

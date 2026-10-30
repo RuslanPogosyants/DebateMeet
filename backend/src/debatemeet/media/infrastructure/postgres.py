@@ -15,9 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from debatemeet.media.application.ports import (
     CONTROL_LIFETIME,
     ControlEffect,
+    DeleteRoomEffect,
     DeliveryState,
     MediaEffect,
     PacketEffect,
+    RemovalDeliveryEffect,
     RemovalEffect,
 )
 from debatemeet.round.application.ports import (
@@ -29,11 +31,35 @@ from debatemeet.round.application.ports import (
 )
 from debatemeet.round.contract.microphone import MAX_CONTROL_BYTES, MicrophonePayload
 from debatemeet.shared.application.errors import UnreadableRoundError
+from debatemeet.shared.infrastructure.database import command_transaction
+from debatemeet.shared.infrastructure.lifecycle import acquire_round_lifecycle
 
 # A session lock on a dedicated connection, never the transaction of a round command.
 PUBLISHER_LOCK = 1145917525
 CHANNEL = "round_changed"
 log = structlog.get_logger(__name__)
+
+
+async def _rearm_deleted(
+    connection: AsyncConnection, round_ids: Sequence[RoundId], now: datetime | None
+) -> int:
+    if not round_ids:
+        return 0
+    rows = await connection.execute(
+        text("""INSERT INTO media_outbox(round_id,operation,created_at,available_at)
+            SELECT round_id,'delete_room',
+                COALESCE(CAST(:now AS timestamptz),CURRENT_TIMESTAMP),
+                COALESCE(CAST(:now AS timestamptz),CURRENT_TIMESTAMP)
+            FROM deleted_rounds WHERE round_id=ANY(CAST(:ids AS text[]))
+            ON CONFLICT(round_id) WHERE operation='delete_room' AND delivered_at IS NULL
+            DO UPDATE SET revision=media_outbox.revision+1,
+                available_at=EXCLUDED.available_at,attempts=0 RETURNING round_id"""),
+        {"ids": list(round_ids), "now": now},
+    )
+    queued = [str(row[0]) for row in rows]
+    for round_id in queued:
+        await connection.execute(text("SELECT pg_notify('round_changed',:id)"), {"id": round_id})
+    return len(queued)
 
 
 def _control(row: RowMapping) -> ControlEffect:
@@ -67,6 +93,10 @@ class PostgresMediaOutbox:
 
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
+
+    async def delete_room(self, round_id: RoundId, now: datetime) -> None:
+        if not await _rearm_deleted(self._connection, [round_id], now):
+            raise ValueError("Room deletion requires a terminal round receipt")
 
     async def control_microphone(
         self,
@@ -163,8 +193,19 @@ class PostgresMediaStore:
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
 
-    async def started(self, round_id: RoundId, room_sid: str) -> None:
-        async with self._engine.begin() as connection:
+    async def started(self, round_id: RoundId, room_sid: str, now: datetime | None = None) -> bool:
+        async with command_transaction(self._engine) as connection:
+            # Share deletion's order before KEY SHARE: a late start must not hold
+            # an FK lock while waiting on an outbox row being purged by DELETE.
+            await acquire_round_lifecycle(connection, round_id)
+            # KEY SHARE conflicts only with deletion/id changes, not ordinary round
+            # writers. An SDK create has already finished, outside this transaction.
+            existing = await connection.scalar(
+                text("SELECT id FROM rounds WHERE id=:id FOR KEY SHARE"), {"id": round_id}
+            )
+            if existing is None:
+                await _rearm_deleted(connection, [round_id], now)
+                return False
             await connection.execute(
                 text("""
                     INSERT INTO media_rooms (round_id, room_sid)
@@ -203,6 +244,27 @@ class PostgresMediaStore:
             await connection.execute(
                 text("SELECT pg_notify('round_changed', :id)"), {"id": round_id}
             )
+            return True
+
+    async def deleted_rounds(
+        self, after_round: RoundId | None, limit: int = 100
+    ) -> Sequence[RoundId]:
+        if not 1 <= limit <= 100:
+            raise ValueError("Invalid deletion page size")
+        async with self._engine.connect() as connection:
+            rows = await connection.execute(
+                text("""SELECT round_id FROM deleted_rounds
+                    WHERE CAST(:after AS text) IS NULL OR round_id>:after
+                    ORDER BY round_id LIMIT :limit"""),
+                {"after": after_round, "limit": limit},
+            )
+            return [RoundId(row[0]) for row in rows]
+
+    async def rearm_deleted(
+        self, round_ids: Sequence[RoundId], now: datetime | None = None
+    ) -> None:
+        async with self._engine.begin() as connection:
+            await _rearm_deleted(connection, round_ids, now)
 
     async def finished(self, round_id: RoundId, room_sid: str) -> None:
         async with self._engine.begin() as connection:
@@ -276,6 +338,41 @@ class PostgresMediaStore:
                 )
                 for row in rows.mappings()
             ]
+
+    async def next_removal(
+        self, now: datetime, after_round: RoundId | None
+    ) -> RemovalDeliveryEffect | None:
+        async with self._engine.connect() as connection:
+            for cursor in (after_round, None) if after_round is not None else (None,):
+                rows = await connection.execute(
+                    text("""SELECT id,round_id,operation,participant_id,attempts,revision
+                        FROM media_outbox
+                        WHERE operation IN ('remove_participant','delete_room')
+                            AND delivered_at IS NULL AND available_at<=:now
+                            AND (CAST(:after AS text) IS NULL OR round_id>:after)
+                            AND (operation!='delete_room' OR EXISTS
+                                (SELECT 1 FROM deleted_rounds
+                                    WHERE deleted_rounds.round_id=media_outbox.round_id))
+                        ORDER BY round_id,available_at,id LIMIT 1"""),
+                    {"now": now, "after": cursor},
+                )
+                row = rows.mappings().one_or_none()
+                if row is not None:
+                    if row["operation"] == "delete_room":
+                        return DeleteRoomEffect(
+                            int(row["id"]),
+                            RoundId(row["round_id"]),
+                            int(row["attempts"]),
+                            int(row["revision"]),
+                        )
+                    return RemovalEffect(
+                        int(row["id"]),
+                        RoundId(row["round_id"]),
+                        ParticipantId(row["participant_id"]),
+                        int(row["attempts"]),
+                        int(row["revision"]),
+                    )
+            return None
 
     async def packet_heads(self, now: datetime) -> Sequence[PacketEffect]:
         async with self._engine.connect() as connection:

@@ -1,13 +1,9 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ClientError } from '@/application/ports'
 import { RoundController } from '@/application/round-controller'
-import {
-  RoundTimers,
-  TimerControls,
-  TimerReadouts,
-  TimerHealth,
-} from '@/ui/components/round-timers'
+import { RoundTimers, TimerReadouts, TimerHealth } from '@/ui/components/round-timers'
 import { formatTimerTime, parseTimerTime } from '@/ui/timer-time'
 import { ROUND_ID, SELF, fixture, snapshot } from '../fixtures'
 
@@ -53,58 +49,422 @@ describe('timer input and display', () => {
     expect(parseTimerTime(value)).toBe(expected)
   })
 
-  it('shows both clocks, giving running speech display priority without changing preparation', async () => {
+  it('shows one shared countdown without speech bookkeeping', async () => {
+    const { controller } = await setup(snapshot(), false)
+    render(<RoundTimers controller={controller} layout="compact" />)
+    expect(screen.getAllByRole('timer')).toHaveLength(1)
+    expect(screen.getByRole('timer', { name: 'Таймер' })).toHaveTextContent('15:00')
+    expect(screen.getByRole('button', { name: 'Подготовка' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: 'Речь' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Следующая речь' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('edits digits inline once on Enter and keeps the new configured duration for reset', async () => {
+    const { controller, api } = await setup()
+    const next = snapshot(2)
+    next.judgeFlag.holder = SELF
+    next.timers.prep = { durationMs: 373000, remainingMs: 373000, endsAt: null, status: 'stopped' }
+    const command = vi.spyOn(api, 'command').mockResolvedValueOnce(next)
+    render(<RoundTimers controller={controller} layout="narrow" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '6:13{Enter}')
+    fireEvent.blur(input)
+    expect(command).toHaveBeenCalledTimes(1)
+    expect(command).toHaveBeenCalledWith(
+      ROUND_ID,
+      expect.anything(),
+      { type: 'timers/prep/configure', durationMs: 373000 },
+      expect.any(String),
+    )
+    expect(input).toHaveValue('6:13')
+    expect(
+      screen.getAllByRole('button', { name: /Запустить таймер|Сбросить таймер/u }),
+    ).toHaveLength(2)
+  })
+
+  it('saves an inline edit and starts with one click', async () => {
+    const { controller, api } = await setup()
+    const configured = snapshot(2)
+    configured.judgeFlag.holder = SELF
+    configured.timers.prep = {
+      durationMs: 420000,
+      status: 'stopped',
+      endsAt: null,
+      remainingMs: 420000,
+    }
+    const command = vi.spyOn(api, 'command').mockResolvedValueOnce(configured)
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '7:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Запустить таймер' }))
+    expect(command.mock.calls.map((call) => call[2])).toEqual([
+      { type: 'timers/prep/configure', durationMs: 420000 },
+      { type: 'timers/prep/start' },
+    ])
+  })
+
+  it('does not start after an uncertain edit and blocks repeated changes until retry', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command').mockRejectedValue(new ClientError('network'))
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '7:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Запустить таймер' }))
+    expect(command).toHaveBeenCalledTimes(1)
+    expect(controller.store.getState().commandUncertain).toBe(true)
+    expect(input).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Запустить таймер' })).toBeDisabled()
+  })
+
+  it('changes the remaining time of a running timer without pausing it', async () => {
     const value = snapshot()
     value.timers.prep = {
-      durationMs: 900_000,
+      durationMs: 420000,
       status: 'running',
-      endsAt: 1_300_000,
+      endsAt: 1319000,
       remainingMs: null,
     }
-    value.timers.speech = {
-      durationMs: 420_000,
-      status: 'running',
-      endsAt: 1_359_000,
-      remainingMs: null,
-    }
-    const { controller } = await setup(value, false)
-    render(<RoundTimers controller={controller} layout="compact" />)
-    expect(screen.getByRole('timer', { name: 'Таймер речи' })).toHaveTextContent('1:01')
-    expect(screen.getByRole('timer', { name: 'Таймер подготовки' })).toHaveTextContent('5:00')
-    expect(screen.getByTestId('speech-timer')).toHaveAttribute('data-prominent', 'true')
-    expect(screen.getByTestId('prep-timer')).toHaveAttribute('data-prominent', 'false')
-    expect(screen.getByText('POI можно')).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'Запустить речь' })).not.toBeInTheDocument()
-    expect(screen.getByRole('timer', { name: 'Таймер речи' })).toHaveAttribute('aria-live', 'off')
+    const { controller, api } = await setup(value)
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    expect(input).toHaveValue('5:19')
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '6:13{Enter}')
+    expect(command.mock.calls[0]?.[2]).toEqual({ type: 'timers/prep/set', remainingMs: 373000 })
+    expect(command).toHaveBeenCalledTimes(1)
   })
 
-  it.each([
-    [410_000, 'POI нельзя'],
-    [5_000, 'грейс — ещё 0:05'],
-    [-21_000, 'сверх времени +0:21'],
-  ])('describes speech boundaries with words for remaining %i', async (remaining, text) => {
+  it('rejects invalid input and cancels drafts on Escape without sending a command', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '1:60{Enter}')
+    expect(screen.getByRole('alert')).toBeVisible()
+    expect(command).not.toHaveBeenCalled()
+    await userEvent.keyboard('{Escape}')
+    fireEvent.blur(input)
+    expect(input).toHaveValue('15:00')
+    expect(command).not.toHaveBeenCalled()
+  })
+
+  it('retains a draft across incoming snapshots and uses current status at commit', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '8:10')
+    const running = snapshot(2)
+    running.judgeFlag.holder = SELF
+    running.timers.prep = {
+      durationMs: 900000,
+      status: 'running',
+      endsAt: 1500000,
+      remainingMs: null,
+    }
+    act(() => {
+      controller.timers.accept(running)
+      controller.store.setState({ snapshot: running })
+    })
+    expect(input).toHaveValue('8:10')
+    await userEvent.keyboard('{Enter}')
+    expect(command.mock.calls[0]?.[2]).toEqual({ type: 'timers/prep/set', remainingMs: 490000 })
+  })
+
+  it('cancels editing on loss of judge powers and blocks uncertain commands', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '6:13')
+    const lost = snapshot(2)
+    act(() => {
+      controller.timers.accept(lost)
+      controller.store.setState({ snapshot: lost })
+    })
+    fireEvent.blur(input)
+    expect(command).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('resets immediately without confirmation and prevents a zero-time preparation start', async () => {
+    const value = snapshot()
+    value.timers.prep = { durationMs: 420000, status: 'paused', endsAt: null, remainingMs: 0 }
+    const { controller, api } = await setup(value)
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    expect(screen.getByRole('button', { name: 'Запустить таймер' })).toBeDisabled()
+    expect(screen.getByText('Время вышло')).toBeVisible()
+    const reset = screen.getByRole('button', { name: 'Сбросить таймер' })
+    await userEvent.click(reset)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(command.mock.calls[0]?.[2]).toEqual({ type: 'timers/prep/reset' })
+  })
+
+  it('shows one speech clock counting upwards with protected minutes and direct reset', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Речь' }))
+    expect(screen.getAllByRole('timer')).toHaveLength(1)
+    expect(screen.getByRole('textbox', { name: 'Время, мм:сс' })).toHaveValue('0:00')
+    expect(screen.getByText('Вопросы нельзя')).toBeVisible()
+    expect(screen.getByRole('textbox', { name: 'Длительность речи, мм:сс' })).toHaveValue('7:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Сбросить таймер' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(command.mock.calls[0]?.[2]).toEqual({ type: 'timers/speech/reset' })
+  })
+
+  it('edits elapsed speech without the preparation minimum and keeps the running speech', async () => {
     const value = snapshot()
     value.timers.speech = {
-      durationMs: 420_000,
-      status: 'paused',
+      durationMs: 420000,
+      status: 'running',
+      endsAt: 1101000,
+      remainingMs: null,
+    }
+    const { controller, api } = await setup(value)
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    expect(input).toHaveValue('5:19')
+    expect(screen.getByText('Вопросы можно')).toBeVisible()
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '6:13{Enter}')
+    expect(command.mock.calls[0]?.[2]).toEqual({ type: 'timers/speech/set', remainingMs: 47000 })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '0:00{Enter}')
+    expect(command.mock.calls[1]?.[2]).toEqual({ type: 'timers/speech/set', remainingMs: 420000 })
+  })
+
+  it('configures speech duration inline while stopped', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Речь' }))
+    const input = screen.getByRole('textbox', { name: 'Длительность речи, мм:сс' })
+    await userEvent.click(input)
+    await userEvent.clear(input)
+    await userEvent.type(input, '5:00{Enter}')
+    expect(command.mock.calls[0]?.[2]).toEqual({
+      type: 'timers/speech/configure',
+      durationMs: 300000,
+    })
+  })
+
+  it('switches each clock direction without changing shared time or its default duration', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    const direction = screen.getByRole('combobox', { name: 'Направление отсчета' })
+    expect(direction).toHaveValue('countdown')
+    expect(screen.getByRole('textbox', { name: 'Длительность подготовки, мм:сс' })).toHaveValue(
+      '15:00',
+    )
+    await userEvent.selectOptions(direction, 'stopwatch')
+    expect(screen.getByRole('textbox', { name: 'Время, мм:сс' })).toHaveValue('0:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Речь' }))
+    expect(direction).toHaveValue('stopwatch')
+    expect(screen.getByRole('textbox', { name: 'Длительность речи, мм:сс' })).toHaveValue('7:00')
+    await userEvent.selectOptions(direction, 'countdown')
+    expect(screen.getByRole('textbox', { name: 'Время, мм:сс' })).toHaveValue('7:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Подготовка' }))
+    expect(direction).toHaveValue('stopwatch')
+    expect(command).not.toHaveBeenCalled()
+  })
+
+  it.each(['mouse', 'keyboard'] as const)(
+    'discards an edited main clock when %s focuses the direction selector',
+    async (inputMethod) => {
+      const { controller, api } = await setup()
+      const command = vi.spyOn(api, 'command')
+      render(<RoundTimers controller={controller} layout="full" />)
+      const input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+      const direction = screen.getByRole('combobox', { name: 'Направление отсчета' })
+      await userEvent.clear(input)
+      await userEvent.type(input, '6:13')
+      if (inputMethod === 'mouse') await userEvent.click(direction)
+      else await userEvent.tab({ shift: true })
+      expect(direction).toHaveFocus()
+      await userEvent.selectOptions(direction, 'stopwatch')
+      expect(screen.getByRole('textbox', { name: 'Время, мм:сс' })).toHaveValue('0:00')
+      expect(command).not.toHaveBeenCalled()
+    },
+  )
+
+  it('discards duration drafts when switching direction or timer kind', async () => {
+    const { controller, api } = await setup()
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    const duration = screen.getByRole('textbox', { name: 'Длительность подготовки, мм:сс' })
+    await userEvent.clear(duration)
+    await userEvent.type(duration, '10:00')
+    const direction = screen.getByRole('combobox', { name: 'Направление отсчета' })
+    await userEvent.click(direction)
+    await userEvent.selectOptions(direction, 'stopwatch')
+    expect(screen.getByRole('textbox', { name: 'Длительность подготовки, мм:сс' })).toHaveValue(
+      '15:00',
+    )
+    const main = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.clear(main)
+    await userEvent.type(main, '3:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Речь' }))
+    expect(command).not.toHaveBeenCalled()
+  })
+
+  it('edits a running preparation stopwatch as elapsed and a speech countdown as remaining', async () => {
+    const value = snapshot()
+    value.timers.prep = {
+      durationMs: 900000,
+      status: 'running',
+      endsAt: 1600000,
+      remainingMs: null,
+    }
+    const { controller, api } = await setup(value)
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Направление отсчета' }),
+      'stopwatch',
+    )
+    let input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    expect(input).toHaveValue('5:00')
+    await userEvent.clear(input)
+    await userEvent.type(input, '6:13{Enter}')
+    expect(command.mock.calls[0]?.[2]).toEqual({ type: 'timers/prep/set', remainingMs: 527000 })
+    await userEvent.click(screen.getByRole('button', { name: 'Речь' }))
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Направление отсчета' }),
+      'countdown',
+    )
+    input = screen.getByRole('textbox', { name: 'Время, мм:сс' })
+    await userEvent.clear(input)
+    await userEvent.type(input, '6:13{Enter}')
+    expect(command.mock.calls[1]?.[2]).toEqual({ type: 'timers/speech/set', remainingMs: 373000 })
+  })
+
+  it('keeps signed elapsed visible instead of freezing after remaining exceeds the duration', async () => {
+    const value = snapshot()
+    value.timers.prep = {
+      durationMs: 900000,
+      status: 'running',
+      endsAt: 2200000,
+      remainingMs: null,
+    }
+    const { controller, api } = await setup(value)
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Направление отсчета' }),
+      'stopwatch',
+    )
+    expect(screen.getByRole('textbox', { name: 'Время, мм:сс' })).toHaveValue('−5:00')
+    expect(screen.getByText('До отметки 0:00')).toBeVisible()
+    await userEvent.click(screen.getByRole('textbox', { name: 'Время, мм:сс' }))
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Время, мм:сс' }))
+    expect(command).not.toHaveBeenCalled()
+  })
+
+  it('lets a preparation stopwatch resume past its target and exposes preparation duration editing', async () => {
+    const value = snapshot()
+    value.timers.prep = { durationMs: 900000, status: 'paused', endsAt: null, remainingMs: -1000 }
+    const { controller, api } = await setup(value)
+    const command = vi.spyOn(api, 'command')
+    render(<RoundTimers controller={controller} layout="full" />)
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Направление отсчета' }),
+      'stopwatch',
+    )
+    expect(screen.getByRole('textbox', { name: 'Время, мм:сс' })).toHaveValue('15:01')
+    await userEvent.click(screen.getByRole('button', { name: 'Запустить таймер' }))
+    expect(command.mock.calls[0]?.[2]).toEqual({ type: 'timers/prep/start' })
+    const input = screen.getByRole('textbox', { name: 'Длительность подготовки, мм:сс' })
+    await userEvent.clear(input)
+    await userEvent.type(input, '20:00{Enter}')
+    expect(command.mock.calls[1]?.[2]).toEqual({
+      type: 'timers/prep/configure',
+      durationMs: 1200000,
+    })
+  })
+
+  it('saves a duration edit before starting with one click and cancels it before reset', async () => {
+    const { controller, api } = await setup()
+    const configured = snapshot(2)
+    configured.judgeFlag.holder = SELF
+    configured.timers.prep = {
+      durationMs: 600000,
+      status: 'stopped',
+      remainingMs: 600000,
       endsAt: null,
-      remainingMs: remaining === 5_000 ? -10_000 : remaining === -21_000 ? -36_000 : remaining,
     }
-    const { controller } = await setup(value, false)
-    render(<TimerReadouts controller={controller} />)
-    expect(screen.getByText(text)).toBeVisible()
-    expect(screen.getByTestId('speech-timer')).toHaveTextContent('пауза')
+    const command = vi.spyOn(api, 'command').mockResolvedValueOnce(configured)
+    render(<RoundTimers controller={controller} layout="full" />)
+    const input = screen.getByRole('textbox', { name: 'Длительность подготовки, мм:сс' })
+    await userEvent.clear(input)
+    await userEvent.type(input, '10:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Запустить таймер' }))
+    expect(command.mock.calls.map((call) => call[2])).toEqual([
+      { type: 'timers/prep/configure', durationMs: 600000 },
+      { type: 'timers/prep/start' },
+    ])
+    command.mockClear()
+    await userEvent.clear(input)
+    await userEvent.type(input, '8:00')
+    await userEvent.click(screen.getByRole('button', { name: 'Сбросить таймер' }))
+    expect(command.mock.calls.map((call) => call[2])).toEqual([{ type: 'timers/prep/reset' }])
   })
 
-  it('projects each frame locally without ticking the round store or issuing commands', async () => {
+  it.each(['invalid', 'uncertain'] as const)(
+    'does not start after a %s duration edit',
+    async (failure) => {
+      const { controller, api } = await setup()
+      const command = vi.spyOn(api, 'command')
+      if (failure === 'uncertain') command.mockRejectedValue(new ClientError('network'))
+      render(<RoundTimers controller={controller} layout="full" />)
+      const input = screen.getByRole('textbox', { name: 'Длительность подготовки, мм:сс' })
+      await userEvent.clear(input)
+      await userEvent.type(input, failure === 'invalid' ? '1:60' : '10:00')
+      await userEvent.click(screen.getByRole('button', { name: 'Запустить таймер' }))
+      expect(command.mock.calls.map((call) => call[2])).toEqual(
+        failure === 'invalid' ? [] : [{ type: 'timers/prep/configure', durationMs: 600000 }],
+      )
+      expect(screen.queryByRole('alert') !== null).toBe(failure === 'invalid')
+      expect(screen.getByRole('button', { name: 'Запустить таймер' })).toHaveProperty(
+        'disabled',
+        failure === 'uncertain',
+      )
+    },
+  )
+
+  it('counts down locally using the clock and never changes the round state on a tick', async () => {
     const value = snapshot()
-    value.timers.speech = {
-      durationMs: 420_000,
+    value.timers.prep = {
+      durationMs: 420000,
       status: 'running',
-      endsAt: 1_419_500,
+      endsAt: 1419500,
       remainingMs: null,
     }
-    const { controller, api, serverNow } = await setup(value, false)
+    const { controller, serverNow, api } = await setup(value, false)
     let frame: FrameRequestCallback | undefined
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frame = callback
@@ -112,146 +472,65 @@ describe('timer input and display', () => {
     })
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const mutations = vi.spyOn(controller.store, 'setState')
-    const commands = vi.spyOn(api, 'command')
     render(<TimerReadouts controller={controller} updateTitle />)
-    expect(screen.getByRole('timer', { name: 'Таймер речи' })).toHaveTextContent('0:00')
-    serverNow.mockReturnValue(1_001_600)
-    act(() => {
-      frame?.(16)
-    })
-    expect(screen.getByRole('timer', { name: 'Таймер речи' })).toHaveTextContent('0:02')
-    expect(document.title).toContain('0:02')
-    serverNow.mockReturnValue(1_500_000)
-    act(() => {
-      frame?.(32)
-    })
-    expect(screen.getByRole('timer', { name: 'Таймер речи' })).toHaveTextContent('8:20')
+    expect(screen.getByRole('timer')).toHaveTextContent('7:00')
+    serverNow.mockReturnValue(1001600)
+    act(() => frame?.(16))
+    expect(screen.getByRole('timer')).toHaveTextContent('6:58')
+    expect(document.title).toContain('6:58')
     expect(mutations).not.toHaveBeenCalled()
-    expect(commands).not.toHaveBeenCalled()
+    expect(api.commands).toEqual([])
   })
-})
 
-describe('judge timer commands', () => {
-  it('sends start through the existing command controller', async () => {
+  it('keeps a healthy foreground clock refresh silent while time samples are pending', async () => {
     const { controller, api } = await setup()
-    const commands = vi.spyOn(api, 'command')
-    render(<TimerControls controller={controller} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Запустить речь' }))
-    expect(commands.mock.calls[0]?.[2]).toEqual({ type: 'timers/speech/start' })
+    await controller.timers.resync()
+    expect(controller.timers.store.getState()).toMatchObject({
+      synchronized: true,
+      degraded: false,
+      syncing: false,
+    })
+    render(<TimerHealth controller={controller} />)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    let finishSample: (value: number) => void = vi.fn<(value: number) => void>()
+    const sample = new Promise<number>((resolve) => {
+      finishSample = resolve
+    })
+    const time = vi.spyOn(api, 'time').mockReturnValueOnce(sample)
+    act(() => controller.foreground())
+    expect(time).toHaveBeenCalledOnce()
+    expect(controller.timers.store.getState().syncing).toBe(true)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByText('Уточняем время…')).not.toBeInTheDocument()
+    await act(async () => {
+      finishSample(Date.now())
+      await controller.timers.resync()
+    })
+    expect(controller.timers.store.getState().syncing).toBe(false)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
   it.each([
-    ['речи', 'Прошедшее время, мм:сс', '8:12', 'speech', -72_000],
-    ['речи', 'Прошедшее время, мм:сс', '-1:00', 'speech', 480_000],
-    ['подготовки', 'Остаток, мм:сс', '-0:12', 'prep', -12_000],
-  ])('sets time %s as %s %s', async (kindName, inputName, input, kind, remainingMs) => {
-    const { controller, api } = await setup()
-    const commands = vi.spyOn(api, 'command')
-    render(<TimerControls controller={controller} />)
-    await userEvent.click(screen.getByRole('button', { name: `Выставить время ${kindName}` }))
-    const dialog = screen.getByRole('dialog', { name: `Выставить время ${kindName}` })
-    const field = within(dialog).getByRole('textbox', { name: inputName })
-    await userEvent.clear(field)
-    await userEvent.type(field, input)
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Выставить' }))
-    expect(commands.mock.calls[0]?.[2]).toEqual({ type: `timers/${kind}/set`, remainingMs })
-  })
-
-  it('rejects malformed seconds and out of range configuration before a command', async () => {
-    const { controller, api } = await setup()
-    const commands = vi.spyOn(api, 'command')
-    render(<TimerControls controller={controller} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Изменить длительность речи' }))
-    const dialog = screen.getByRole('dialog', { name: 'Изменить длительность речи' })
-    const field = within(dialog).getByRole('textbox', { name: 'Длительность, мм:сс' })
-    for (const input of ['0:59', '15:01', '7:60', '-1:00']) {
-      await userEvent.clear(field)
-      await userEvent.type(field, input)
-      expect(within(dialog).getByRole('button', { name: 'Изменить и сбросить' })).toBeDisabled()
-      expect(field).toHaveAttribute('aria-invalid', 'true')
-    }
-    expect(commands).not.toHaveBeenCalled()
-  })
-
-  it('allows seconds precision and explicitly warns that configuration resets the timer', async () => {
-    const { controller, api } = await setup()
-    const commands = vi.spyOn(api, 'command')
-    render(<TimerControls controller={controller} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Изменить длительность речи' }))
-    const dialog = screen.getByRole('dialog', { name: 'Изменить длительность речи' })
-    expect(within(dialog).getByText('Таймер будет сброшен и остановлен.')).toBeVisible()
-    expect(within(dialog).getByRole('button', { name: 'Отмена' })).toHaveFocus()
-    const field = within(dialog).getByRole('textbox', { name: 'Длительность, мм:сс' })
-    await userEvent.clear(field)
-    await userEvent.type(field, '5:30')
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Изменить и сбросить' }))
-    expect(commands.mock.calls[0]?.[2]).toEqual({
-      type: 'timers/speech/configure',
-      durationMs: 330_000,
-    })
-  })
-
-  it('confirms reset of a started timer, focuses cancellation and restores the trigger', async () => {
-    const value = snapshot()
-    value.timers.speech = {
-      durationMs: 420_000,
-      status: 'paused',
-      endsAt: null,
-      remainingMs: 300_000,
-    }
-    const { controller, api } = await setup(value)
-    const commands = vi.spyOn(api, 'command')
-    render(<TimerControls controller={controller} />)
-    const trigger = screen.getByRole('button', { name: 'Сбросить речь' })
-    await userEvent.click(trigger)
-    const dialog = screen.getByRole('dialog', { name: 'Сбросить таймер речи?' })
-    expect(within(dialog).getByRole('button', { name: 'Отмена' })).toHaveFocus()
-    fireEvent(dialog, new Event('cancel', { cancelable: true }))
-    expect(trigger).toHaveFocus()
-    expect(commands).not.toHaveBeenCalled()
-    await userEvent.click(trigger)
-    await userEvent.click(
-      within(screen.getByRole('dialog')).getByRole('button', { name: 'Сбросить' }),
-    )
-    expect(commands.mock.calls[0]?.[2]).toEqual({ type: 'timers/speech/reset' })
-  })
-
-  it('describes the undo backup at the current server clock', async () => {
-    const value = snapshot()
-    value.speechNo = 4
-    value.speechUndo = {
-      speechNo: 3,
-      timer: { durationMs: 420_000, status: 'running', endsAt: 988_000, remainingMs: null },
-    }
-    const { controller, api } = await setup(value)
-    const commands = vi.spyOn(api, 'command')
-    render(<TimerControls controller={controller} />)
-    await userEvent.click(screen.getByRole('button', { name: 'Отменить: речь 3, 7:12' }))
-    expect(commands.mock.calls[0]?.[2]).toEqual({ type: 'speech/undo' })
-  })
-
-  it('disables next speech for two seconds after its successful result', async () => {
-    const { controller, api } = await setup()
-    const next = snapshot(2)
-    next.judgeFlag.holder = SELF
-    next.speechNo = 2
-    vi.spyOn(api, 'command').mockResolvedValueOnce(next)
-    render(<TimerControls controller={controller} />)
-    vi.useFakeTimers()
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Следующая речь' }))
-      await Promise.resolve()
-    })
-    expect(screen.getByRole('button', { name: 'Следующая речь' })).toBeDisabled()
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_999)
-    })
-    expect(screen.getByRole('button', { name: 'Следующая речь' })).toBeDisabled()
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1)
-    })
-    expect(screen.getByRole('button', { name: 'Следующая речь' })).toBeEnabled()
-  })
+    [false, false, 0, 'Время приблизительное'],
+    [true, true, 0, 'Не удалось уточнить время; используем последнюю поправку'],
+    [true, false, 500, 'Время приблизительное'],
+  ])(
+    'keeps a real clock warning and recovery action with synchronized=%s degraded=%s uncertainty=%i',
+    async (synchronized, degraded, uncertaintyMs, message) => {
+      const { controller } = await setup()
+      await controller.timers.resync()
+      controller.timers.store.setState({ synchronized, degraded, uncertaintyMs, syncing: false })
+      render(<TimerHealth controller={controller} />)
+      expect(screen.getByRole('status')).toHaveTextContent(message)
+      expect(screen.getByRole('button', { name: 'Уточнить время' })).toBeEnabled()
+      act(() => controller.timers.store.setState({ syncing: true }))
+      expect(screen.getByRole('status')).toBeVisible()
+      expect(screen.getByRole('button', { name: 'Уточняем время…' })).toBeDisabled()
+      act(() => controller.timers.store.setState({ syncing: false }))
+      expect(screen.getByRole('status')).toHaveTextContent(message)
+      expect(screen.getByRole('button', { name: 'Уточнить время' })).toBeEnabled()
+    },
+  )
 
   it('offers explicit clock recovery and the common audio unblock action', async () => {
     const { controller } = await setup()

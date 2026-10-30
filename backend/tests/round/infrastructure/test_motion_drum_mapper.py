@@ -172,3 +172,21 @@ def test_reset_drum_state_keeps_a_nonzero_counter_and_empty_enabled_set() -> Non
     restored = decode_round(document, ROUND_ID, 1)
     assert restored.drum == Drum(enabled=(), remove_drawn=False, draw_count=JS_MAX_SAFE_INTEGER)
     assert encode_round(restored) == document
+
+
+def test_speaker_and_team_history_round_trips_without_a_document_schema_change() -> None:
+    round_ = a_round().with_participant("alice").with_judge("alice").build()
+    positions = tuple(Position)
+    round_.drum = Drum(
+        enabled=positions[4:],
+        drawn=tuple(
+            DrawnPosition(position, number) for number, position in enumerate(positions, 1)
+        ),
+        last=DrawResult(positions[-1], len(positions), at(0)),
+        draw_count=len(positions),
+    )
+    document = encode_round(round_)
+    assert document["schema"] == 1
+    restored = decode_round(document, ROUND_ID, 23)
+    assert restored.drum == round_.drum
+    assert encode_round(restored) == document

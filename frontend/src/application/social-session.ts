@@ -22,6 +22,7 @@ export class SocialSession {
   private interval: ReturnType<typeof setInterval> | null = null
   private readonly controls = new Map<string, number>()
   private readonly nonces = new Map<string, number>()
+  private readonly previousVolumes = new Map<string, number>()
   private readonly roundId: string
   private readonly preferences: Preferences
   private readonly clock: ClientClock
@@ -183,9 +184,18 @@ export class SocialSession {
   }
   setVolume(identity: string, value: number): void {
     if (!Number.isFinite(value)) return
-    const volume = Math.max(0, Math.min(1, value))
+    const volume = Math.max(0, Math.min(2, value))
+    const previous = this.volume(identity)
+    if (volume > 0) this.previousVolumes.set(identity, volume)
+    else if (previous > 0) this.previousVolumes.set(identity, previous)
     this.preferences.setVolume(this.roundId, identity, volume)
     this.store.setState({ volumes: { ...this.store.getState().volumes, [identity]: volume } })
+  }
+  toggleMuted(identity: string): void {
+    this.setVolume(
+      identity,
+      this.volume(identity) > 0 ? 0 : (this.previousVolumes.get(identity) ?? 1),
+    )
   }
 
   suspend(): void {
@@ -201,5 +211,6 @@ export class SocialSession {
     this.entering = false
     this.controls.clear()
     this.nonces.clear()
+    this.previousVolumes.clear()
   }
 }

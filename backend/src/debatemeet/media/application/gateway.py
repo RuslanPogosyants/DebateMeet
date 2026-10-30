@@ -48,7 +48,8 @@ class RoundMediaGateway:
             app_version=self._app_version,
         )
         room = await self._api.create_room(round_id, snapshot.model_dump_json(by_alias=True))
-        await self._store.started(round_id, room.sid)
+        if not await self._store.started(round_id, room.sid, self._clock.now()):
+            raise NotFoundError
 
     def token(self, round_id: RoundId, participant_id: ParticipantId, name: str) -> str:
         return self._api.token(round_id, participant_id, name)

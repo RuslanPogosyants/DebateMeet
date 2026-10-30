@@ -18,6 +18,30 @@ function source() {
 }
 
 describe('clock synchronization', () => {
+  it('requires a current lifecycle success, bounded age and no degraded result for derived latency', async () => {
+    const clock = source()
+    const api = {
+      time: vi
+        .fn<() => Promise<number>>()
+        .mockImplementation(() => Promise.resolve(clock.now() + 1000000)),
+    }
+    const sync = new ClockSync(api, clock, () => {})
+    await sync.sync()
+    expect(sync.usable()).toBe(true)
+    clock.advance(60001)
+    expect(sync.usable()).toBe(false)
+    expect(sync.diagnostic().ageMs).toBe(60001)
+    sync.close()
+    sync.activate()
+    expect(sync.usable()).toBe(false)
+    api.time.mockRejectedValueOnce(new Error('offline'))
+    await sync.sync()
+    expect(sync.diagnostic()).toMatchObject({ synchronized: false, degraded: true })
+    expect(sync.serverNow()).toBe(clock.now() + 1000000)
+    await sync.sync()
+    expect(sync.usable()).toBe(true)
+    expect(sync.diagnostic().ageMs).toBe(0)
+  })
   it('uses median offsets and reports RTT plus disagreement rather than the best RTT', async () => {
     const clock = source()
     const offsets = [1700000000000, 1700000100000, 1700000000000, 1700000000000, 1700000000000]

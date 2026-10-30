@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from debatemeet.shared.application.errors import RoundBusyError
 from debatemeet.shared.application.ports import KeyClaim
 from debatemeet.shared.domain.events import DomainEvent
 
@@ -62,21 +63,27 @@ class PostgresCommandKeys:
             "request_hash": request_hash,
             "now": now,
         }
-        inserted = await self._connection.execute(
-            text("""INSERT INTO command_keys
-                (round_id, participant_id, key, request_hash, created_at)
-                VALUES (:round_id, :participant_id, :key, :request_hash, :now)
-                ON CONFLICT DO NOTHING RETURNING id"""),
-            values,
-        )
-        if inserted.scalar_one_or_none() is not None:
-            return KeyClaim.FIRST
-        existing = await self._connection.execute(
-            text("""SELECT request_hash FROM command_keys WHERE round_id = :round_id
-                AND participant_id IS NOT DISTINCT FROM :participant_id AND key = :key"""),
-            values,
-        )
-        return KeyClaim.REPEATED if existing.scalar_one() == request_hash else KeyClaim.CONFLICT
+        # Deletion or receipt maintenance may remove a conflicting row between statements.
+        # Retrying avoids a key row lock before the round lock (the inverse of deletion).
+        for _ in range(3):
+            inserted = await self._connection.execute(
+                text("""INSERT INTO command_keys
+                    (round_id, participant_id, key, request_hash, created_at)
+                    VALUES (:round_id, :participant_id, :key, :request_hash, :now)
+                    ON CONFLICT DO NOTHING RETURNING id"""),
+                values,
+            )
+            if inserted.scalar_one_or_none() is not None:
+                return KeyClaim.FIRST
+            existing = await self._connection.execute(
+                text("""SELECT request_hash FROM command_keys WHERE round_id = :round_id
+                    AND participant_id IS NOT DISTINCT FROM :participant_id AND key = :key"""),
+                values,
+            )
+            claimed_hash = existing.scalar_one_or_none()
+            if claimed_hash is not None:
+                return KeyClaim.REPEATED if claimed_hash == request_hash else KeyClaim.CONFLICT
+        raise RoundBusyError
 
 
 class PostgresEventLog:

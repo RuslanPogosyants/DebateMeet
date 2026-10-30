@@ -2,10 +2,15 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { routes } from '@/ui/routes'
 import { ServicesContext } from '@/ui/services'
 import { BOB, ROUND_ID, SELF, fixture, snapshot } from '../fixtures'
+
+// Route-loading behavior is covered separately; these cases exercise layout.
+beforeAll(async () => {
+  await import('@/ui/pages/round-page')
+})
 
 beforeEach(() => {
   vi.stubGlobal('RTCPeerConnection', vi.fn<() => void>())
@@ -48,6 +53,77 @@ async function meeting(value = snapshot()) {
 }
 
 describe('responsive meeting navigation', () => {
+  it('explains an unavailable display-capture API without affecting media controls', async () => {
+    viewport(1440, 900)
+    await meeting()
+    const share = screen.getByRole('button', { name: 'Демонстрировать экран' })
+    expect(share).toBeDisabled()
+    expect(share).toHaveAttribute('title', 'В этом браузере демонстрация экрана недоступна')
+    expect(share).toHaveAccessibleDescription('В этом браузере демонстрация экрана недоступна')
+    expect(screen.getByRole('button', { name: 'Микрофон выключен' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Камера выключена' })).toBeEnabled()
+  })
+
+  it.each([390, 1440])(
+    'keeps screen publication independent from microphone and camera at width %i',
+    async (width) => {
+      viewport(width, 900)
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: {
+          getUserMedia: vi.fn<MediaDevices['getUserMedia']>(),
+          getDisplayMedia: vi.fn<MediaDevices['getDisplayMedia']>(),
+        },
+      })
+      const { media, api } = await meeting()
+      const share = screen.getByRole('button', { name: 'Демонстрировать экран' })
+      expect(share).toBeEnabled()
+      await userEvent.click(share)
+      expect(share).toHaveAccessibleName('Остановить демонстрацию')
+      expect(share).toHaveAttribute('aria-pressed', 'true')
+      expect(media[0]?.screenChanges).toEqual([true])
+      await userEvent.click(share)
+      expect(share).toHaveAccessibleName('Демонстрировать экран')
+      expect(share).toHaveAttribute('aria-pressed', 'false')
+      expect(media[0]?.screenChanges).toEqual([true, false])
+      expect(media[0]?.cameraChanges).toEqual([])
+      expect(media[0]?.microphoneChanges).toEqual([])
+      expect(api.commands).toEqual([])
+    },
+  )
+
+  it('allows cancelling screen capture while its chooser is pending', async () => {
+    viewport(1440, 900)
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn<MediaDevices['getUserMedia']>(),
+        getDisplayMedia: vi.fn<MediaDevices['getDisplayMedia']>(),
+      },
+    })
+    const { media } = await meeting()
+    const session = media[0]
+    if (!session) throw new Error('Missing media')
+    let finish: (() => void) | undefined
+    const capture = vi.spyOn(session, 'screen').mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve
+      }),
+    )
+    const share = screen.getByRole('button', { name: 'Демонстрировать экран' })
+    await userEvent.click(share)
+    expect(share).toHaveAccessibleName('Отменить демонстрацию')
+    expect(share).toHaveAttribute('aria-busy', 'true')
+    await userEvent.click(share)
+    expect(capture.mock.calls).toEqual([[true], [false]])
+    await act(async () => {
+      finish?.()
+      await Promise.resolve()
+    })
+    expect(share).toHaveAccessibleName('Демонстрировать экран')
+    expect(share).toHaveAttribute('aria-busy', 'false')
+  })
+
   it.each([
     [1280, 720],
     [1600, 650],
@@ -89,7 +165,7 @@ describe('responsive meeting navigation', () => {
       expect(screen.queryByRole('button', { name: 'Перейти в OG' })).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Микрофон выключен' })).toBeVisible()
       expect(screen.getByRole('button', { name: 'Камера выключена' })).toBeVisible()
-      expect(screen.getByRole('button', { name: 'Выйти' })).toBeVisible()
+      expect(screen.getByRole('button', { name: 'Ещё' })).toBeVisible()
       const moved = snapshot(2)
       const person = moved.participants[0]
       if (!person) throw new Error('No participant')
@@ -135,8 +211,62 @@ describe('responsive meeting navigation', () => {
     expect(commands.mock.calls[0]?.[2]).toEqual({ type: 'recall', room: 'og' })
   })
 
-  it('opens implemented judge controls in their own narrow panel', async () => {
+  it('opens the complete paged roster from a compact room drawer without leaving the room', async () => {
     viewport(390, 844)
+    const value = snapshot()
+    const own = value.participants[0]
+    if (!own) throw new Error('Missing self')
+    own.presence.status = 'connected'
+    value.participants.push(
+      ...Array.from({ length: 9 }, (_, index) => ({
+        id: `p${String(index).padStart(11, '0')}`,
+        name: `Участник ${index + 1}`,
+        room: 'base' as const,
+        presence: { status: 'connected' as const, since: 1000 },
+        handRaisedAt: 1000 + index,
+      })),
+    )
+    const { api } = await meeting(value)
+    const commands = vi.spyOn(api, 'command')
+    const queue = screen.getByRole('button', { name: 'Очередь рук: 9' })
+    expect(screen.queryByRole('region', { name: 'Очередь рук' })).not.toBeInTheDocument()
+    await userEvent.click(queue)
+    const queueRoster = screen.getByRole('dialog', { name: 'Очередь рук' })
+    expect(within(queueRoster).getAllByRole('listitem')).toHaveLength(8)
+    await userEvent.click(
+      within(queueRoster).getByRole('button', { name: 'Следующая страница участников' }),
+    )
+    expect(within(queueRoster).getByText('Участник 9')).toBeVisible()
+    await userEvent.click(within(queueRoster).getByRole('button', { name: 'Закрыть' }))
+    expect(queue).toHaveFocus()
+    const rooms = screen.getByRole('button', { name: 'Комнаты' })
+    await userEvent.click(rooms)
+    const drawer = screen.getByRole('dialog', { name: 'Комнаты' })
+    const base = within(drawer).getByRole('region', { name: 'База' })
+    expect(within(base).getAllByRole('listitem')).toHaveLength(2)
+    const all = within(base).getByRole('button', { name: 'Все 10' })
+    await userEvent.click(all)
+    const roster = screen.getByRole('dialog', { name: 'База · участники' })
+    expect(within(roster).getAllByRole('listitem')).toHaveLength(8)
+    await userEvent.click(
+      within(roster).getByRole('button', { name: 'Следующая страница участников' }),
+    )
+    expect(within(roster).getByText('Участник 9')).toBeVisible()
+    fireEvent(roster, new Event('cancel', { bubbles: false, cancelable: true }))
+    expect(screen.queryByRole('dialog', { name: 'База · участники' })).not.toBeInTheDocument()
+    expect(all).toHaveFocus()
+    expect(drawer).toBeVisible()
+    fireEvent(drawer, new Event('cancel', { cancelable: true }))
+    expect(rooms).toHaveFocus()
+    expect(screen.getByRole('heading', { name: 'База' })).toBeVisible()
+    expect(commands).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [390, 844],
+    [1440, 900],
+  ])('opens implemented judge controls in their own panel at %i×%i', async (width, height) => {
+    viewport(width, height)
     const value = snapshot()
     value.judgeFlag.holder = SELF
     await meeting(value)
@@ -151,17 +281,36 @@ describe('responsive meeting navigation', () => {
     expect(trigger).toHaveFocus()
   })
 
-  it('keeps reactions, sound recovery and exit in the phone More sheet and restores keyboard focus', async () => {
-    viewport(390, 844)
-    const { api } = await meeting()
+  it.each([
+    [390, 844],
+    [720, 780],
+    [960, 650],
+    [1440, 900],
+  ])('keeps direct reactions and a single infrastructure menu at %i×%i', async (width, height) => {
+    viewport(width, height)
+    const value = snapshot()
+    const own = value.participants[0]
+    if (!own) throw new Error('Missing self')
+    own.presence.status = 'connected'
+    const { api } = await meeting(value)
     const more = screen.getByRole('button', { name: 'Ещё' })
+    expect(screen.queryByRole('button', { name: 'Звук и устройства' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Выйти' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Настройки' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Скопировать ссылку' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^Реакция — /u })).toHaveLength(5)
+    await userEvent.click(screen.getByRole('button', { name: 'Реакция — 👏' }))
+    expect(api.reactions).toEqual(['clap'])
     expect(screen.getByRole('button', { name: 'Поднять руку' })).toHaveAttribute(
       'aria-pressed',
       'false',
     )
     await userEvent.click(more)
     const drawer = screen.getByRole('dialog', { name: 'Ещё' })
-    expect(within(drawer).getAllByRole('button', { name: /^Реакция — /u })).toHaveLength(5)
+    expect(within(drawer).queryByRole('button', { name: /^Реакция — /u })).not.toBeInTheDocument()
+    expect(within(drawer).getByRole('button', { name: 'Скопировать ссылку' })).toBeEnabled()
+    expect(within(drawer).getByRole('button', { name: 'Диагностика' })).toBeEnabled()
+    expect(within(drawer).getByRole('button', { name: 'Сообщить о проблеме' })).toBeEnabled()
     expect(within(drawer).getByRole('checkbox', { name: 'Скрыть реакции' })).toBeEnabled()
     expect(within(drawer).getByRole('button', { name: 'Звук и устройства' })).toBeEnabled()
     expect(within(drawer).getByRole('button', { name: 'Выйти' })).toBeEnabled()
@@ -177,7 +326,159 @@ describe('responsive meeting navigation', () => {
     expect(api.leaves).toEqual(['PA_local'])
   })
 
-  it('adds hands after the judge timer controls while retaining the pinned timer outside the scrolling content', async () => {
+  it('opens diagnostics and reports through More, with one dialog and focus returning to its trigger', async () => {
+    viewport(1440, 900)
+    await meeting()
+    const more = screen.getByRole('button', { name: 'Ещё' })
+    expect(screen.queryByRole('button', { name: 'Диагностика' })).not.toBeInTheDocument()
+    for (const title of ['Диагностика', 'Сообщить о проблеме']) {
+      await userEvent.click(more)
+      await userEvent.click(screen.getByRole('button', { name: title }))
+      const dialog = screen.getByRole('dialog', { name: title })
+      expect(screen.getAllByRole('dialog')).toHaveLength(1)
+      fireEvent(dialog, new Event('cancel', { cancelable: true }))
+      expect(more).toHaveFocus()
+    }
+  })
+
+  it.each([false, true])(
+    'opens diagnostics by shortcut with More initially open=%s',
+    async (menuOpen) => {
+      viewport(1440, 900)
+      await meeting()
+      const more = screen.getByRole('button', { name: 'Ещё' })
+      if (menuOpen) await userEvent.click(more)
+      fireEvent.keyDown(window, { key: 'D', ctrlKey: true, shiftKey: true })
+      const diagnostics = screen.getByRole('dialog', { name: 'Диагностика' })
+      expect(screen.getAllByRole('dialog')).toHaveLength(1)
+      fireEvent(diagnostics, new Event('cancel', { bubbles: false, cancelable: true }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(more).toHaveFocus()
+    },
+  )
+
+  it('retains judge exit confirmation after closing the infrastructure menu', async () => {
+    viewport(1440, 900)
+    const value = snapshot()
+    value.judgeFlag.holder = SELF
+    const { api } = await meeting(value)
+    const more = screen.getByRole('button', { name: 'Ещё' })
+    await userEvent.click(more)
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Ещё' })).getByRole('button', { name: 'Выйти' }),
+    )
+    const confirm = screen.getByRole('dialog', { name: 'Выйти из раунда?' })
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(within(confirm).getByRole('button', { name: 'Отмена' })).toHaveFocus()
+    expect(api.leaves).toEqual([])
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Отмена' }))
+    expect(more).toHaveFocus()
+    expect(api.leaves).toEqual([])
+    await userEvent.click(more)
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Ещё' })).getByRole('button', { name: 'Выйти' }),
+    )
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Выйти из раунда?' })).getByRole('button', {
+        name: 'Выйти',
+      }),
+    )
+    expect(await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })).toBeVisible()
+    expect(api.leaves).toEqual(['PA_local'])
+  })
+
+  it('keeps people from other rooms off the scene before and after moving', async () => {
+    viewport(1440, 900)
+    const value = snapshot()
+    value.participants.push({
+      id: BOB,
+      name: 'Борис',
+      room: 'og',
+      presence: { status: 'connected', since: 1000 },
+      handRaisedAt: null,
+    })
+    const { media } = await meeting(value)
+    act(() =>
+      media[0]?.events?.people([
+        { id: SELF, microphone: true, camera: true, speaking: true },
+        { id: BOB, microphone: true, camera: true, speaking: true },
+      ]),
+    )
+    expect(screen.queryByRole('article', { name: 'Борис' })).not.toBeInTheDocument()
+    expect(screen.getByRole('article', { name: 'Вика' })).toHaveAttribute('data-speaking', 'true')
+    expect(
+      within(screen.getByRole('complementary', { name: 'Комнаты' })).queryByLabelText('говорит'),
+    ).not.toBeInTheDocument()
+    const moved = structuredClone(value)
+    moved.version++
+    const movedSelf = moved.participants[0]
+    if (!movedSelf) throw new Error('Missing self')
+    movedSelf.room = 'oo'
+    await act(async () => {
+      media[0]?.events?.snapshot(structuredClone(moved))
+      await Promise.resolve()
+    })
+    expect(screen.queryByRole('article', { name: 'Борис' })).not.toBeInTheDocument()
+    moved.version++
+    const movedBob = moved.participants[1]
+    if (!movedBob) throw new Error('Missing Bob')
+    movedBob.room = 'oo'
+    await act(async () => {
+      media[0]?.events?.snapshot(structuredClone(moved))
+      await Promise.resolve()
+    })
+    expect(await screen.findByRole('article', { name: 'Борис' })).toBeVisible()
+  })
+
+  it('keeps the device sheet and its trigger stable through a server room change', async () => {
+    viewport(1440, 900)
+    const { media } = await meeting()
+    const more = screen.getByRole('button', { name: 'Ещё' })
+    await userEvent.click(more)
+    const parent = screen.getByRole('dialog', { name: 'Ещё' })
+    const trigger = within(parent).getByRole('button', { name: 'Звук и устройства' })
+    await userEvent.click(trigger)
+    const panel = screen.getByRole('dialog', { name: 'Звук и устройства' })
+    const moved = snapshot(2)
+    const own = moved.participants[0]
+    if (!own) throw new Error('Missing self')
+    own.room = 'og'
+    await act(async () => {
+      media[0]?.events?.snapshot(moved)
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('dialog', { name: 'Звук и устройства' })).toBe(panel)
+    expect(trigger.isConnected).toBe(true)
+    await userEvent.click(within(panel).getByRole('button', { name: 'Закрыть' }))
+    expect(trigger).toHaveFocus()
+    expect(screen.getByRole('dialog', { name: 'Ещё' })).toBe(parent)
+    fireEvent(parent, new Event('cancel', { bubbles: false, cancelable: true }))
+    expect(more).toHaveFocus()
+    expect(await screen.findByRole('heading', { name: 'OG' })).toBeVisible()
+  })
+
+  it('collapses the desktop sidebar and restores the draft and focus when reopened', async () => {
+    viewport(1440, 900)
+    await meeting()
+    await userEvent.type(
+      screen.getByRole('textbox', { name: 'Сообщение в общий чат' }),
+      'Сохранить черновик',
+    )
+    const toggle = screen.getByRole('button', { name: /^Чат$/u })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(screen.getByRole('button', { name: 'Свернуть чат' }))
+    expect(toggle).toHaveFocus()
+    expect(screen.queryByRole('textbox', { name: 'Сообщение в общий чат' })).not.toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(toggle)
+    expect(screen.getByRole('textbox', { name: 'Сообщение в общий чат' })).toHaveValue(
+      'Сохранить черновик',
+    )
+    await userEvent.click(screen.getByRole('tab', { name: 'Жребий' }))
+    expect(screen.getByRole('tabpanel', { name: 'Жребий' })).toBeVisible()
+  })
+
+  it('keeps the only timer in the main screen and puts judge hand actions in the sheet', async () => {
     viewport(390, 844)
     const value = snapshot()
     value.judgeFlag.holder = SELF
@@ -194,9 +495,8 @@ describe('responsive meeting navigation', () => {
     const hands = within(drawer).getByRole('region', { name: 'Руки и микрофоны' })
     expect(within(hands).getByRole('button', { name: 'Опустить все руки' })).toBeEnabled()
     const pinned = drawer.querySelector('.sheet-pinned')
-    expect(pinned).not.toBeNull()
-    expect(pinned).toHaveTextContent('Речь')
-    expect(pinned?.contains(hands)).toBe(false)
+    expect(pinned).toBeNull()
+    expect(within(drawer).queryByRole('timer')).not.toBeInTheDocument()
   })
 
   it('preserves the open chat draft and focus when social packets arrive', async () => {
@@ -206,7 +506,11 @@ describe('responsive meeting navigation', () => {
     if (!own) throw new Error('Missing participant')
     own.presence.status = 'connected'
     const { media } = await meeting(value)
-    await userEvent.click(screen.getByText('Чат', { selector: '.phone-chat-button' }))
+    const chatTrigger = screen
+      .getAllByRole('button', { name: /^Чат$/u })
+      .find((button) => button.classList.contains('chat-toggle'))
+    if (!chatTrigger) throw new Error('Missing chat trigger')
+    await userEvent.click(chatTrigger)
     const chat = screen.getByRole('dialog', { name: 'Общий чат' })
     const draft = within(chat).getByRole('textbox', { name: 'Сообщение в общий чат' })
     await userEvent.type(draft, 'Продолжаю писать')

@@ -123,11 +123,12 @@ def test_the_largest_snapshot_fits_a_data_packet() -> None:
     round_.version = JS_MAX_SAFE_INTEGER
     round_.motion = Motion('\\"' * 150, '\\"' * 750)
     round_.drum = Drum(
+        enabled=tuple(Position),
         drawn=tuple(
-            DrawnPosition(position, JS_MAX_SAFE_INTEGER - 3 + index)
+            DrawnPosition(position, JS_MAX_SAFE_INTEGER - len(Position) + 1 + index)
             for index, position in enumerate(Position)
         ),
-        last=DrawResult(Position.CO, JS_MAX_SAFE_INTEGER, datetime.max.replace(tzinfo=UTC)),
+        last=DrawResult(tuple(Position)[-1], JS_MAX_SAFE_INTEGER, datetime.max.replace(tzinfo=UTC)),
         draw_count=JS_MAX_SAFE_INTEGER,
     )
     round_.prep_timer = Timer(1800000, TimerStatus.PAUSED, None, -JS_MAX_SAFE_INTEGER)

@@ -1,4 +1,5 @@
 import type { ClientClock, RoundApi } from './ports'
+import type { DiagnosticClock } from '@/domain/diagnostics'
 
 export type ClockState = {
   synchronized: boolean
@@ -20,6 +21,7 @@ export class ClockSync {
   private active = true
   private generation = 0
   private pending: Promise<void> | null = null
+  private lastSuccess: number | null = null
   private readonly api: Pick<RoundApi, 'time'>
   private readonly clock: ClientClock
   private readonly changed: () => void
@@ -35,6 +37,7 @@ export class ClockSync {
     return this.clock.now() + this.offset
   }
   activate(): void {
+    if (!this.active) this.state.synchronized = false
     this.active = true
   }
 
@@ -43,6 +46,38 @@ export class ClockSync {
     ++this.generation
     this.pending = null
     this.state.syncing = false
+    this.state.synchronized = false
+  }
+
+  invalidate(): void {
+    this.close()
+    this.state.degraded = true
+    this.activate()
+    this.changed()
+  }
+
+  diagnostic(): DiagnosticClock {
+    return {
+      synchronized: this.state.synchronized,
+      degraded: this.state.degraded,
+      ageMs:
+        this.lastSuccess === null
+          ? null
+          : Math.min(604800000, Math.max(0, this.clock.now() - this.lastSuccess)),
+      uncertaintyMs:
+        this.state.uncertaintyMs === null ? null : Math.min(86400000, this.state.uncertaintyMs),
+    }
+  }
+
+  usable(): boolean {
+    const state = this.diagnostic()
+    return (
+      this.active &&
+      state.synchronized &&
+      !state.degraded &&
+      state.ageMs !== null &&
+      state.ageMs <= 60000
+    )
   }
 
   sync(): Promise<void> {
@@ -79,6 +114,7 @@ export class ClockSync {
       this.offset = median.offset
       this.state.synchronized = true
       this.state.degraded = false
+      this.lastSuccess = this.clock.now()
       // The observed envelope includes both RTT and offset disagreement, not a WAN guarantee.
       this.state.uncertaintyMs = Math.max(
         ...samples.map((sample) => sample.roundTrip / 2 + Math.abs(sample.offset - median.offset)),

@@ -1,18 +1,20 @@
-import { useState } from 'react'
+import { ControlIcon } from './control-icon'
+import { useId, useState } from 'react'
 import { useStore } from 'zustand'
 import type { RoundController } from '@/application/round-controller'
 import type { LogicalRoom, RoundCommand, SubRoom } from '@/application/ports'
 import { handQueue } from '@/domain/social'
 import { ConfirmDialog } from './confirm-dialog'
 import { Sheet } from './sheet'
-import { TimerControls, TimerReadouts } from './round-timers'
+import { ParticipantRoster } from './participant-roster'
 import { DrumPanel } from './round-drum'
 import { MotionEditorButton } from './round-motion'
-import { HandBadge, JudgeSocialPanel, ParticipantActions } from './round-social'
+import { JudgeSocialPanel } from './round-social'
 import type { MeetingLayout } from '@/ui/use-meeting-layout'
 import {
   enterRoom,
   flagReleased,
+  handPosition,
   recallRoom,
   recallSummary,
   roomDescriptions,
@@ -31,6 +33,8 @@ export function RoomMap({
 }) {
   const state = useStore(controller.store)
   const [recall, setRecall] = useState<SubRoom | 'all' | null>(null)
+  const [roster, setRoster] = useState<LogicalRoom | null>(null)
+  const handSummaryId = useId()
   const current = state.snapshot?.participants.find((person) => person.id === state.self)?.room
   const judge = state.self !== null && state.snapshot?.judgeFlag.holder === state.self
   const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
@@ -55,6 +59,9 @@ export function RoomMap({
         {rooms.map((room) => {
           const people = state.snapshot?.participants.filter((person) => person.room === room) ?? []
           const queue = state.snapshot ? handQueue(state.snapshot, room) : []
+          const hiddenHands = queue.filter(
+            (person) => !people.slice(0, 2).some((visible) => visible.id === person.id),
+          ).length
           return (
             <section
               key={room}
@@ -91,36 +98,70 @@ export function RoomMap({
               </div>
               {people.length > 0 && (
                 <ul>
-                  {people.map((person) => {
+                  {people.slice(0, 2).map((person) => {
+                    const hand = queue.findIndex((raised) => raised.id === person.id) + 1
                     const media = state.people.find((connected) => connected.id === person.id)
+                    const microphoneLabel = media
+                      ? media.microphone
+                        ? strings.round.microphoneOn
+                        : strings.round.microphoneOff
+                      : strings.round.noConnection
                     return (
                       <li key={person.id}>
-                        <HandBadge
-                          position={queue.findIndex((raised) => raised.id === person.id) + 1}
-                        />{' '}
-                        {media?.speaking && (
-                          <span className="speaker-dash" aria-label="говорит">
-                            —{' '}
-                          </span>
-                        )}
-                        {person.name}
-                        {person.id === state.self && (
-                          <span className="text-caption"> · {strings.round.you}</span>
-                        )}
-                        <ParticipantActions controller={controller} participant={person} />
-                        <span className="room-person-state">
-                          {state.snapshot?.judgeFlag.holder === person.id &&
-                            `${strings.round.judge} · `}
-                          {media
-                            ? !media.microphone
-                              ? strings.round.microphoneOff
-                              : ''
-                            : strings.round.noConnection}
+                        <span className="room-person-name">
+                          {hand > 0 && (
+                            <span
+                              className="room-hand-badge"
+                              role="img"
+                              aria-label={handPosition(hand)}
+                              title={handPosition(hand)}
+                            >
+                              <ControlIcon kind="hand" /> {hand}
+                            </span>
+                          )}
+                          {person.name}
+                          {person.id === state.self && (
+                            <span className="text-caption"> · {strings.round.you}</span>
+                          )}
+                        </span>
+                        <span
+                          className="room-person-microphone"
+                          role="img"
+                          aria-label={microphoneLabel}
+                          title={microphoneLabel}
+                        >
+                          {media ? <ControlIcon kind="microphone" off={!media.microphone} /> : '—'}
                         </span>
                       </li>
                     )
                   })}
                 </ul>
+              )}
+              {people.length > 2 && (
+                <button
+                  className="text-link room-roster"
+                  type="button"
+                  aria-label={`Все ${people.length}`}
+                  aria-describedby={hiddenHands > 0 ? `${handSummaryId}-${room}` : undefined}
+                  onClick={() => setRoster(room)}
+                >
+                  Все {people.length}
+                  {hiddenHands > 0 && (
+                    <>
+                      <span
+                        className="room-hand-summary"
+                        role="img"
+                        aria-label={`Поднятых рук среди остальных: ${hiddenHands}`}
+                        title={`Поднятых рук среди остальных: ${hiddenHands}`}
+                      >
+                        <ControlIcon kind="hand" /> {hiddenHands}
+                      </span>
+                      <span className="sr-only" id={`${handSummaryId}-${room}`}>
+                        Поднятых рук среди остальных: {hiddenHands}
+                      </span>
+                    </>
+                  )}
+                </button>
               )}
               {people.length === 0 && (
                 <p className="room-description text-caption">{roomDescriptions[room]}</p>
@@ -140,6 +181,16 @@ export function RoomMap({
           )
         })}
       </div>
+      {roster !== null && (
+        <ParticipantRoster
+          controller={controller}
+          participants={
+            state.snapshot?.participants.filter((person) => person.room === roster) ?? []
+          }
+          title={`${roomNames[roster]} · участники`}
+          onClose={() => setRoster(null)}
+        />
+      )}
       {recall !== null && (
         <RecallConfirmation controller={controller} room={recall} onClose={() => setRecall(null)} />
       )}
@@ -281,11 +332,13 @@ export function JudgeControl({
   leaveAfter = false,
   onClose,
   panel = false,
+  compact = false,
 }: {
   controller: RoundController
   leaveAfter?: boolean
   onClose?: () => void
   panel?: boolean
+  compact?: boolean
 }) {
   const state = useStore(controller.store)
   const [dialog, setDialog] = useState<'claim' | 'handover' | null>(leaveAfter ? 'handover' : null)
@@ -300,68 +353,84 @@ export function JudgeControl({
     state.snapshot?.participants.filter(
       (person) => person.id !== state.self && state.people.some((media) => media.id === person.id),
     ) ?? []
+  const claimLabel =
+    flag?.lastHolder?.id === state.self ? strings.round.reclaimJudge : strings.round.becomeJudge
+  const flagStatus =
+    flag?.releasedReason === 'holder_disconnected' && flag.lastHolder
+      ? flagReleased(flag.lastHolder.name)
+      : strings.round.noJudge
   function close() {
     setDialog(null)
     onClose?.()
   }
   return (
-    <div className="judge-control" aria-live="polite">
+    <div className={`judge-control${compact ? ' judge-control-compact' : ''}`} aria-live="polite">
       {!leaveAfter &&
         (flag?.holder ? (
           self ? (
             panel ? (
               <button
-                className="action-primary"
+                className="action icon-control judge-panel-trigger"
                 type="button"
+                aria-label={strings.round.youJudge}
+                title={strings.round.youJudge}
                 aria-expanded={panelOpen}
                 onClick={() => setPanelOpen(true)}
               >
-                {strings.round.youJudge}
+                <ControlIcon kind="flag" />
               </button>
             ) : (
               <>
                 <p className="font-medium">{strings.round.youJudge}</p>
                 <button
-                  className="action-primary"
+                  className="action icon-control"
                   type="button"
+                  aria-label={strings.round.handOver}
+                  title={strings.round.handOver}
                   disabled={busy}
                   onClick={() => setDialog('handover')}
                 >
-                  {strings.round.handOver}
+                  <ControlIcon kind="flag-transfer" />
                 </button>
                 <button
-                  className="text-link"
+                  className="action icon-control"
                   type="button"
+                  aria-label={strings.round.releaseJudge}
+                  title={strings.round.releaseJudge}
                   disabled={busy}
                   onClick={() => {
                     void controller.command({ type: 'judge/release' })
                   }}
                 >
-                  {strings.round.releaseJudge}
+                  <ControlIcon kind="flag" off />
                 </button>
               </>
             )
           ) : (
-            <p>
+            <p className={compact ? 'judge-holder-status' : undefined}>
               {strings.round.judge} — {holder?.name}
             </p>
           )
         ) : (
           <>
-            <p>
+            <p
+              className={compact ? 'sr-only' : undefined}
+              title={flagStatus}
+              aria-label={flagStatus}
+            >
               {flag?.releasedReason === 'holder_disconnected' && flag.lastHolder
-                ? flagReleased(flag.lastHolder.name)
+                ? strings.round.flagAvailable
                 : strings.round.noJudge}
             </p>
             <button
-              className="action"
+              className="action icon-control"
               type="button"
+              aria-label={claimLabel}
+              title={compact ? `${claimLabel}. ${flagStatus}` : claimLabel}
               disabled={busy}
               onClick={() => setDialog('claim')}
             >
-              {flag?.lastHolder?.id === state.self
-                ? strings.round.reclaimJudge
-                : strings.round.becomeJudge}
+              <ControlIcon kind="flag" />
             </button>
           </>
         ))}
@@ -370,9 +439,7 @@ export function JudgeControl({
           title={strings.round.youJudge}
           closeLabel={strings.round.closeJudge}
           onClose={() => setPanelOpen(false)}
-          pinned={<TimerReadouts controller={controller} />}
         >
-          <TimerControls controller={controller} />
           <JudgeSocialPanel controller={controller} />
           <DrumPanel controller={controller} />
           <MotionEditorButton controller={controller} />

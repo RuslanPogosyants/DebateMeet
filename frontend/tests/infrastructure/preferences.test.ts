@@ -7,7 +7,7 @@ afterEach(() => {
 })
 
 describe('local preferences', () => {
-  it('scopes volume by round and identity, caps it at 100 percent and retains it without storage', () => {
+  it('scopes volume by round and identity, caps it at 200 percent and retains it without storage', () => {
     vi.stubGlobal('localStorage', {
       getItem: () => {
         throw new Error('blocked')
@@ -19,16 +19,27 @@ describe('local preferences', () => {
     const preferences = new BrowserPreferences()
     preferences.setVolume(ROUND_ID, BOB, 0.5)
     preferences.setReactionsHidden(true)
+    preferences.setSceneLayout('grid')
+    preferences.setSelfVisible(false)
     expect(preferences.volume(ROUND_ID, BOB)).toBe(0.5)
     expect(preferences.volume(ROUND_ID, SELF)).toBe(1)
     expect(preferences.volume('x'.repeat(22), BOB)).toBe(1)
     expect(preferences.reactionsHidden()).toBe(true)
+    expect(preferences.sceneLayout()).toBe('grid')
+    expect(preferences.selfVisible()).toBe(false)
     preferences.setVolume(ROUND_ID, BOB, 200)
-    expect(preferences.volume(ROUND_ID, BOB)).toBe(1)
+    expect(preferences.volume(ROUND_ID, BOB)).toBe(2)
     preferences.setVolume(ROUND_ID, BOB, -1)
     expect(preferences.volume(ROUND_ID, BOB)).toBe(0)
     preferences.setVolume(ROUND_ID, BOB, Infinity)
     expect(preferences.volume(ROUND_ID, BOB)).toBe(0)
+  })
+
+  it('reads existing volume keys with amplification and keeps the 200 percent bound', () => {
+    vi.stubGlobal('localStorage', { getItem: () => '1.75' })
+    expect(new BrowserPreferences().volume(ROUND_ID, BOB)).toBe(1.75)
+    vi.stubGlobal('localStorage', { getItem: () => '9' })
+    expect(new BrowserPreferences().volume(ROUND_ID, BOB)).toBe(2)
   })
 
   it.each(['NaN', 'Infinity', 'false', 'null', '{}', '', ' '])(
@@ -72,5 +83,7 @@ describe('local preferences', () => {
     const preferences = new BrowserPreferences()
     expect(preferences.credentials(ROUND_ID)).toBeNull()
     expect(preferences.recent()).toEqual([])
+    expect(preferences.sceneLayout()).toBe('speaker')
+    expect(preferences.selfVisible()).toBe(true)
   })
 })

@@ -1,11 +1,11 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useStore } from 'zustand'
 import type { RoundController } from '@/application/round-controller'
 import { normalizeText } from '@/domain/chat'
 import { plainText } from '@/domain/snapshot'
 import { ConfirmDialog } from './confirm-dialog'
 import { Sheet } from './sheet'
-import { contentStrings as s } from '@/ui/strings'
+import { contentStrings as s, errorText, strings } from '@/ui/strings'
 
 export function MotionEditorButton({ controller }: { controller: RoundController }) {
   const state = useStore(controller.store)
@@ -25,6 +25,7 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
   const state = useStore(controller.store)
   const [text, setText] = useState(state.snapshot?.motion.text ?? '')
   const [infoslide, setInfoslide] = useState(state.snapshot?.motion.infoslide ?? '')
+  const [submitted, setSubmitted] = useState<{ text: string; infoslide: string } | null>(null)
   const id = useId()
   const normalizedText = normalizeText(text)
   const normalizedInfo = normalizeText(infoslide)
@@ -34,6 +35,18 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
     state.commandUncertain ||
     state.stage !== 'connected' ||
     state.snapshot?.judgeFlag.holder !== state.self
+  const motion = state.snapshot?.motion
+  useEffect(() => {
+    if (
+      submitted !== null &&
+      !state.commandPending &&
+      !state.commandUncertain &&
+      state.error === null &&
+      motion?.text === submitted.text &&
+      motion.infoslide === submitted.infoslide
+    )
+      close()
+  }, [close, motion, state.commandPending, state.commandUncertain, state.error, submitted])
   return (
     <ConfirmDialog
       title={s.editMotion}
@@ -41,7 +54,7 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
       onCancel={close}
       disabled={!valid || busy}
       onConfirm={() => {
-        close()
+        setSubmitted({ text: normalizedText, infoslide: normalizedInfo })
         void controller.command({ type: 'motion', text: normalizedText, infoslide: normalizedInfo })
       }}
     >
@@ -49,6 +62,7 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
       <textarea
         id={`${id}-text`}
         value={text}
+        disabled={state.commandPending || state.commandUncertain}
         onChange={(event) => setText(event.target.value)}
         aria-describedby={`${id}-text-count`}
       />
@@ -60,6 +74,7 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
       <textarea
         id={`${id}-info`}
         value={infoslide}
+        disabled={state.commandPending || state.commandUncertain}
         onChange={(event) => setInfoslide(event.target.value)}
         aria-describedby={`${id}-info-count`}
       />
@@ -68,6 +83,26 @@ function MotionEditor({ controller, close }: { controller: RoundController; clos
         /3000 UTF-8
       </p>
       {!valid && <p role="alert">{s.invalidMotion}</p>}
+      {submitted !== null && state.error !== null && (
+        <div role="alert">
+          <p>{errorText(state.error)}</p>
+          {state.commandUncertain && (
+            <>
+              <p>{strings.round.uncertain}</p>
+              <button
+                className="text-link"
+                type="button"
+                disabled={state.commandPending || state.stage !== 'connected'}
+                onClick={() => {
+                  void controller.retryCommand()
+                }}
+              >
+                {strings.round.retryCommand}
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </ConfirmDialog>
   )
 }
@@ -80,28 +115,32 @@ export function MotionDisplay({
   editable: boolean
 }) {
   const motion = useStore(controller.store, (state) => state.snapshot?.motion)
-  const [view, setView] = useState<'motion' | 'info' | null>(null)
+  const fullMotion = motion?.text ?? ''
+  const [open, setOpen] = useState(false)
   return (
     <section className="motion-heading" aria-label={s.motion}>
       <p className="motion-text font-display text-title font-medium" data-testid="motion-text">
-        {motion?.text ? `«${motion.text}»` : s.motionEmpty}
+        {motion?.text ? `${s.motion}: ${motion.text}` : s.motionEmpty}
       </p>
       <div className="motion-actions">
-        {motion?.text && (
-          <button className="text-link motion-full" type="button" onClick={() => setView('motion')}>
+        {(Boolean(motion?.text) || Boolean(motion?.infoslide)) && (
+          <button className="text-link motion-full" type="button" onClick={() => setOpen(true)}>
             {s.fullMotion}
-          </button>
-        )}
-        {motion?.infoslide && (
-          <button className="text-link" type="button" onClick={() => setView('info')}>
-            {s.infoslide}
           </button>
         )}
         {editable && <MotionEditorButton controller={controller} />}
       </div>
-      {view !== null && (
-        <Sheet title={view === 'motion' ? s.motion : s.infoslide} onClose={() => setView(null)}>
-          <p className="plain-text">{view === 'motion' ? motion?.text : motion?.infoslide}</p>
+      {open && (
+        <Sheet title={s.motion} onClose={() => setOpen(false)}>
+          <div className="motion-full-content">
+            <p className="plain-text">{fullMotion.length > 0 ? fullMotion : s.motionEmpty}</p>
+            {motion?.infoslide && (
+              <section>
+                <h3 className="text-caption font-medium">{s.infoslide}</h3>
+                <p className="plain-text">{motion.infoslide}</p>
+              </section>
+            )}
+          </div>
         </Sheet>
       )}
     </section>

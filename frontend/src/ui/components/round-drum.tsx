@@ -5,7 +5,27 @@ import type { Position } from '@/application/ports'
 import { ConfirmDialog } from './confirm-dialog'
 import { contentStrings as s } from '@/ui/strings'
 
-const positions: Position[] = ['og', 'oo', 'cg', 'co']
+const teamPositions: readonly Position[] = ['og', 'oo', 'cg', 'co']
+const speakerPositions: readonly Position[] = [
+  'og1',
+  'og2',
+  'oo1',
+  'oo2',
+  'cg1',
+  'cg2',
+  'co1',
+  'co2',
+]
+
+function displayedPositions(enabled: readonly Position[]): readonly Position[] {
+  const speakers = enabled.some((position) => speakerPositions.includes(position))
+  const teams = enabled.some((position) => teamPositions.includes(position))
+  return speakers
+    ? teams
+      ? [...teamPositions, ...speakerPositions]
+      : speakerPositions
+    : teamPositions
+}
 
 export function DrumPanel({
   controller,
@@ -31,6 +51,7 @@ export function DrumPanel({
     return () => clearTimeout(timer)
   }, [lastNo])
   if (drum === undefined) return null
+  const positions = displayedPositions(drum.enabled)
   const available = drum.enabled.filter(
     (position) => !drum.removeDrawn || !drum.drawn.some((drawn) => drawn.position === position),
   )
@@ -157,6 +178,9 @@ function DrumConfiguration({
 }) {
   const state = useStore(controller.store)
   const [enabled, setEnabled] = useState(state.snapshot?.drum.enabled ?? [])
+  const [positions, setPositions] = useState(() =>
+    displayedPositions(state.snapshot?.drum.enabled ?? []),
+  )
   const [removeDrawn, setRemoveDrawn] = useState(state.snapshot?.drum.removeDrawn ?? true)
   const id = useId()
   return (
@@ -175,7 +199,31 @@ function DrumConfiguration({
         void controller.command({ type: 'drum/configure', enabled, removeDrawn })
       }}
     >
-      <fieldset>
+      <div className="drum-presets" role="group" aria-label="Формат жребия">
+        {(
+          [
+            ['4 команды', teamPositions],
+            ['8 спикеров', speakerPositions],
+          ] as const
+        ).map(([label, preset]) => (
+          <button
+            className="action"
+            type="button"
+            key={label}
+            aria-pressed={positions === preset}
+            onClick={() => {
+              setPositions(preset)
+              setEnabled([...preset])
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="drum-selection-count" aria-live="polite">
+        Включено {enabled.length} из {positions.length}
+      </p>
+      <fieldset className="drum-configuration-positions">
         <legend>{s.enabledPositions}</legend>
         {positions.map((position) => (
           <label className="check-row" key={position}>

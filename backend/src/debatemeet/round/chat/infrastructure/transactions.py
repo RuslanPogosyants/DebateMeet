@@ -29,17 +29,12 @@ from debatemeet.round.chat.infrastructure.postgres import _epoch, _message
 from debatemeet.shared.application.errors import NotFoundError
 from debatemeet.shared.application.ports import ADMIN, SYSTEM
 from debatemeet.shared.infrastructure.database import command_transaction
+from debatemeet.shared.infrastructure.lifecycle import acquire_round_lifecycle
 from debatemeet.shared.infrastructure.persistence import PostgresCommandKeys, PostgresEventLog
-
-CHAT_NAMESPACE = 1145917526
 
 
 async def prepare_chat(connection: AsyncConnection, round_id: RoundId) -> None:
-    # Two-int advisory locks occupy a different keyspace from the publisher's bigint lock.
-    await connection.execute(
-        text("SELECT pg_advisory_xact_lock(:namespace, hashtext(:round_id))"),
-        {"namespace": CHAT_NAMESPACE, "round_id": round_id},
-    )
+    await acquire_round_lifecycle(connection, round_id)
     if (
         await connection.scalar(
             text("SELECT 1 FROM rounds WHERE id=:round_id"), {"round_id": round_id}
@@ -266,7 +261,8 @@ class PostgresSystemMessages:
         if round_id not in self._prepared:
             raise RuntimeError("system messages require the chat guard before the Round lock")
         if (
-            position not in {"og", "oo", "cg", "co"}
+            position
+            not in {"og", "oo", "cg", "co", "og1", "og2", "oo1", "oo2", "cg1", "cg2", "co1", "co2"}
             or type(draw_no) is not int
             or not 1 <= draw_no <= 9007199254740991
         ):
