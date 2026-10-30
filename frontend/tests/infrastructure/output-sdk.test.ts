@@ -41,7 +41,7 @@ describe('installed LiveKit ESM audio output patch', () => {
     expect(entry).toMatch(/\/dist\/livekit-client\.esm\.mjs$/u)
     const manifest: unknown = JSON.parse(readFileSync(new URL('../package.json', entry), 'utf8'))
     expect(manifest).toMatchObject({
-      version: '2.22.3',
+      version: '2.23.0',
       exports: { '.': { import: './dist/livekit-client.esm.mjs' } },
     })
   })

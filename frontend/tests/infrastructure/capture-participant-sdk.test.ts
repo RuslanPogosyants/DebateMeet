@@ -224,6 +224,62 @@ function setup() {
 }
 
 describe('installed ESM participant capture lifecycle', () => {
+  it('stops acquired microphone capture when audio-context adoption rejects', async () => {
+    const fixture = setup()
+    const failure = new Error('Audio context was closed')
+    vi.spyOn(LocalAudioTrack.prototype, 'setAudioContext').mockRejectedValueOnce(failure)
+
+    await expect(fixture.toggle('audio', true)).rejects.toBe(failure)
+    expect(tracks.size).toBe(1)
+    tracks.forEach(disabled)
+    expect(fixture.sender).not.toHaveBeenCalled()
+  })
+
+  it('stops microphone capture immediately when off supersedes pending audio-context adoption', async () => {
+    const fixture = setup()
+    const adopted = barrier<void>()
+    const adoption = vi
+      .spyOn(LocalAudioTrack.prototype, 'setAudioContext')
+      .mockImplementationOnce(() => adopted.promise)
+    const enabling = fixture.toggle('audio', true)
+    let off = Promise.resolve()
+    try {
+      await vi.waitFor(() => expect(adoption).toHaveBeenCalledOnce())
+      const captured = [...tracks][0]
+      if (!captured) throw new Error('Missing acquired microphone track')
+      off = fixture.toggle('audio', false)
+      disabled(captured)
+      expect(fixture.sender).not.toHaveBeenCalled()
+    } finally {
+      adopted.release()
+      await Promise.all([enabling, off])
+    }
+    expect(fixture.sender).not.toHaveBeenCalled()
+  })
+
+  it('waits for audio-context adoption before returning captured microphone tracks', async () => {
+    const { participant } = setup()
+    const adopted = barrier<void>()
+    const adoption = vi
+      .spyOn(LocalAudioTrack.prototype, 'setAudioContext')
+      .mockImplementationOnce(() => adopted.promise)
+    const finished = vi.fn<() => void>()
+    const creating = participant.createTracks({ audio: true }).then((captured) => {
+      finished()
+      return captured
+    })
+    try {
+      await vi.waitFor(() => expect(adoption).toHaveBeenCalledOnce())
+      expect(finished).not.toHaveBeenCalled()
+    } finally {
+      adopted.release()
+    }
+    const captured = await creating
+    expect(finished).toHaveBeenCalledOnce()
+    expect(captured).toHaveLength(1)
+    captured.forEach((track) => track.stop())
+  })
+
   it.each(['audio', 'video'] as const)(
     'does not publish initial %s capture after off or close',
     async (kind) => {

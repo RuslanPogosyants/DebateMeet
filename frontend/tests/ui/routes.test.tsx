@@ -1,11 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { routes } from '@/ui/routes'
 import { ServicesContext } from '@/ui/services'
-import { strings } from '@/ui/strings'
+import { socialStrings, strings } from '@/ui/strings'
 import { ROUND_ID, fixture } from '../fixtures'
 
 beforeEach(() => {
@@ -65,7 +65,12 @@ describe('routes and entry', () => {
       'false',
     )
     expect(media[0]?.microphoneChanges).toEqual([])
-    await userEvent.click(screen.getByRole('button', { name: strings.round.leave }))
+    await userEvent.click(screen.getByRole('button', { name: socialStrings.more }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: socialStrings.more })).getByRole('button', {
+        name: strings.round.leave,
+      }),
+    )
     expect(await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })).toBeInTheDocument()
   })
 
