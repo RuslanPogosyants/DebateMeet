@@ -340,7 +340,7 @@ describe('fixed participant stage', () => {
     )
     expect(screen.queryByRole('article', { name: 'Участник 1' })).not.toBeInTheDocument()
     expect(screen.queryByRole('article', { name: 'Участник 3' })).not.toBeInTheDocument()
-    const trigger = screen.getByRole('button', { name: 'Участники (2)' })
+    const trigger = screen.getByRole('button', { name: 'Участники: 2' })
     await userEvent.click(trigger)
     const roster = screen.getByRole('dialog', { name: 'Участники' })
     expect(within(roster).getAllByRole('listitem')).toHaveLength(2)
@@ -373,7 +373,7 @@ describe('fixed participant stage', () => {
         <RoomRosterButton controller={controller} />
       </>,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Участники (40)' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Участники: 40' }))
     const roster = screen.getByRole('dialog', { name: 'Участники' })
     expect(within(roster).getAllByRole('listitem')).toHaveLength(8)
     await userEvent.click(

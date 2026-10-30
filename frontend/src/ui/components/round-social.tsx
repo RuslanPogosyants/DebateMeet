@@ -87,8 +87,8 @@ export function HandQueue({
         <button
           className="action icon-control hand-queue-trigger"
           type="button"
-          aria-label={`${socialStrings.queue} (${queue.length})`}
-          title={`${socialStrings.queue} (${queue.length})`}
+          aria-label={`${socialStrings.queue}: ${queue.length}`}
+          title={`${socialStrings.queue}: ${queue.length}`}
           aria-haspopup="dialog"
           aria-expanded={rosterOpen}
           data-has-hands={queue.length > 0}

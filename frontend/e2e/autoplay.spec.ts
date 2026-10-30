@@ -193,7 +193,7 @@ test('native autoplay blocks media and timer audio until one trusted sound actio
           (button) => button.textContent?.trim() === 'Включить звук',
         ),
         clockReady:
-          document.querySelector('[data-testid="speech-timer-readout"]') !== null &&
+          document.querySelector('[role="timer"][aria-label="Таймер"]') !== null &&
           document.querySelector('.timer-clock-status') === null,
       })
     })

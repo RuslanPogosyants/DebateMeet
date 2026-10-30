@@ -121,6 +121,7 @@ test('a lost draw response retries the same command and drum settings persist af
   await page.getByRole('tab', { name: 'Общий чат', exact: true }).click()
   await expect(chat(page).locator('.chat-system')).toHaveCount(3)
   await page.getByRole('tab', { name: 'Жребий', exact: true }).click()
+  await page.getByText('Меню жребия', { exact: true }).click()
   await page.getByRole('button', { name: 'Сбросить барабан', exact: true }).click()
   const reset = page.getByRole('dialog', { name: 'Сбросить барабан', exact: true })
   await expect(reset.getByRole('button', { name: 'Отмена', exact: true })).toBeFocused()

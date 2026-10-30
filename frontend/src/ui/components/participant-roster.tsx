@@ -15,7 +15,7 @@ export function RoomRosterButton({ controller }: { controller: RoundController }
   const state = useStore(controller.store)
   const [open, setOpen] = useState(false)
   const participants = connectedRoomParticipants(state)
-  const label = `${strings.round.people} (${participants.length})`
+  const label = `${strings.round.people}: ${participants.length}`
   return (
     <>
       <button
