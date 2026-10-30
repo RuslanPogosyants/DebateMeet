@@ -37,7 +37,7 @@ from debatemeet.round.infrastructure.diagnostics import (
     SlidingDiagnosticLimiter,
 )
 from debatemeet.round.infrastructure.postgres import PostgresParticipantArchive
-from debatemeet.shared.infrastructure.diagnostics import PostgresDiagnostics, purge_diagnostics
+from debatemeet.shared.infrastructure.diagnostics import purge_diagnostics
 from tests.round.builders import at
 from tests.round.chat.infrastructure.test_a4_rollback import (
     ALICE,
@@ -117,6 +117,15 @@ async def test_actual_a6_preserves_terminal_deletion_and_live_b6_state_after_day
             old_body, fresh_body = telemetry(), telemetry()
             old_batch = diagnostic_batch(TelemetryBatchBody.model_validate(old_body))
             await receiver(RID, ALICE_CREDENTIALS, old_batch)
+            diagnostic_statement = text(
+                "SELECT kind,received_at,payload FROM diagnostics_batches WHERE batch_id=:id"
+            )
+            async with engine.connect() as connection:
+                diagnostic_before = (
+                    (await connection.execute(diagnostic_statement, {"id": old_batch.batch_id}))
+                    .mappings()
+                    .one()
+                )
             expected_receipts = [
                 value for value in prepared.receipts if value["round_id"] != UNKNOWN
             ]
@@ -254,7 +263,14 @@ async def test_actual_a6_preserves_terminal_deletion_and_live_b6_state_after_day
             ).publish_once()
             assert len(prepared.sdk.muted) == 2
             assert len(prepared.sdk.controls) == 1
-            assert await PostgresDiagnostics(engine).report(old_batch.batch_id) is not None
+            # The fixed fixture epoch must not depend on the public reader's wall-clock retention.
+            async with engine.connect() as connection:
+                diagnostic_after = (
+                    (await connection.execute(diagnostic_statement, {"id": old_batch.batch_id}))
+                    .mappings()
+                    .one()
+                )
+            assert diagnostic_after == diagnostic_before
             resumed = await state.commands(
                 RID, ALICE_CREDENTIALS, str(UUID(int=603)), UndoNextSpeech()
             )
