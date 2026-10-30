@@ -17,6 +17,7 @@ for (const phase of ['upgrade', 'first response'] as const) {
     test.setTimeout(90000)
     await measureRenderedAudio(page)
     await page.addInitScript((fault) => {
+      if (fault !== 'upgrade') return
       const Native = window.WebSocket
       window.debatemeetSignalProbe = { attempts: 0, firstOpened: false, firstClosed: false }
       window.WebSocket = new Proxy(Native, {
@@ -54,9 +55,11 @@ for (const phase of ['upgrade', 'first response'] as const) {
               close: {
                 value: () => {
                   if (state === Native.CLOSED) return
+                  state = Native.CLOSING
+                  socket.dispatchEvent(new Event('error'))
                   state = Native.CLOSED
                   probe.firstClosed = true
-                  socket.dispatchEvent(new CloseEvent('close', { code: 1000, wasClean: true }))
+                  socket.dispatchEvent(new CloseEvent('close', { code: 1006, wasClean: false }))
                 },
               },
             })
@@ -75,13 +78,18 @@ for (const phase of ['upgrade', 'first response'] as const) {
         },
       })
     }, phase)
+    let routedAttempts = 0
+    let routedFirstClosed = false
     if (phase === 'first response') {
-      let attempts = 0
       await page.routeWebSocket(
         (url) => url.pathname.startsWith('/rtc'),
         (route) => {
           // Playwright opens the first socket, but no server sends its initial JoinResponse.
-          if (++attempts > 1) route.connectToServer()
+          if (++routedAttempts === 1)
+            route.onClose(() => {
+              routedFirstClosed = true
+            })
+          else route.connectToServer()
         },
       )
     }
@@ -99,11 +107,16 @@ for (const phase of ['upgrade', 'first response'] as const) {
       timeout: 35000,
     })
     expect(joins).toBe(1)
-    expect(await page.evaluate(() => window.debatemeetSignalProbe)).toEqual({
-      attempts: 2,
-      firstOpened: phase === 'first response',
-      firstClosed: true,
-    })
+    if (phase === 'upgrade') {
+      expect(await page.evaluate(() => window.debatemeetSignalProbe)).toEqual({
+        attempts: 2,
+        firstOpened: false,
+        firstClosed: true,
+      })
+    } else {
+      expect(routedAttempts).toBe(2)
+      await expect.poll(() => routedFirstClosed).toBe(true)
+    }
     expect(
       (await snapshot(page)).participants.filter((person) => person.name === 'Повторный сигналинг'),
     ).toHaveLength(1)
