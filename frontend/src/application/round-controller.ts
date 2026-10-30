@@ -569,6 +569,8 @@ export class RoundController {
       this.store.setState({ commandPending: false, commandUncertain: true })
     const previous = this.session
     this.session = null
+    // SDK termination still leaves adapter-owned devices and audio resources to dispose.
+    const cleanup = previous?.disconnect().catch(() => {})
     this.stopPolling()
     this.stopAlone()
     if (reason !== 'network') {
@@ -581,14 +583,18 @@ export class RoundController {
         commandPending: false,
         commandUncertain: false,
       })
+      await cleanup
       return
     }
-    if (!(await this.ownership.current())) {
+    const current = await this.ownership.current()
+    if (generation !== this.generation) return
+    if (!current) {
       this.ownershipLost()
+      await cleanup
       return
     }
     this.store.setState({ stage: 'reconnecting', people: [] })
-    await previous?.disconnect().catch(() => {})
+    await cleanup
     if (generation !== this.generation) return
     try {
       await this.connect(generation)

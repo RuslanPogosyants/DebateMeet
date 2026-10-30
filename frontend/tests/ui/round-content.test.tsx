@@ -104,6 +104,97 @@ describe('shared motion and judge drawing', () => {
     })
   })
 
+  it('retains both motion drafts after a definitive failure and closes only after a successful retry', async () => {
+    const { controller, api, value } = await setup()
+    const next = {
+      ...value,
+      version: value.version + 1,
+      motion: { text: 'Draft motion', infoslide: 'Draft slide' },
+    }
+    const command = vi
+      .spyOn(api, 'command')
+      .mockRejectedValueOnce(new ClientError('round_busy'))
+      .mockResolvedValueOnce(next)
+    render(<MotionEditorButton controller={controller} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Изменить резолюцию' }))
+    await userEvent.type(screen.getByLabelText('Резолюция'), next.motion.text)
+    await userEvent.type(screen.getByLabelText('Инфослайд'), next.motion.infoslide)
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    const dialog = screen.getByRole('dialog', { name: 'Изменить резолюцию' })
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'Раунд занят. Повторите через несколько секунд.',
+    )
+    expect(screen.getByLabelText('Резолюция')).toHaveValue(next.motion.text)
+    expect(screen.getByLabelText('Инфослайд')).toHaveValue(next.motion.infoslide)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(controller.store.getState().snapshot?.motion).toEqual(next.motion)
+    expect(command).toHaveBeenCalledTimes(2)
+    expect(command.mock.calls[0]?.[3]).not.toBe(command.mock.calls[1]?.[3])
+  })
+
+  it('keeps an uncertain motion draft and retries the same command from the dialog', async () => {
+    const { controller, api, value } = await setup()
+    const next = {
+      ...value,
+      version: value.version + 1,
+      motion: { text: 'Uncertain motion', infoslide: 'Uncertain slide' },
+    }
+    const command = vi
+      .spyOn(api, 'command')
+      .mockRejectedValueOnce(new ClientError('network'))
+      .mockResolvedValueOnce(next)
+    render(<MotionEditorButton controller={controller} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Изменить резолюцию' }))
+    await userEvent.type(screen.getByLabelText('Резолюция'), next.motion.text)
+    await userEvent.type(screen.getByLabelText('Инфослайд'), next.motion.infoslide)
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    const dialog = screen.getByRole('dialog', { name: 'Изменить резолюцию' })
+    expect(within(dialog).getByRole('alert')).toBeVisible()
+    expect(within(dialog).getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+    expect(screen.getByLabelText('Резолюция')).toHaveValue(next.motion.text)
+    expect(screen.getByLabelText('Инфослайд')).toHaveValue(next.motion.infoslide)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Повторить команду' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(controller.store.getState().snapshot?.motion).toEqual(next.motion)
+    expect(command.mock.calls[0]?.[3]).toBe(command.mock.calls[1]?.[3])
+  })
+
+  it('keeps a pending editor open and does not close a newly opened editor when an old save finishes', async () => {
+    const { controller, api, value } = await setup()
+    const next = {
+      ...value,
+      version: value.version + 1,
+      motion: { text: 'Pending motion', infoslide: 'Pending slide' },
+    }
+    let finish: (value: typeof next) => void = vi.fn<(value: typeof next) => void>()
+    const command = vi.spyOn(api, 'command').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    render(<MotionEditorButton controller={controller} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Изменить резолюцию' }))
+    await userEvent.type(screen.getByLabelText('Резолюция'), next.motion.text)
+    await userEvent.type(screen.getByLabelText('Инфослайд'), next.motion.infoslide)
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+    const pending = screen.getByRole('dialog', { name: 'Изменить резолюцию' })
+    expect(within(pending).getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+    expect(screen.getByLabelText('Резолюция')).toBeDisabled()
+    expect(screen.getByLabelText('Инфослайд')).toBeDisabled()
+    await userEvent.click(within(pending).getByRole('button', { name: 'Отмена' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Изменить резолюцию' }))
+    const reopened = screen.getByRole('dialog', { name: 'Изменить резолюцию' })
+    await act(async () => {
+      finish(next)
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('dialog', { name: 'Изменить резолюцию' })).toBe(reopened)
+    expect(command).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText('Резолюция')).toBeEnabled()
+  })
+
   it('explains disabled/drawn chips and permits configuring all positions off without resetting history', async () => {
     const { controller, api, value } = await setup()
     value.drum = {
