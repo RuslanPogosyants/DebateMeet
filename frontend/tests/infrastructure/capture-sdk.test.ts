@@ -89,6 +89,29 @@ afterEach(() => {
 })
 
 describe('installed LiveKit capture intent boundary', () => {
+  it('stops an unadopted user-provided replacement when applying its constraints fails', async () => {
+    vi.stubGlobal('MediaStream', CaptureStream)
+    vi.stubGlobal('MediaStreamTrack', CaptureTrack)
+    const original = new MediaStreamTrack()
+    const replacement = new MediaStreamTrack()
+    const failure = new DOMException('Capture constraints failed', 'OverconstrainedError')
+    vi.spyOn(replacement, 'applyConstraints').mockRejectedValueOnce(failure)
+    vi.stubGlobal('navigator', {
+      mediaDevices: {
+        getUserMedia: vi.fn<() => Promise<MediaStream>>(() =>
+          Promise.resolve(new MediaStream([replacement])),
+        ),
+      },
+    })
+    const track = new LocalVideoTrack(original, {}, true)
+    track.source = Track.Source.Camera
+    boundary.state.track = track
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    await expect(track.restartTrack({ deviceId: 'replacement' })).rejects.toBe(failure)
+    expect(replacement.readyState).toBe('ended')
+  })
+
   it.each(['off', 'close'] as const)(
     'fences a late camera capture before sender replacement after %s supersedes enable',
     async (supersede) => {

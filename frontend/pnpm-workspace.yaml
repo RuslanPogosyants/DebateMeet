@@ -10,4 +10,4 @@ overrides:
 
 # Keep output promises and source capture cancellation fenced in the pinned SDK.
 patchedDependencies:
-  livekit-client@2.22.3: patches/livekit-client@2.22.3.patch
+  livekit-client@2.23.0: patches/livekit-client@2.23.0.patch
