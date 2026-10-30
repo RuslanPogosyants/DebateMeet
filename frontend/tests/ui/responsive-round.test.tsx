@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { routes } from '@/ui/routes'
 import { ServicesContext } from '@/ui/services'
 import { BOB, ROUND_ID, SELF, fixture, snapshot } from '../fixtures'
+import { FakeRecordingApi, FakeRecordingPlatform } from '../recording-fakes'
 
 // Route-loading behavior is covered separately; these cases exercise layout.
 beforeAll(async () => {
@@ -34,8 +35,12 @@ function viewport(width: number, height: number) {
   }))
 }
 
-async function meeting(value = snapshot()) {
+async function meeting(
+  value = snapshot(),
+  configure?: (fakes: ReturnType<typeof fixture>) => void,
+) {
   const fakes = fixture()
+  configure?.(fakes)
   fakes.api.response.snapshot = value
   const router = createMemoryRouter(routes, { initialEntries: [`/r/${ROUND_ID}`] })
   render(
@@ -53,6 +58,25 @@ async function meeting(value = snapshot()) {
 }
 
 describe('responsive meeting navigation', () => {
+  it('places infrastructure controls before the compact debate content and keeps warnings outside that toolbar', async () => {
+    viewport(390, 844)
+    const value = snapshot()
+    value.motion = { text: 'Проверка порядка', infoslide: 'Строка один\nСтрока два' }
+    const { media } = await meeting(value)
+    const toggle = screen.getByRole('button', { name: 'Показать боковую панель' })
+    const full = screen.getByRole('button', { name: 'Полностью' })
+    expect(toggle.compareDocumentPosition(full) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('Строка один Строка два', { exact: false })).toHaveClass(
+      'motion-infoslide',
+    )
+    expect(screen.getByRole('button', { name: 'Крупный спикер' })).toBeVisible()
+    act(() => media[0]?.events?.playback(true))
+    const warning = document.querySelector('.timer-health')
+    expect(warning?.closest('.meeting-notices')).not.toBeNull()
+    expect(document.querySelector('.meeting-center > .timer-health')).toBeNull()
+    expect(toggle).toBeVisible()
+  })
+
   it('explains an unavailable display-capture API without affecting media controls', async () => {
     viewport(1440, 900)
     await meeting()
@@ -127,31 +151,24 @@ describe('responsive meeting navigation', () => {
   it.each([
     [1280, 720],
     [1600, 650],
-  ])(
-    'uses a compact strip at %i×%i and opens the complete map on demand',
-    async (width, height) => {
-      viewport(width, height)
-      const { api } = await meeting()
-      const commands = vi.spyOn(api, 'command')
-      expect(screen.getByRole('button', { name: 'Перейти в OG' })).toBeVisible()
-      expect(screen.queryByRole('complementary', { name: 'Комнаты' })).not.toBeInTheDocument()
-      const trigger = screen.getByRole('button', { name: 'Кто где' })
-      await userEvent.click(trigger)
-      const drawer = screen.getByRole('dialog', { name: 'Комнаты' })
-      expect(within(drawer).getByRole('complementary', { name: 'Комнаты' })).toBeVisible()
-      expect(screen.getByRole('button', { name: 'Закрыть комнаты' })).toHaveFocus()
-      fireEvent(drawer, new Event('cancel', { bubbles: false, cancelable: true }))
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-      expect(trigger).toHaveFocus()
-      expect(commands).not.toHaveBeenCalled()
-    },
-  )
+  ])('uses the unified left panel at %i×%i', async (width, height) => {
+    viewport(width, height)
+    const { api } = await meeting()
+    const commands = vi.spyOn(api, 'command')
+    expect(screen.getByRole('complementary', { name: 'Комнаты' })).toBeVisible()
+    expect(screen.getByRole('textbox', { name: 'Сообщение в общий чат' })).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Свернуть боковую панель' }))
+    expect(screen.queryByRole('button', { name: 'Перейти в OG' })).not.toBeInTheDocument()
+    expect(commands).not.toHaveBeenCalled()
+  })
 
   it('keeps the full map in a wide, tall desktop layout', async () => {
     viewport(1440, 900)
     await meeting()
     expect(screen.getByRole('complementary', { name: 'Комнаты' })).toBeVisible()
     expect(screen.queryByRole('button', { name: 'Кто где' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Участники:/u })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Действия — /u })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -171,10 +188,10 @@ describe('responsive meeting navigation', () => {
       if (!person) throw new Error('No participant')
       person.room = 'og'
       vi.spyOn(api, 'command').mockResolvedValueOnce(moved)
-      const trigger = screen.getByRole('button', { name: 'Комнаты' })
+      const trigger = screen.getByRole('button', { name: 'Показать боковую панель' })
       await userEvent.click(trigger)
       await userEvent.click(
-        within(screen.getByRole('dialog', { name: 'Комнаты' })).getByRole('button', {
+        within(screen.getByRole('dialog', { name: 'Комнаты и чат' })).getByRole('button', {
           name: 'Перейти в OG',
         }),
       )
@@ -198,9 +215,9 @@ describe('responsive meeting navigation', () => {
     })
     const { api } = await meeting(value)
     const commands = vi.spyOn(api, 'command')
-    await userEvent.click(screen.getByRole('button', { name: 'Комнаты' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Показать боковую панель' }))
     await userEvent.click(
-      within(screen.getByRole('dialog', { name: 'Комнаты' })).getByRole('button', {
+      within(screen.getByRole('dialog', { name: 'Комнаты и чат' })).getByRole('button', {
         name: 'Вернуть OG в базу',
       }),
     )
@@ -211,7 +228,7 @@ describe('responsive meeting navigation', () => {
     expect(commands.mock.calls[0]?.[2]).toEqual({ type: 'recall', room: 'og' })
   })
 
-  it('opens the complete paged roster from a compact room drawer without leaving the room', async () => {
+  it('keeps the hand queue paged but removes general rosters from the mobile panel', async () => {
     viewport(390, 844)
     const value = snapshot()
     const own = value.participants[0]
@@ -239,23 +256,14 @@ describe('responsive meeting navigation', () => {
     expect(within(queueRoster).getByText('Участник 9')).toBeVisible()
     await userEvent.click(within(queueRoster).getByRole('button', { name: 'Закрыть' }))
     expect(queue).toHaveFocus()
-    const rooms = screen.getByRole('button', { name: 'Комнаты' })
+    const rooms = screen.getByRole('button', { name: 'Показать боковую панель' })
     await userEvent.click(rooms)
-    const drawer = screen.getByRole('dialog', { name: 'Комнаты' })
+    const drawer = screen.getByRole('dialog', { name: 'Комнаты и чат' })
     const base = within(drawer).getByRole('region', { name: 'База' })
     expect(within(base).getAllByRole('listitem')).toHaveLength(2)
-    const all = within(base).getByRole('button', { name: 'Все 10' })
-    await userEvent.click(all)
-    const roster = screen.getByRole('dialog', { name: 'База · участники' })
-    expect(within(roster).getAllByRole('listitem')).toHaveLength(8)
-    await userEvent.click(
-      within(roster).getByRole('button', { name: 'Следующая страница участников' }),
-    )
-    expect(within(roster).getByText('Участник 9')).toBeVisible()
-    fireEvent(roster, new Event('cancel', { bubbles: false, cancelable: true }))
-    expect(screen.queryByRole('dialog', { name: 'База · участники' })).not.toBeInTheDocument()
-    expect(all).toHaveFocus()
-    expect(drawer).toBeVisible()
+    expect(within(base).getByText('Еще 8')).toBeVisible()
+    expect(within(drawer).queryByRole('button', { name: /^Все \d+/u })).not.toBeInTheDocument()
+    expect(within(drawer).queryByRole('button', { name: /^Действия — /u })).not.toBeInTheDocument()
     fireEvent(drawer, new Event('cancel', { cancelable: true }))
     expect(rooms).toHaveFocus()
     expect(screen.getByRole('heading', { name: 'База' })).toBeVisible()
@@ -295,7 +303,8 @@ describe('responsive meeting navigation', () => {
     const { api } = await meeting(value)
     const more = screen.getByRole('button', { name: 'Ещё' })
     expect(screen.queryByRole('button', { name: 'Звук и устройства' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Выйти' })).not.toBeInTheDocument()
+    const leave = screen.getByRole('button', { name: 'Выйти' })
+    expect(leave.closest('.meeting-controls')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Настройки' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Скопировать ссылку' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /^Реакция — /u })).toHaveLength(5)
@@ -313,15 +322,12 @@ describe('responsive meeting navigation', () => {
     expect(within(drawer).getByRole('button', { name: 'Сообщить о проблеме' })).toBeEnabled()
     expect(within(drawer).getByRole('checkbox', { name: 'Скрыть реакции' })).toBeEnabled()
     expect(within(drawer).getByRole('button', { name: 'Звук и устройства' })).toBeEnabled()
-    expect(within(drawer).getByRole('button', { name: 'Выйти' })).toBeEnabled()
+    expect(within(drawer).queryByRole('button', { name: 'Выйти' })).not.toBeInTheDocument()
     expect(within(drawer).getByRole('button', { name: 'Закрыть' })).toHaveFocus()
     fireEvent(drawer, new Event('cancel', { bubbles: false, cancelable: true }))
     expect(more).toHaveFocus()
     expect(api.leaves).toEqual([])
-    await userEvent.click(more)
-    await userEvent.click(
-      within(screen.getByRole('dialog', { name: 'Ещё' })).getByRole('button', { name: 'Выйти' }),
-    )
+    await userEvent.click(leave)
     expect(await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })).toBeVisible()
     expect(api.leaves).toEqual(['PA_local'])
   })
@@ -357,33 +363,54 @@ describe('responsive meeting navigation', () => {
     },
   )
 
-  it('retains judge exit confirmation after closing the infrastructure menu', async () => {
+  it('retains judge exit confirmation and returns focus to the permanent leave button', async () => {
     viewport(1440, 900)
     const value = snapshot()
     value.judgeFlag.holder = SELF
     const { api } = await meeting(value)
-    const more = screen.getByRole('button', { name: 'Ещё' })
-    await userEvent.click(more)
-    await userEvent.click(
-      within(screen.getByRole('dialog', { name: 'Ещё' })).getByRole('button', { name: 'Выйти' }),
-    )
+    const leave = screen.getByRole('button', { name: 'Выйти' })
+    await userEvent.click(leave)
     const confirm = screen.getByRole('dialog', { name: 'Выйти из раунда?' })
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(within(confirm).getByRole('button', { name: 'Отмена' })).toHaveFocus()
     expect(api.leaves).toEqual([])
     await userEvent.click(within(confirm).getByRole('button', { name: 'Отмена' }))
-    expect(more).toHaveFocus()
+    expect(leave).toHaveFocus()
     expect(api.leaves).toEqual([])
-    await userEvent.click(more)
-    await userEvent.click(
-      within(screen.getByRole('dialog', { name: 'Ещё' })).getByRole('button', { name: 'Выйти' }),
-    )
+    await userEvent.click(leave)
     await userEvent.click(
       within(screen.getByRole('dialog', { name: 'Выйти из раунда?' })).getByRole('button', {
         name: 'Выйти',
       }),
     )
     expect(await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })).toBeVisible()
+    expect(api.leaves).toEqual(['PA_local'])
+  })
+
+  it.each([false, true])('keeps the recording exit guard with judge=%s', async (judge) => {
+    viewport(390, 844)
+    const value = snapshot()
+    if (judge) value.judgeFlag.holder = SELF
+    const recording = new FakeRecordingPlatform()
+    const { api } = await meeting(value, (fakes) => {
+      fakes.services.recording = recording
+      fakes.services.recordingApi = new FakeRecordingApi()
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Ещё' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Начать запись комнаты' }))
+    await screen.findByRole('button', { name: 'Остановить' })
+    const leave = screen.getByRole('button', { name: 'Выйти' })
+    await userEvent.click(leave)
+    const confirm = screen.getByRole('dialog', { name: 'Завершить запись и выйти?' })
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(api.leaves).toEqual([])
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Остаться' }))
+    expect(leave).toHaveFocus()
+    expect(recording.run.stop).not.toHaveBeenCalled()
+    await userEvent.click(leave)
+    await userEvent.click(screen.getByRole('button', { name: 'Завершить запись и выйти' }))
+    await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })
+    expect(recording.run.stop).toHaveBeenCalledOnce()
     expect(api.leaves).toEqual(['PA_local'])
   })
 
@@ -466,8 +493,9 @@ describe('responsive meeting navigation', () => {
     )
     const toggle = screen.getByRole('button', { name: /^Чат$/u })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    await userEvent.click(screen.getByRole('button', { name: 'Свернуть чат' }))
-    expect(toggle).toHaveFocus()
+    const collapse = screen.getByRole('button', { name: 'Свернуть боковую панель' })
+    await userEvent.click(collapse)
+    expect(collapse).toHaveFocus()
     expect(screen.queryByRole('textbox', { name: 'Сообщение в общий чат' })).not.toBeInTheDocument()
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await userEvent.click(toggle)
@@ -511,7 +539,7 @@ describe('responsive meeting navigation', () => {
       .find((button) => button.classList.contains('chat-toggle'))
     if (!chatTrigger) throw new Error('Missing chat trigger')
     await userEvent.click(chatTrigger)
-    const chat = screen.getByRole('dialog', { name: 'Общий чат' })
+    const chat = screen.getByRole('dialog', { name: 'Комнаты и чат' })
     const draft = within(chat).getByRole('textbox', { name: 'Сообщение в общий чат' })
     await userEvent.type(draft, 'Продолжаю писать')
     act(() => {

@@ -1,0 +1,13 @@
+.scene-heading .rooms-panel-toggle {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+@media (pointer: coarse) {
+  .scene-heading .rooms-panel-toggle {
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
+  }
+}

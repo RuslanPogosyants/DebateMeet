@@ -17,6 +17,8 @@ import { VersionSession } from '@/application/version-session'
 import { HttpDiagnosticApi } from '@/infrastructure/diagnostic-api'
 import { BrowserErrorBus } from '@/infrastructure/error-sanitizer'
 import { buildVersion } from '@/domain/diagnostics'
+import { BrowserRecordingPlatform } from '@/infrastructure/recording-platform'
+import { HttpRecordingApi } from '@/infrastructure/recording-api'
 import '@/ui/styles.css'
 
 const container = document.getElementById('root')
@@ -39,6 +41,8 @@ window.addEventListener('vite:preloadError', (event) => {
 })
 const api = new HttpRoundApi((value) => versions.observe(value))
 const services: Services = {
+  recording: new BrowserRecordingPlatform(),
+  recordingApi: new HttpRecordingApi(),
   appVersion,
   versions,
   diagnostics: new HttpDiagnosticApi(),

@@ -31,7 +31,7 @@ export class BrowserPreferences implements Preferences {
   }
 
   sceneLayout(): 'speaker' | 'grid' {
-    return this.get('debatemeet.sceneLayout') === 'grid' ? 'grid' : 'speaker'
+    return this.get('debatemeet.sceneLayout') === 'speaker' ? 'speaker' : 'grid'
   }
   setSceneLayout(value: 'speaker' | 'grid'): void {
     this.set('debatemeet.sceneLayout', value)

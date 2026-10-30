@@ -6,7 +6,6 @@ import type { LogicalRoom, RoundCommand, SubRoom } from '@/application/ports'
 import { handQueue } from '@/domain/social'
 import { ConfirmDialog } from './confirm-dialog'
 import { Sheet } from './sheet'
-import { ParticipantRoster } from './participant-roster'
 import { DrumPanel } from './round-drum'
 import { MotionEditorButton } from './round-motion'
 import { JudgeSocialPanel } from './round-social'
@@ -27,19 +26,23 @@ const rooms: LogicalRoom[] = ['base', 'og', 'oo', 'cg', 'co', 'judges']
 export function RoomMap({
   controller,
   onEntered,
+  id,
+  hidden = false,
 }: {
   controller: RoundController
   onEntered?: () => void
+  id?: string
+  hidden?: boolean
 }) {
   const state = useStore(controller.store)
   const [recall, setRecall] = useState<SubRoom | 'all' | null>(null)
-  const [roster, setRoster] = useState<LogicalRoom | null>(null)
   const handSummaryId = useId()
   const current = state.snapshot?.participants.find((person) => person.id === state.self)?.room
   const judge = state.self !== null && state.snapshot?.judgeFlag.holder === state.self
   const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
+  const connectedIds = new Set(state.people.map((person) => person.id))
   return (
-    <aside className="room-map" aria-label={strings.round.rooms}>
+    <aside className="room-map" aria-label={strings.round.rooms} id={id} hidden={hidden}>
       <div className="room-map-heading">
         <h2 className="text-title font-medium">{strings.round.rooms}</h2>
         {judge && (
@@ -57,7 +60,14 @@ export function RoomMap({
       </div>
       <div className="room-map-grid">
         {rooms.map((room) => {
-          const people = state.snapshot?.participants.filter((person) => person.room === room) ?? []
+          const people =
+            state.snapshot?.participants
+              .filter((person) => person.room === room)
+              .toSorted(
+                (a, b) =>
+                  Number(b.id === state.self) - Number(a.id === state.self) ||
+                  Number(connectedIds.has(b.id)) - Number(connectedIds.has(a.id)),
+              ) ?? []
           const queue = state.snapshot ? handQueue(state.snapshot, room) : []
           const hiddenHands = queue.filter(
             (person) => !people.slice(0, 2).some((visible) => visible.id === person.id),
@@ -138,14 +148,11 @@ export function RoomMap({
                 </ul>
               )}
               {people.length > 2 && (
-                <button
-                  className="text-link room-roster"
-                  type="button"
-                  aria-label={`Все ${people.length}`}
+                <p
+                  className="room-more text-caption"
                   aria-describedby={hiddenHands > 0 ? `${handSummaryId}-${room}` : undefined}
-                  onClick={() => setRoster(room)}
                 >
-                  Все {people.length}
+                  Еще {people.length - 2}
                   {hiddenHands > 0 && (
                     <>
                       <span
@@ -161,7 +168,7 @@ export function RoomMap({
                       </span>
                     </>
                   )}
-                </button>
+                </p>
               )}
               {people.length === 0 && (
                 <p className="room-description text-caption">{roomDescriptions[room]}</p>
@@ -181,16 +188,6 @@ export function RoomMap({
           )
         })}
       </div>
-      {roster !== null && (
-        <ParticipantRoster
-          controller={controller}
-          participants={
-            state.snapshot?.participants.filter((person) => person.room === roster) ?? []
-          }
-          title={`${roomNames[roster]} · участники`}
-          onClose={() => setRoster(null)}
-        />
-      )}
       {recall !== null && (
         <RecallConfirmation controller={controller} room={recall} onClose={() => setRecall(null)} />
       )}

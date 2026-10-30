@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
-export async function adminCommand(...args: string[]): Promise<unknown> {
+export async function adminCommand(command: string, ...args: string[]): Promise<unknown> {
   const stateFile = process.env['DM_E2E_STATE_FILE']
   if (stateFile === undefined) throw new Error('The owned E2E server state is unavailable')
   const state: unknown = JSON.parse(await readFile(stateFile, 'utf8'))
@@ -23,7 +23,8 @@ export async function adminCommand(...args: string[]): Promise<unknown> {
   database.pathname = `/${state.database}`
   const { stdout } = await promisify(execFile)(
     fileURLToPath(new URL('../../backend/.venv/bin/python', import.meta.url)),
-    ['-m', 'debatemeet.admin', ...args],
+    // URL-safe generated identifiers may start with a dash.
+    ['-m', 'debatemeet.admin', command, '--', ...args],
     {
       cwd: fileURLToPath(new URL('../../backend/', import.meta.url)),
       timeout: 10000,

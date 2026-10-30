@@ -82,18 +82,18 @@ export function SceneControls({ controller }: { controller: RoundController }) {
       <button
         className="scene-choice"
         type="button"
-        aria-pressed={scene.layout === 'speaker'}
-        onClick={() => controller.scene.setLayout('speaker')}
-      >
-        {text.speaker}
-      </button>
-      <button
-        className="scene-choice"
-        type="button"
         aria-pressed={scene.layout === 'grid'}
         onClick={() => controller.scene.setLayout('grid')}
       >
         {text.grid}
+      </button>
+      <button
+        className="scene-choice"
+        type="button"
+        aria-pressed={scene.layout === 'speaker'}
+        onClick={() => controller.scene.setLayout('speaker')}
+      >
+        {text.speaker}
       </button>
       <label className="self-view-choice">
         <input

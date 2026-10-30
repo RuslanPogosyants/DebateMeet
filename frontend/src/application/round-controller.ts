@@ -6,9 +6,10 @@ import { SocialSession } from './social-session'
 import { DiagnosticsSession } from './diagnostics-session'
 import { DeviceSession } from './device-session'
 import { SceneSession } from './scene-session'
+import { RecordingSession, type RecordingContext } from './recording-session'
 import type { ErrorCode } from '@/domain/diagnostics'
 import { AloneWatchdog } from './alone-watchdog'
-import { readSnapshot, type Snapshot } from '@/domain/snapshot'
+import { readSnapshot, newerSnapshot, type Snapshot } from '@/domain/snapshot'
 import type { ReactionCode } from '@/domain/social'
 import type { MicrophonePacket } from '@/domain/social'
 import {
@@ -63,6 +64,7 @@ export class RoundController {
   readonly diagnostics: DiagnosticsSession
   readonly devices: DeviceSession
   readonly scene: SceneSession
+  readonly recording: RecordingSession
   readonly version: Services['versions']
   readonly store = createStore<RoundState>(() => ({
     stage: 'prejoin',
@@ -143,7 +145,13 @@ export class RoundController {
       this.timers.serverNow(),
     )
     this.devices = new DeviceSession(services.devices, (id) => this.timers.output(id))
-    this.scene = new SceneSession(services.preferences, services.clientClock)
+    this.scene = new SceneSession(services.preferences)
+    this.recording = new RecordingSession(
+      roundId,
+      services.recordingApi,
+      services.recording,
+      services.clientClock,
+    )
     this.diagnostics = new DiagnosticsSession(
       roundId,
       services.diagnostics,
@@ -213,6 +221,11 @@ export class RoundController {
       (person) => person.id === selfId,
     )?.room
     const nextRoom = next.participants.find((person) => person.id === selfId)?.room
+    if (
+      newerSnapshot(this.subscriptions.latest, next) &&
+      (this.subscriptions.latest?.epoch !== next.epoch || previousRoom !== nextRoom)
+    )
+      void this.recording.stop('recording_room_changed')
     if (
       hasMediaBaseline &&
       timing !== null &&
@@ -358,6 +371,7 @@ export class RoundController {
   }
 
   private ownershipLost(): void {
+    this.recording.dispose()
     this.timers.close()
     this.chat.close()
     this.social.close()
@@ -522,6 +536,7 @@ export class RoundController {
     this.chat.start(this.credentials, this.subscriptions.latest?.epoch ?? joined.snapshot.epoch)
     this.social.start(joined.participantId, this.session?.sid ?? null)
     this.store.setState({ stage: 'connected', controlUnavailable: false })
+    this.recording.connect(this.credentials)
     this.diagnostics.start(this.credentials)
     this.diagnostics.connected(this.emptyRoom())
     this.session?.measureAudio()
@@ -554,6 +569,7 @@ export class RoundController {
   }
 
   private async disconnected(reason: EndReason): Promise<void> {
+    this.recording.dispose()
     this.devices.close()
     this.scene.close()
     if (reason === 'network') this.diagnostics.reconnect()
@@ -653,6 +669,8 @@ export class RoundController {
     if (this.pendingIntent !== null) return
     this.pendingIntent = { intent, key: crypto.randomUUID() }
     if (intent.type === 'enter') {
+      if (this.recordingContext()?.room !== intent.room)
+        void this.recording.stop('recording_room_changed')
       this.social.enterPending(true)
       this.diagnostics.begin('room_switch_decoded_playback_ms', intent.room)
       this.session?.measureAudio()
@@ -829,6 +847,33 @@ export class RoundController {
     return this.toggle('screen', enabled)
   }
 
+  private recordingContext(): RecordingContext | null {
+    const state = this.store.getState()
+    const room = state.snapshot?.participants.find((person) => person.id === state.self)?.room
+    if (
+      state.stage !== 'connected' ||
+      this.credentials === null ||
+      this.session === null ||
+      this.session.sid === null ||
+      state.snapshot === null ||
+      room === undefined
+    )
+      return null
+    return {
+      credentials: this.credentials,
+      room,
+      sid: this.session.sid,
+      epoch: state.snapshot.epoch,
+      media: this.session,
+    }
+  }
+  startRecording(): Promise<void> {
+    const context = this.recordingContext()
+    return context === null
+      ? Promise.resolve()
+      : this.recording.start(context, () => this.recordingContext())
+  }
+
   async startAudio(): Promise<void> {
     this.timers.resume()
     try {
@@ -881,12 +926,7 @@ export class RoundController {
     const state = this.store.getState()
     const snapshot = this.subscriptions.latest ?? state.snapshot
     if (snapshot !== null && state.self !== null)
-      this.scene.update(
-        snapshot,
-        state.self,
-        state.people,
-        this.session?.subscribedVideoIds() ?? [],
-      )
+      this.scene.update(snapshot, state.self, state.people)
   }
 
   attachVideo(
@@ -911,6 +951,7 @@ export class RoundController {
   }
 
   pageHidden(): void {
+    void this.recording.stop('recording_session_changed')
     const sid = this.session?.sid
     if (
       this.ownership.owned() &&
@@ -923,6 +964,7 @@ export class RoundController {
   }
 
   async leave(reason: EndReason = 'left'): Promise<void> {
+    this.recording.dispose()
     this.timers.close()
     this.chat.close()
     this.social.close()
@@ -951,6 +993,7 @@ export class RoundController {
   }
 
   dispose(): void {
+    this.recording.dispose()
     this.deactivate()
     this.timers.close()
     this.chat.close()

@@ -49,7 +49,15 @@ describe('shared motion and judge drawing', () => {
     expect(container.querySelector('script')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Изменить резолюцию' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Инфослайд' })).not.toBeInTheDocument()
+    expect(container.querySelector('.motion-infoslide')).toHaveTextContent(
+      'Инфослайд: Only a slide',
+    )
+    const summary = screen.getByRole('region', { name: 'Текст резолюции и инфослайда' })
+    await userEvent.tab()
+    expect(summary).toHaveFocus()
     const open = screen.getByRole('button', { name: 'Полностью' })
+    await userEvent.tab()
+    expect(open).toHaveFocus()
     await userEvent.click(open)
     const dialog = screen.getByRole('dialog', { name: 'Резолюция' })
     expect(within(dialog).getByText('<script>Motion</script>')).toBeVisible()
@@ -85,6 +93,8 @@ describe('shared motion and judge drawing', () => {
     render(<MotionDisplay controller={controller} editable={false} />)
     expect(screen.queryByRole('button', { name: 'Полностью' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Инфослайд' })).not.toBeInTheDocument()
+    await userEvent.tab()
+    expect(document.body).toHaveFocus()
   })
 
   it('validates UTF-8 limits and saves both normalized fields through the existing command', async () => {
@@ -374,6 +384,9 @@ describe('common chat controls', () => {
       })
     })
     const { container } = render(<ChatPanel controller={controller} />)
+    const history = screen.getByRole('log', { name: 'Общий чат' })
+    history.focus()
+    expect(history).toHaveFocus()
     expect(screen.getByText('видят все, включая другие команды')).toBeVisible()
     expect(screen.getByText('<img onerror=alert(1)>')).toBeVisible()
     expect(container.querySelector('img')).toBeNull()

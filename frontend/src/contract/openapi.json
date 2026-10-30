@@ -3726,6 +3726,369 @@
         }
       }
     },
+    "/api/rounds/{round_id}/recordings": {
+      "get": {
+        "summary": "Status",
+        "operationId": "status_api_rounds__round_id__recordings_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/rounds/{round_id}/recordings/start": {
+      "post": {
+        "summary": "Start",
+        "operationId": "start_api_rounds__round_id__recordings_start_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingLeaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/rounds/{round_id}/recordings/renew": {
+      "post": {
+        "summary": "Renew",
+        "operationId": "renew_api_rounds__round_id__recordings_renew_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingRenewBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingLeaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/rounds/{round_id}/recordings/stop": {
+      "post": {
+        "summary": "Stop",
+        "operationId": "stop_api_rounds__round_id__recordings_stop_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/rounds/{round_id}/telemetry": {
       "post": {
         "summary": "Telemetry",
@@ -5133,6 +5496,126 @@
           "room"
         ],
         "title": "RecallBody"
+      },
+      "RecordingBody": {
+        "properties": {
+          "recordingId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Recordingid"
+          },
+          "sid": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Sid"
+          },
+          "room": {
+            "$ref": "#/components/schemas/Room"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recordingId",
+          "sid",
+          "room"
+        ],
+        "title": "RecordingBody"
+      },
+      "RecordingLeaseResponse": {
+        "properties": {
+          "recordingId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Recordingid"
+          },
+          "participantId": {
+            "$ref": "#/components/schemas/ParticipantCode"
+          },
+          "room": {
+            "$ref": "#/components/schemas/Room"
+          },
+          "epoch": {
+            "type": "integer",
+            "title": "Epoch"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "title": "Expiresat"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "ttlMs": {
+            "type": "integer",
+            "title": "Ttlms",
+            "default": 15000
+          }
+        },
+        "type": "object",
+        "required": [
+          "recordingId",
+          "participantId",
+          "room",
+          "epoch",
+          "expiresAt",
+          "active"
+        ],
+        "title": "RecordingLeaseResponse"
+      },
+      "RecordingRenewBody": {
+        "properties": {
+          "recordingId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Recordingid"
+          },
+          "sid": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Sid"
+          },
+          "room": {
+            "$ref": "#/components/schemas/Room"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recordingId",
+          "sid",
+          "room"
+        ],
+        "title": "RecordingRenewBody"
+      },
+      "RecordingStatusResponse": {
+        "properties": {
+          "serverTime": {
+            "type": "integer",
+            "title": "Servertime"
+          },
+          "leases": {
+            "items": {
+              "$ref": "#/components/schemas/RecordingLeaseResponse"
+            },
+            "type": "array",
+            "title": "Leases"
+          }
+        },
+        "type": "object",
+        "required": [
+          "serverTime",
+          "leases"
+        ],
+        "title": "RecordingStatusResponse"
       },
       "ReleaseReason": {
         "type": "string",

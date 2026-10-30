@@ -83,7 +83,7 @@ describe('local preferences', () => {
     const preferences = new BrowserPreferences()
     expect(preferences.credentials(ROUND_ID)).toBeNull()
     expect(preferences.recent()).toEqual([])
-    expect(preferences.sceneLayout()).toBe('speaker')
+    expect(preferences.sceneLayout()).toBe('grid')
     expect(preferences.selfVisible()).toBe(true)
   })
 })

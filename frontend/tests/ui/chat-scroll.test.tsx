@@ -58,6 +58,7 @@ beforeEach(() => {
 afterEach(() => {
   controllers.splice(0).forEach((controller) => controller.dispose())
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 function message(id: number): Message {
@@ -93,14 +94,14 @@ async function setup() {
   controllers.push(controller)
   await controller.join('Вика', false)
   await controller.chat.repair()
-  render(<ChatPanel controller={controller} />)
+  const view = render(<ChatPanel controller={controller} />)
   const log = screen.getByRole('log', { name: 'Общий чат' })
   const composer = screen.getByRole('textbox', { name: 'Сообщение в общий чат' })
   const append = (id: number) =>
     act(() =>
       controller.chat.receive({ topic: 'chat', roundId: ROUND_ID, epoch: 1, message: message(id) }),
     )
-  return { controller, history, log, composer, append }
+  return { controller, history, log, composer, append, view }
 }
 
 function pageBefore() {
@@ -112,6 +113,68 @@ function pageBefore() {
 }
 
 describe('chat reading position', () => {
+  it('keeps unread messages until the end of history is visible in the combined panel', async () => {
+    let target: Element | undefined
+    let notify: IntersectionObserverCallback | undefined
+    const observers: IntersectionObserver[] = []
+    const disconnect = vi.fn<() => void>()
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class implements IntersectionObserver {
+        root = null
+        rootMargin = '0px'
+        scrollMargin = '0px'
+        thresholds = [0, 1]
+        constructor(callback: IntersectionObserverCallback) {
+          notify = callback
+          observers.push(this)
+        }
+        observe(element: Element) {
+          target = element
+        }
+        unobserve() {}
+        takeRecords() {
+          return []
+        }
+        disconnect = disconnect
+      },
+    )
+    const { controller, log, append, view } = await setup()
+    expect(target).toBe(log.lastElementChild)
+    expect(target).toHaveClass('chat-reading-end')
+    const intersect = (ratio: number) =>
+      act(() => {
+        const observer = observers[0]
+        if (!target || !notify || !observer) throw new Error('Missing intersection observer')
+        notify(
+          [
+            {
+              target,
+              time: 0,
+              rootBounds: null,
+              boundingClientRect: new DOMRect(0, 0, 100, 1),
+              intersectionRect: new DOMRect(0, 0, 100, ratio),
+              isIntersecting: ratio > 0,
+              intersectionRatio: ratio,
+            },
+          ],
+          observer,
+        )
+      })
+    // The log can be at its internal bottom while its last row is below the panel viewport.
+    intersect(0)
+    append(17)
+    expect(controller.chat.store.getState().unread).toBe(1)
+    intersect(0.5)
+    fireEvent.scroll(log)
+    append(18)
+    expect(controller.chat.store.getState().unread).toBe(2)
+    intersect(1)
+    expect(controller.chat.store.getState().unread).toBe(0)
+    view.unmount()
+    expect(disconnect).toHaveBeenCalledOnce()
+  })
+
   it('preserves the relative anchor when exhausting history removes the button and moves the log up', async () => {
     const { history, log, composer } = await setup()
     log.dataset.movingHeader = 'true'

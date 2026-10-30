@@ -66,7 +66,7 @@ jobs:
           # Tests against the LiveKit of compose.yaml.
           area media '^(backend/|compose\.yaml$|deploy/dev/)'
           # The backend, web and deploy bundle images.
-          area images '^(backend/|frontend/|deploy/server/|tools/app-version\.sh$)'
+          area images '^(backend/|frontend/|deploy/server/|deploy/trial/|tools/app-version\.sh$)'
 
   backend:
     name: Backend
@@ -316,10 +316,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           uv sync --locked --project backend
-          uv run --no-sync --project backend ruff check deploy/server
-          uv run --no-sync --project backend ruff format --check deploy/server
-          uv run --no-sync --project backend mypy --strict --python-version 3.10 deploy/server/agent.py
+          uv run --no-sync --project backend ruff check deploy/server deploy/trial
+          uv run --no-sync --project backend ruff format --check deploy/server deploy/trial
+          uv run --no-sync --project backend mypy --strict --python-version 3.10 deploy/server/agent.py deploy/trial/artifact.py
           python3 -m unittest discover -s deploy/server/tests
+          python3 -m unittest discover -s deploy/trial
       # Every image is built and checked even when a linter fails, so one push reports all failures.
       - id: version
         name: Version
@@ -440,6 +441,20 @@ jobs:
           echo "$ports"
           # `ports` exits 0 even when it cannot parse the config, so its output is what counts.
           grep -q '^TCP Ports' <<< "$ports"
+
+      # The trial VPS receives these checked images over SSH from the operator's machine.
+      # Only a successful main build is eligible; no server credentials are held by GitHub.
+      - name: Package offline trial deployment
+        run: python3 deploy/trial/artifact.py build "$RUNNER_TEMP/trial-artifact"
+      - name: Upload offline trial deployment
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: trial-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/trial-artifact/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
 
   e2e:
     name: E2E

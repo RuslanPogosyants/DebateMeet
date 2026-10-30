@@ -119,9 +119,30 @@ export function MotionDisplay({
   const [open, setOpen] = useState(false)
   return (
     <section className="motion-heading" aria-label={s.motion}>
-      <p className="motion-text font-display text-title font-medium" data-testid="motion-text">
-        {motion?.text ? `${s.motion}: ${motion.text}` : s.motionEmpty}
-      </p>
+      <div
+        className="motion-summary"
+        role="region"
+        aria-label="Текст резолюции и инфослайда"
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The bounded summary must scroll with the keyboard, including in Safari.
+        tabIndex={motion?.text || motion?.infoslide ? 0 : undefined}
+      >
+        <p className="motion-text font-display text-title font-medium" data-testid="motion-text">
+          {motion?.text ? (
+            <>
+              <strong>{s.motion}: </strong>
+              {motion.text}
+            </>
+          ) : (
+            s.motionEmpty
+          )}
+        </p>
+        {motion?.infoslide && (
+          <p className="motion-infoslide">
+            <strong>Инфослайд: </strong>
+            {motion.infoslide}
+          </p>
+        )}
+      </div>
       <div className="motion-actions">
         {(Boolean(motion?.text) || Boolean(motion?.infoslide)) && (
           <button className="text-link motion-full" type="button" onClick={() => setOpen(true)}>

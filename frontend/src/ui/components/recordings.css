@@ -1,0 +1,47 @@
+.recording-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.recording-status:empty {
+  display: none;
+}
+.recording-status p {
+  margin: 0;
+}
+.recording-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.recording-live > span {
+  font-variant-numeric: tabular-nums;
+}
+.recording-live .action {
+  min-height: 44px;
+}
+.recordings-library ul {
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  list-style: none;
+}
+.recording-entry {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.recording-entry > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.recording-entry button {
+  min-height: 44px;
+}

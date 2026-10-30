@@ -10,6 +10,7 @@ import type {
   TelemetryBatch,
 } from '@/domain/diagnostics'
 import type { VersionSession } from './version-session'
+import type { RecordingPlatform } from './recording-ports'
 
 export type Joined = components['schemas']['JoinResponse']
 export type Credentials = { participantId: string; secret: string }
@@ -141,6 +142,25 @@ export interface MediaSession {
   selectDevice(kind: DeviceKind, id: string): Promise<MediaDeviceState>
   subscribedVideoIds(): readonly string[]
   measureAudio(): void
+  recordingMicrophone?(listener: (track: MediaStreamTrack | null) => void): () => void
+  recordingBackground?(enabled: boolean): void
+}
+
+export type RecordingLease = components['schemas']['RecordingLeaseResponse']
+export type RecordingRequest = { recordingId: string; sid: string; room: LogicalRoom }
+export interface RecordingApi {
+  status(roundId: string, credentials: Credentials): Promise<RecordingLease[]>
+  reserve(
+    roundId: string,
+    credentials: Credentials,
+    request: RecordingRequest,
+  ): Promise<RecordingLease>
+  renew(
+    roundId: string,
+    credentials: Credentials,
+    request: RecordingRequest,
+  ): Promise<RecordingLease>
+  stop(roundId: string, credentials: Credentials, request: RecordingRequest): Promise<void>
 }
 
 export type Preview = {
@@ -191,6 +211,8 @@ export interface ClientErrorBus {
 }
 
 export interface Services {
+  recording: RecordingPlatform
+  recordingApi: RecordingApi
   api: RoundApi
   chat: ChatApi
   clientClock: ClientClock

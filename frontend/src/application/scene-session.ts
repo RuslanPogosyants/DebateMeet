@@ -1,12 +1,11 @@
 import { createStore } from 'zustand/vanilla'
 import type { Snapshot } from '@/domain/snapshot'
-import type { ClientClock, MediaPerson, Preferences } from './ports'
+import type { MediaPerson, Preferences } from './ports'
 
 export type SceneState = {
   layout: 'speaker' | 'grid'
   showSelf: boolean
   pinnedId: string | null
-  primaryId: string | null
   videoIds: readonly string[]
   hiddenCameraIds: readonly string[]
   screenIds: readonly string[]
@@ -15,45 +14,46 @@ export type SceneState = {
 export class SceneSession {
   readonly store
   private readonly preferences: Preferences
-  private readonly clock: ClientClock
   private input: {
     snapshot: Snapshot
     self: string
     people: readonly MediaPerson[]
-    subscribed: readonly string[]
   } | null = null
+  private visibleVideoIds: readonly string[] = []
   private room: string | null = null
-  private candidate: string | null = null
-  private candidateSince = 0
-  private primarySince = 0
-  private timer: ReturnType<typeof setTimeout> | null = null
 
-  constructor(preferences: Preferences, clock: ClientClock) {
+  constructor(preferences: Preferences) {
     this.preferences = preferences
-    this.clock = clock
     this.store = createStore<SceneState>(() => ({
-      layout: preferences.sceneLayout(),
+      layout: 'grid',
       showSelf: preferences.selfVisible(),
       pinnedId: null,
-      primaryId: null,
       videoIds: [],
       hiddenCameraIds: [],
       screenIds: [],
       screenId: null,
     }))
   }
-  update(
-    snapshot: Snapshot,
-    self: string,
-    people: readonly MediaPerson[],
-    subscribedVideoIds: readonly string[],
-  ): void {
-    this.input = { snapshot, self, people, subscribed: subscribedVideoIds }
+  update(snapshot: Snapshot, self: string, people: readonly MediaPerson[]): void {
+    this.input = { snapshot, self, people }
+    this.reconcile()
+  }
+  setVisibleVideoIds(ids: readonly string[]): void {
+    const eligible = new Set(this.eligible())
+    const next = [...new Set(ids)].filter((id) => eligible.has(id)).slice(0, 12)
+    if (next.join() === this.visibleVideoIds.join()) return
+    this.visibleVideoIds = next
     this.reconcile()
   }
   setLayout(layout: 'speaker' | 'grid'): void {
-    this.preferences.setSceneLayout(layout)
-    this.store.setState({ layout })
+    if (layout === 'grid') this.pin(null)
+    else if (this.store.getState().pinnedId !== null || this.store.getState().screenId !== null)
+      this.store.setState({ layout: 'speaker' })
+    else {
+      const eligible = this.eligible()
+      const id = eligible.find((identity) => identity !== this.input?.self) ?? eligible[0]
+      if (id !== undefined) this.pin(id)
+    }
   }
   setSelfVisible(showSelf: boolean): void {
     this.preferences.setSelfVisible(showSelf)
@@ -62,8 +62,7 @@ export class SceneSession {
   }
   pin(id: string | null): void {
     if (id !== null && !this.eligible().includes(id)) return
-    this.store.setState({ pinnedId: id })
-    this.candidate = null
+    this.store.setState({ pinnedId: id, layout: id === null ? 'grid' : 'speaker' })
     this.reconcile()
   }
   setCameraHidden(id: string, hidden: boolean): void {
@@ -100,8 +99,6 @@ export class SceneSession {
       .map((person) => person.id)
   }
   private reconcile(): void {
-    if (this.timer !== null) clearTimeout(this.timer)
-    this.timer = null
     const input = this.input
     if (input === null) return
     const room =
@@ -110,6 +107,7 @@ export class SceneSession {
     const eligible = this.eligible()
     const changedRoom = room !== this.room
     this.room = room
+    if (changedRoom) this.visibleVideoIds = []
     const hiddenCameraIds = previous.hiddenCameraIds.filter((id) =>
       input.snapshot.participants.some((person) => person.id === id && id !== input.self),
     )
@@ -130,73 +128,39 @@ export class SceneSession {
         ? previous.pinnedId
         : null
     const retained = changedRoom ? [] : previous.videoIds.filter((id) => eligible.includes(id))
-    const videoIds = [...retained, ...eligible.filter((id) => !retained.includes(id))].slice(
-      0,
-      cameraBudget,
-    )
+    const requested = this.visibleVideoIds.filter((id) => eligible.includes(id))
+    const videoIds = [...new Set([...requested, ...retained, ...eligible])].slice(0, cameraBudget)
     if (pinnedId !== null && !videoIds.includes(pinnedId)) {
       if (videoIds.length === cameraBudget) videoIds.pop()
       videoIds.push(pinnedId)
     }
-    let primaryId =
-      !changedRoom && previous.primaryId !== null && videoIds.includes(previous.primaryId)
-        ? previous.primaryId
-        : (videoIds.find((id) => id !== input.self) ?? videoIds[0] ?? null)
-    const now = this.clock.now()
-    if (changedRoom || primaryId !== previous.primaryId) {
-      this.primarySince = now
-      this.candidate = null
-    }
-    if (pinnedId !== null) {
-      primaryId = pinnedId
-      this.candidate = null
-    } else {
-      // MediaSession keeps public SDK active-speaker priority in the people frame.
-      const next =
-        input.people.find(
-          (person) =>
-            person.id !== input.self &&
-            videoIds.includes(person.id) &&
-            person.speaking &&
-            (!person.camera ||
-              hiddenCameraIds.includes(person.id) ||
-              input.subscribed.includes(person.id)),
-        )?.id ?? null
-      if (next === null || next === primaryId) this.candidate = null
-      else {
-        if (this.candidate !== next) {
-          this.candidate = next
-          this.candidateSince = now
-        }
-        const wait = Math.max(800 - (now - this.candidateSince), 2000 - (now - this.primarySince))
-        if (wait <= 0) {
-          primaryId = next
-          this.primarySince = now
-          this.candidate = null
-        } else this.timer = setTimeout(() => this.reconcile(), wait)
-      }
-    }
+    const layout =
+      pinnedId !== null ||
+      (!changedRoom &&
+        previous.pinnedId === null &&
+        previous.layout === 'speaker' &&
+        previous.screenId !== null &&
+        screenIds.includes(previous.screenId))
+        ? 'speaker'
+        : 'grid'
     if (
       pinnedId !== previous.pinnedId ||
-      primaryId !== previous.primaryId ||
+      layout !== previous.layout ||
       videoIds.join() !== previous.videoIds.join() ||
       hiddenCameraIds.join() !== previous.hiddenCameraIds.join() ||
       screenIds.join() !== previous.screenIds.join() ||
       screenId !== previous.screenId
     ) {
-      if (primaryId !== previous.primaryId) this.primarySince = now
-      this.store.setState({ pinnedId, primaryId, videoIds, hiddenCameraIds, screenIds, screenId })
+      this.store.setState({ layout, pinnedId, videoIds, hiddenCameraIds, screenIds, screenId })
     }
   }
   close(): void {
-    if (this.timer !== null) clearTimeout(this.timer)
-    this.timer = null
     this.input = null
+    this.visibleVideoIds = []
     this.room = null
-    this.candidate = null
     this.store.setState({
       pinnedId: null,
-      primaryId: null,
+      layout: 'grid',
       videoIds: [],
       hiddenCameraIds: [],
       screenIds: [],

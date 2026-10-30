@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { RoundController } from '@/application/round-controller'
 import type { Participant } from '@/domain/snapshot'
@@ -49,12 +49,14 @@ export function ParticipantRoster({
   title,
   emptyText,
   onClose,
+  renderActions,
 }: {
   controller: RoundController
   participants: readonly Participant[]
   title: string
   emptyText?: string
   onClose: () => void
+  renderActions?: (participant: Participant) => ReactNode
 }) {
   const state = useStore(controller.store)
   const [page, setPage] = useState(0)
@@ -91,7 +93,11 @@ export function ParticipantRoster({
                         : 'Отключён'}
                   </p>
                 </div>
-                <ParticipantActions controller={controller} participant={person} />
+                {renderActions ? (
+                  renderActions(person)
+                ) : (
+                  <ParticipantActions controller={controller} participant={person} />
+                )}
               </li>
             )
           })}

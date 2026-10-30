@@ -61,6 +61,11 @@
  */
 :root {
   --background: #ffffff;
+  --tile-control-bg: #00000059;
+  --tile-control-hover: #000000a6;
+  --tile-caption-shade: #000000b8;
+  --tile-border: #ffffff20;
+  --avatar-background: #ffffff12;
   --foreground: #14140f;
   --card: #ffffff;
   --card-foreground: #14140f;
@@ -236,7 +241,7 @@ input[type='range'] {
   gap: 24px;
 }
 .entry-layout {
-  margin-top: 64px;
+  margin-top: 24px;
   display: grid;
   grid-template-columns: 1.25fr 1fr;
   gap: 64px;
@@ -265,7 +270,7 @@ input[type='range'] {
   border: 2px solid var(--foreground);
 }
 .preview-stage {
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
   background: var(--stage);
   color: var(--on-stage);
   display: grid;
@@ -376,6 +381,7 @@ input[type='range'] {
   position: absolute;
   inset: 0;
   border: 3px solid var(--protected);
+  border-radius: inherit;
   pointer-events: none;
 }
 .own-tile {
@@ -406,7 +412,7 @@ input[type='range'] {
     gap: 48px;
   }
   .entry-layout {
-    margin-top: 32px;
+    margin-top: 24px;
     grid-template-columns: 1fr;
     gap: 32px;
   }
@@ -416,8 +422,7 @@ input[type='range'] {
 }
 /* Logical rooms remain visible while the media scene switches subscriptions. */
 
-.timer-health,
-.back-to-base {
+.timer-health {
   flex-shrink: 0;
 }
 .room-wide {
@@ -434,7 +439,8 @@ input[type='range'] {
   font-size: 13px;
   line-height: 18px;
 }
-.room-own .room-description {
+.room-own .room-description,
+.room-own .room-more {
   color: var(--on-stage-muted);
 }
 .judge-control {
@@ -448,9 +454,6 @@ input[type='range'] {
 .judge-control > p {
   flex-basis: 100%;
   text-align: right;
-}
-.back-to-base {
-  align-self: flex-start;
 }
 dialog {
   color: var(--foreground);
@@ -1093,8 +1096,8 @@ dialog select {
 }
 .tile-actions {
   position: absolute;
-  z-index: 1;
-  inset: 6px 6px auto auto;
+  z-index: 3;
+  inset: 8px 8px auto auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1184,10 +1187,6 @@ dialog select {
 .meeting-more-sheet .reaction-preference {
   padding-inline: 12px;
   font-size: 15px;
-}
-.meeting-more-sheet .menu-leave {
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 8px 8px;
 }
 .participant-volume {
   display: grid;
@@ -1363,8 +1362,12 @@ dialog select {
   gap: 8px 16px;
 }
 .scene-choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px 8px;
-  min-height: 44px;
+  min-height: 32px;
+  line-height: 18px;
   border: 1px solid var(--border);
   cursor: pointer;
 }
@@ -1377,7 +1380,13 @@ dialog select {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 44px;
+  min-height: 32px;
+}
+@media (pointer: coarse) {
+  .scene-choice,
+  .self-view-choice {
+    min-height: 44px;
+  }
 }
 .quality-mark {
   display: inline-flex;
@@ -1575,7 +1584,7 @@ dialog select {
   left: 0;
 }
 
-/* The viewport owns the meeting; only the message history scrolls inside it. */
+/* Bounded regions preserve access to the meeting when the viewport is short. */
 .meeting-shell {
   height: 100dvh;
   min-height: 0;
@@ -1585,19 +1594,10 @@ dialog select {
   gap: 6px;
   overflow: hidden;
 }
-.meeting-center > .timer-health {
-  position: absolute;
-  z-index: 10;
-  top: 0;
-  left: 0;
-  right: 0;
-  max-width: 560px;
-  margin-inline: auto;
-}
-.meeting-center > .timer-health:not(:empty) {
+.meeting-notices > .timer-health {
   display: grid;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--background);
@@ -1617,6 +1617,9 @@ dialog select {
 }
 .meeting-notices {
   flex-shrink: 0;
+  max-height: min(30dvh, 200px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 13px;
   line-height: 18px;
 }
@@ -1630,28 +1633,135 @@ dialog select {
   flex: 1 1 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr) 280px;
+  grid-template-columns: 300px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
 }
-.meeting-workspace-compact {
-  grid-template-columns: minmax(0, 1fr) 280px;
-}
-.meeting-workspace-sidebar-closed {
-  grid-template-columns: 236px minmax(0, 1fr);
-}
-.meeting-workspace-compact.meeting-workspace-sidebar-closed {
+.meeting-workspace-panel-closed {
   grid-template-columns: minmax(0, 1fr);
+}
+.meeting-side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.meeting-side-panel[hidden] {
+  display: none;
+}
+.meeting-side-panel > .room-map {
+  flex: 0 1 auto;
+  min-height: 100px;
+  max-height: 48%;
+  overflow-y: auto;
+}
+.meeting-side-panel > .round-sidebar {
+  flex: 1 0 240px;
+  min-height: 240px;
+  padding: 8px 10px;
+}
+.meeting-side-panel .room-map-heading h2 {
+  font-size: 18px;
+}
+.meeting-side-panel .room-map-heading {
+  min-height: 44px;
+}
+@media (pointer: coarse) {
+  .meeting-side-panel .room-map-heading {
+    min-height: 56px;
+  }
+}
+.meeting-side-panel .room-card {
+  padding: 6px 8px;
+}
+.meeting-side-panel .room-map-grid {
+  gap: 5px;
+}
+.meeting-side-panel .room-description {
+  margin-top: 2px;
+}
+.meeting-side-panel .room-card ul {
+  margin-top: 4px;
+}
+.meeting-side-panel .room-card-heading {
+  font-size: 14px;
+}
+.meeting-side-panel .room-enter {
+  font-size: 13px;
+}
+.meeting-side-panel .sidebar-heading {
+  min-height: 32px;
+}
+.meeting-side-panel .round-sidebar [role='tab'] {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.meeting-side-panel .chat-panel > h2 {
+  display: none;
+}
+.meeting-side-panel .chat-panel {
+  gap: 6px;
+}
+.meeting-side-panel .chat-message + .chat-message {
+  margin-top: 10px;
+}
+.meeting-side-panel .chat-composer {
+  gap: 6px;
+}
+.meeting-side-panel .chat-composer textarea {
+  padding: 8px;
+  height: 48px;
+}
+.meeting-side-panel .chat-compose-actions .action {
+  min-height: 32px;
+  padding: 4px 10px;
+}
+.chat-reading-end {
+  height: 1px;
+}
+.meeting-panel-sheet {
+  inset: 0 auto 0 0;
+  width: min(340px, 100vw - 16px);
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  border-radius: 0 12px 12px 0;
+}
+.meeting-panel-sheet .sheet-content {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.meeting-panel-sheet .meeting-side-panel {
+  flex: 1 1 0;
+}
+.meeting-panel-sheet .room-map-heading {
+  min-height: 0;
+  margin-bottom: 0;
+}
+.meeting-panel-sheet .room-map-heading:has(button) {
+  min-height: 44px;
+  margin-bottom: 6px;
 }
 .meeting-center {
   position: relative;
   display: grid;
   container-type: inline-size;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(min-content, 1fr);
   gap: 6px;
   min-width: 0;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .scene-round-header {
   display: grid;
@@ -1664,12 +1774,31 @@ dialog select {
 .scene-round-header .motion-heading {
   min-width: 0;
 }
-.scene-round-header .motion-text {
+.scene-round-header .motion-summary {
+  max-height: 96px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.scene-round-header .motion-text,
+.scene-round-header .motion-infoslide {
   font-family: var(--font-sans);
-  font-size: 18px;
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 400;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.scene-round-header .motion-text {
+  font-size: 17px;
   line-height: 24px;
   font-weight: 500;
-  white-space: normal;
+}
+.scene-round-header .motion-summary strong {
+  font-weight: 700;
+}
+.scene-round-header .motion-infoslide {
+  margin-top: 6px;
 }
 .scene-round-header .motion-actions {
   margin-top: 2px;
@@ -1694,7 +1823,7 @@ dialog select {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  min-height: 0;
+  min-height: min-content;
   overflow: hidden;
 }
 .scene-toolbar {
@@ -1704,7 +1833,7 @@ dialog select {
   gap: 8px 12px;
   flex-shrink: 0;
   min-width: 0;
-  padding-top: 6px;
+  padding-block: 6px;
 }
 .scene-heading {
   display: flex;
@@ -1713,12 +1842,36 @@ dialog select {
   gap: 2px 10px;
   min-width: 0;
 }
-.scene-heading p,
-.scene-heading .back-to-base {
-  font-size: 13px;
-  line-height: 18px;
+.scene-heading h1 {
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.scene-heading .icon-control {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+.scene-heading .icon-control svg {
+  width: 18px;
+  height: 18px;
+}
+.scene-heading .hand-queue-trigger {
+  flex-basis: 32px;
+}
+@media (pointer: coarse) {
+  .scene-heading .icon-control {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+  .scene-heading .hand-queue-trigger {
+    flex-basis: 44px;
+  }
 }
 .scene-heading p {
+  font-size: 13px;
+  line-height: 18px;
   color: var(--muted-foreground);
 }
 .scene-controls {
@@ -1903,12 +2056,12 @@ dialog select {
 }
 .hand-queue-count {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: -4px;
+  right: -4px;
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--foreground);
   color: var(--background);
@@ -2103,7 +2256,7 @@ dialog select {
   flex-direction: column;
   flex: 1 1 0;
   min-width: 0;
-  min-height: 0;
+  min-height: min-content;
   overflow: hidden;
   border-radius: 12px;
   background: var(--stage);
@@ -2115,8 +2268,8 @@ dialog select {
   flex-direction: column;
   flex: 1 1 0;
   min-width: 0;
-  min-height: 0;
-  padding: 2px 2px 0;
+  min-height: min-content;
+  padding: 10px 10px 0;
   background: var(--stage);
   color: var(--on-stage);
   overflow: hidden;
@@ -2126,7 +2279,7 @@ dialog select {
   display: flex;
   flex: 1 1 0;
   min-width: 0;
-  min-height: 0;
+  min-height: 180px;
   overflow: hidden;
   border-radius: 10px 10px 0 0;
 }
@@ -2134,19 +2287,44 @@ dialog select {
   flex: 1 1 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   grid-auto-rows: minmax(0, 1fr);
-  gap: 2px;
+  gap: 10px;
+}
+.participant-grid:not(.speaker-layout) > .participant-tile {
+  grid-column: span 2;
 }
 .participant-grid:not(.speaker-layout):not(
-    :has(> :nth-child(3 of .participant-tile:not([hidden])))
+    :has(> :nth-child(5 of .participant-tile:not([hidden])))
   ) {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.participant-grid:not(.speaker-layout):has(> :nth-child(3 of .participant-tile:not([hidden]))):not(
+    :has(> :nth-child(4 of .participant-tile:not([hidden])))
+  )
+  > :nth-child(3 of .participant-tile:not([hidden])) {
+  grid-column: 2 / span 2;
+}
+.participant-grid:not(.speaker-layout):has(> :nth-child(5 of .participant-tile:not([hidden]))):not(
+    :has(> :nth-child(6 of .participant-tile:not([hidden])))
+  )
+  > :nth-child(4 of .participant-tile:not([hidden])) {
+  grid-column: 2 / span 2;
+}
+.participant-grid:not(.speaker-layout):has(> :nth-child(5 of .participant-tile:not([hidden]))):not(
+    :has(> :nth-child(6 of .participant-tile:not([hidden])))
+  )
+  > :nth-child(5 of .participant-tile:not([hidden])) {
+  grid-column: 4 / span 2;
 }
 .participant-grid:not(.speaker-layout):not(
     :has(> :nth-child(2 of .participant-tile:not([hidden])))
   ) {
   grid-template-columns: minmax(0, 1fr);
+}
+.participant-grid:not(.speaker-layout):not(:has(> :nth-child(2 of .participant-tile:not([hidden]))))
+  > .participant-tile {
+  grid-column: auto;
 }
 .participant-tile {
   position: relative;
@@ -2156,6 +2334,8 @@ dialog select {
   min-height: 0;
   background: var(--tile);
   overflow: hidden;
+  border: 1px solid var(--tile-border);
+  border-radius: 10px;
 }
 .participant-tile[hidden] {
   display: none;
@@ -2167,7 +2347,7 @@ dialog select {
   min-width: 0;
   display: grid;
   place-items: center;
-  background: var(--stage);
+  background: var(--tile);
 }
 .tile-caption {
   display: flex;
@@ -2191,9 +2371,43 @@ dialog select {
   padding: 12px;
   text-align: center;
 }
-.silhouette-placeholder svg {
-  width: clamp(32px, 10vh, 96px);
-  height: clamp(32px, 10vh, 96px);
+.participant-avatar {
+  display: grid;
+  place-items: center;
+}
+.participant-avatar > span {
+  display: grid;
+  place-items: center;
+  width: clamp(44px, 22cqw, 88px);
+  height: clamp(44px, 22cqw, 88px);
+  border-radius: 50%;
+  background: var(--avatar-background);
+  color: var(--on-stage);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(18px, 8cqw, 28px);
+  line-height: 1;
+}
+.own-tile .tile-media {
+  background: var(--tile-own);
+}
+.tile-caption
+  .quality-mark:is([data-quality='excellent'], [data-quality='good'], [data-quality='unknown']) {
+  display: none;
+}
+.judge-participant-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.judge-participant-controls .icon-control {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+}
+.room-more {
+  margin-top: 6px;
+  color: var(--muted-foreground);
 }
 .participant-grid.speaker-layout {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2303,6 +2517,18 @@ dialog select {
   gap: 6px;
   min-width: 0;
 }
+.call-leave {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 52px;
+  min-height: 52px;
+  padding: 0 12px;
+  border: 1px solid var(--foreground);
+  border-radius: 26px;
+  white-space: nowrap;
+}
 .room-roster-trigger {
   position: relative;
 }
@@ -2325,6 +2551,9 @@ dialog select {
   .meeting-shell {
     padding: 8px 12px;
     gap: 6px;
+  }
+  .meeting-workspace:not(.meeting-workspace-panel-closed) {
+    grid-template-columns: 280px minmax(0, 1fr);
   }
 }
 @media (max-width: 1100px) {
@@ -2352,8 +2581,9 @@ dialog select {
   .hand-queue {
     flex-wrap: wrap;
   }
-  .participant-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .participant-grid:not(.speaker-layout) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
   }
   .stage-pagination {
     min-height: 44px;
@@ -2380,7 +2610,7 @@ dialog select {
     text-align: center;
   }
   .scene-round-header .motion-text {
-    font-size: 18px;
+    font-size: 17px;
     line-height: 24px;
   }
   .scene-round-header .motion-actions {
@@ -2411,11 +2641,11 @@ dialog select {
     flex-basis: 100%;
   }
   .scene-heading h1 {
-    font-size: 20px;
-    line-height: 24px;
+    font-size: 16px;
+    line-height: 20px;
   }
   .scene-controls {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     width: 100%;
   }
   .scene-choice {
@@ -2441,18 +2671,39 @@ dialog select {
   .meeting-controls {
     gap: 0;
     margin-block: 6px;
+    padding-inline: 4px;
+  }
+  .meeting-controls .media-toggle,
+  .meeting-controls .meeting-control-group > .icon-control,
+  .meeting-controls .call-leave {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+  .meeting-controls .call-leave {
+    flex: 0 0 44px;
+    padding: 0;
+    gap: 0;
+    border-radius: 50%;
+  }
+  .call-leave > span {
+    display: none;
   }
   .meeting-control-group {
     column-gap: 6px;
     row-gap: 4px;
   }
   .meeting-control-group > .reaction-buttons {
-    flex: 0 0 calc(100% - 54px);
+    flex: 0 0 calc(100% - 46px);
+    column-gap: 1px;
     order: 1;
     justify-content: center;
   }
   .meeting-control-group > .more-trigger {
     order: 1;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
   }
 }
 
@@ -2461,27 +2712,91 @@ dialog select {
   container-type: inline-size;
 }
 .tile-personal-controls {
-  position: absolute;
-  z-index: 2;
-  bottom: 6px;
-  left: 6px;
+  position: static;
   display: flex;
   align-items: center;
   gap: 2px;
 }
-.tile-control {
-  border-color: var(--on-stage-muted);
-  background: var(--stage);
+.tile-actions .tile-control,
+.tile-actions .participant-actions-trigger {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--tile-control-bg);
   color: var(--on-stage);
 }
-.tile-control[aria-pressed='true'] {
-  border-color: var(--protected);
+.tile-actions {
+  gap: 2px;
+}
+.tile-actions .tile-control[aria-pressed='true'] {
   background: var(--protected);
   color: var(--foreground);
 }
-.tile-personal-controls .tile-control svg {
-  width: 20px;
-  height: 20px;
+.tile-actions .tile-control:hover,
+.tile-actions .participant-actions-trigger:hover {
+  background: var(--tile-control-hover);
+  color: var(--on-stage);
+}
+.tile-actions .tile-control svg,
+.tile-actions .participant-actions-trigger svg {
+  width: 18px;
+  height: 18px;
+}
+.tile-badges {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 8px;
+}
+.tile-caption {
+  position: absolute;
+  z-index: 2;
+  inset: auto 0 0;
+  padding: 20px 10px 8px;
+  background: linear-gradient(transparent, var(--tile-caption-shade));
+  color: var(--on-stage);
+  pointer-events: none;
+}
+.tile-caption .quality-mark {
+  color: var(--on-stage-muted);
+}
+.tile-microphone {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.tile-microphone svg {
+  width: 16px;
+  height: 16px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .tile-actions .tile-control,
+  .tile-actions .participant-actions-trigger {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .participant-tile:hover .tile-actions .tile-control,
+  .participant-tile:hover .tile-actions .participant-actions-trigger,
+  .participant-tile:focus-within .tile-actions .tile-control,
+  .participant-tile:focus-within .tile-actions .participant-actions-trigger,
+  .tile-actions .tile-control[aria-pressed='true'],
+  .tile-actions .tile-control[aria-expanded='true'],
+  .tile-actions .participant-actions-trigger[aria-expanded='true'] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (pointer: coarse), (hover: none) {
+  .tile-actions .tile-control,
+  .tile-actions .participant-actions-trigger {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
 }
 .camera-hidden-label {
   max-width: 180px;
@@ -2541,14 +2856,34 @@ dialog select {
   min-width: 44px;
   min-height: 44px;
 }
-@container (max-width: 190px) {
-  .tile-personal-controls .tile-camera-control {
-    display: none;
+@container (max-width: 160px) {
+  .tile-actions {
+    inset: 4px 4px auto auto;
+  }
+  .tile-actions .tile-control {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
   }
 }
-@container (max-width: 148px) {
-  .tile-personal-controls .tile-volume-control {
-    display: none;
+@container (max-width: 120px) {
+  .tile-actions {
+    inset: 4px 1px auto auto;
+  }
+  .tile-personal-controls {
+    gap: 0;
+  }
+  .tile-actions .tile-control {
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 5px;
+  }
+  .tile-actions .tile-control svg {
+    width: 16px;
+    height: 16px;
   }
 }
 @media (max-width: 600px) {
