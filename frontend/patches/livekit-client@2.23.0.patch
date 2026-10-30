@@ -1,8 +1,26 @@
 diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
-index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862af6397b8 100644
+index a983f6e39c474912a9052d4a5f7155875f204e4a..2b0cf7fc11f8afae920deb1a8b5d6b5fbfdf4463 100644
 --- a/dist/livekit-client.esm.mjs
 +++ b/dist/livekit-client.esm.mjs
-@@ -22967,6 +22967,38 @@
+@@ -18878,6 +18878,7 @@
+       var _this = this;
+       let useV0Path = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : false;
+       let publisherOffer = arguments.length > 5 ? arguments[5] : undefined;
++      let upgradeTimeout = arguments.length > 6 && arguments[6] !== undefined ? arguments[6] : opts.websocketTimeout;
+       return function* () {
+         if (_this.lifecycleState === 'disconnecting') {
+           yield _this.settleInFlightClose();
+@@ -18892,7 +18893,8 @@
+         }
+         _this.options = opts;
+         try {
+-          const res = yield _this.connect(url, token, opts, abortSignal, useV0Path, publisherOffer);
++          // A per-attempt upgrade cap must not shorten the options retained for resume.
++          const res = yield _this.connect(url, token, Object.assign(Object.assign({}, opts), { websocketTimeout: upgradeTimeout }), abortSignal, useV0Path, publisherOffer);
+           return res;
+         } catch (e) {
+           // reported here rather than at each rejection site inside connect(), so that no failure
+@@ -22967,6 +22969,38 @@
  }const DEFAULT_DIMENSIONS_TIMEOUT = 1000;
  const PRE_CONNECT_BUFFER_TIMEOUT = 10000;
  class LocalTrack extends Track {
@@ -41,7 +59,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    /** @internal */
    get sender() {
      return this._sender;
-@@ -23070,89 +23102,103 @@
+@@ -23070,89 +23104,103 @@
    getSourceTrackSettings() {
      return this._mediaStreamTrack.getSettings();
    }
@@ -228,7 +246,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    waitForDimensions() {
      return __awaiter(this, arguments, void 0, function () {
        var _this = this;
-@@ -23187,22 +23233,28 @@
+@@ -23187,22 +23235,28 @@
        }();
      });
    }
@@ -273,7 +291,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    /**
     * @returns DeviceID of the device that is currently being used for this track
     */
-@@ -23277,84 +23329,108 @@
+@@ -23277,84 +23331,108 @@
        // recompute sender encoding parameters.
      });
    }
@@ -459,7 +477,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    setTrackMuted(muted) {
      this.log.debug("setting ".concat(this.kind, " track ").concat(muted ? 'muted' : 'unmuted'), this.logContext);
      if (this.isMuted === muted && this._mediaStreamTrack.enabled !== muted) {
-@@ -23384,22 +23460,21 @@
+@@ -23384,22 +23462,21 @@
        }
      });
    }
@@ -497,7 +515,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    /**
     * pauses publishing to the server without disabling the local MediaStreamTrack
     * this is used to display a user's own video locally while pausing publishing to
-@@ -23703,55 +23778,51 @@
+@@ -23703,55 +23780,51 @@
      this.audioContext = audioContext;
      this.checkForSilence();
    }
@@ -596,7 +614,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    }
    restartTrack(options) {
      return __awaiter(this, void 0, void 0, function* () {
-@@ -24496,54 +24567,44 @@
+@@ -24496,54 +24569,44 @@
        }
      });
    }
@@ -687,7 +705,18 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    }
    setTrackMuted(muted) {
      super.setTrackMuted(muted);
-@@ -25612,7 +25673,7 @@
+@@ -25550,7 +25613,9 @@
+             _this2.shouldFailOnV1Path = false;
+             throw ConnectionError.serviceNotFound('Simulated v1 path failure', 'v0-rtc');
+           }
+-          const joinResponse = yield _this2.client.join(url, token, opts, abortSignal, useV0Path, offerProto);
++          // Retry a stalled first upgrade promptly; later attempts retain the full deadline.
++          const upgradeTimeout = _this2.maxJoinAttempts > 1 && _this2.joinAttempts === 1 ? Math.min(4000, opts.websocketTimeout) : opts.websocketTimeout;
++          const joinResponse = yield _this2.client.join(url, token, opts, abortSignal, useV0Path, offerProto, upgradeTimeout);
+           if (abortSignal === null || abortSignal === void 0 ? void 0 : abortSignal.aborted) {
+             _this2.log.info('join cancelled after the signal join response');
+             throw ConnectionError.cancelled('Connection aborted');
+@@ -25612,7 +25677,7 @@
            };
          } catch (e) {
            if (e instanceof ConnectionError) {
@@ -696,7 +725,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
                _this2.log.warn("Couldn't connect to server, attempt ".concat(_this2.joinAttempts, " of ").concat(_this2.maxJoinAttempts));
                if (_this2.joinAttempts < _this2.maxJoinAttempts) {
                  return _this2.join(url, token, opts, abortSignal, useV0Path);
-@@ -26378,7 +26439,9 @@
+@@ -26378,7 +26443,9 @@
              this.log.warn('attempted connection restart, without signal options present');
              throw new SignalReconnectError();
            }
@@ -706,7 +735,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
            joinResponse = (yield this.join(regionUrl !== null && regionUrl !== void 0 ? regionUrl : this.url, this.token, this.signalOpts, abortSignal, !this.options.singlePeerConnection)).joinResponse;
          } catch (e) {
            if (e instanceof ConnectionError && e.reason === ConnectionErrorReason.NotAllowed) {
-@@ -31733,79 +31796,94 @@
+@@ -31733,79 +31800,94 @@
   * the user instead of two separate ones.
   * @param options
   */
@@ -873,7 +902,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
          const isAudio = mediaStreamTrack.kind === 'audio';
          let trackConstraints;
          const conOrBool = isAudio ? constraints.audio : constraints.video;
-@@ -31815,12 +31893,13 @@
+@@ -31815,12 +31897,13 @@
          // update the constraints with the device id the user gave permissions to in the permission prompt
          // otherwise each track restart (e.g. mute - unmute) will try to initialize the device again -> causing additional permission prompts
          const newDeviceId = mediaStreamTrack.getSettings().deviceId;
@@ -891,7 +920,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
          }
          const track = mediaTrackToLocalTrack(mediaStreamTrack, trackConstraints, loggerOptions);
          if (track.kind === Track.Kind.Video) {
-@@ -31830,23 +31909,29 @@
+@@ -31830,23 +31913,29 @@
          }
          track.mediaStream = stream;
          if (isAudioTrack(track) && audioProcessor) {
@@ -934,7 +963,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
  /**
   * Creates a [[LocalVideoTrack]] with getUserMedia()
   * @param options
-@@ -32194,6 +32279,21 @@
+@@ -32194,6 +32283,21 @@
      trackSids: perms.allowedTrackSids || []
    });
  }class LocalParticipant extends Participant {
@@ -956,7 +985,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    /** @internal */
    constructor(sid, identity, engine, options, roomOutgoingDataStreamManager, roomOutgoingDataTrackManager, rpcClientManager, rpcServerManager) {
      super(sid, identity, undefined, undefined, undefined, {
-@@ -32609,116 +32709,150 @@
+@@ -32609,116 +32713,150 @@
        }
      });
    }
@@ -1216,7 +1245,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    }
    /**
     * Publish both camera and microphone at the same time. This is useful for
-@@ -32749,43 +32883,70 @@
+@@ -32749,43 +32887,70 @@
     * @param options
     * @returns
     */
@@ -1324,7 +1353,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    /**
     * Creates a screen capture tracks with getDisplayMedia().
     * A LocalVideoTrack is always created and returned.
-@@ -32873,7 +33034,45 @@
+@@ -32873,7 +33038,45 @@
        this.engine.once(EngineEvent.Closing, onClosing);
      });
    }
@@ -1371,7 +1400,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
      return __awaiter(this, arguments, void 0, function (track, options) {
        var _this2 = this;
        let isRepublish = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : false;
-@@ -33018,7 +33217,7 @@
+@@ -33018,7 +33221,7 @@
            }
            throw e;
          } finally {
@@ -1380,7 +1409,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
          }
        }();
      });
-@@ -33626,52 +33825,73 @@
+@@ -33626,52 +33829,73 @@
        return results.filter(track => !!track);
      });
    }
@@ -1495,7 +1524,7 @@ index a983f6e39c474912a9052d4a5f7155875f204e4a..497dd6863dcad65845eb92c9d6148862
    }
    /**
     * Publish a new data payload to the room. Data will be forwarded to each
-@@ -36256,7 +36476,7 @@
+@@ -36256,7 +36480,7 @@
            try {
              if (_this3.options.webAudioMix) {
                // @ts-expect-error setSinkId is not yet in the typescript type of AudioContext
@@ -2164,3 +2193,15 @@ index 6730ac74111c8f20c6cdc9f94665978b658af2f3..a4adae5765d4f5be8462e533c6aeffe3
      );
    }
  }
+diff --git a/dist/src/api/SignalClient.d.ts b/dist/src/api/SignalClient.d.ts
+--- a/dist/src/api/SignalClient.d.ts
++++ b/dist/src/api/SignalClient.d.ts
+@@ -103,7 +103,7 @@
+     private useV0SignalPath;
+     constructor(useJSON?: boolean, loggerOptions?: LoggerOptions);
+     private get logContext();
+-    join(url: string, token: string, opts: SignalOptions, abortSignal?: AbortSignal, useV0Path?: boolean, publisherOffer?: SessionDescription): Promise<JoinResponse>;
++    join(url: string, token: string, opts: SignalOptions, abortSignal?: AbortSignal, useV0Path?: boolean, publisherOffer?: SessionDescription, upgradeTimeout?: number): Promise<JoinResponse>;
+     reconnect(url: string, token: string, sid?: string, reason?: ReconnectReason): Promise<ReconnectResponse | undefined>;
+     private connect;
+     startReadingLoop(signalReader: ReadableStreamDefaultReader<string | ArrayBuffer>): Promise<void>;

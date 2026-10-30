@@ -1520,21 +1520,6 @@ dialog select {
   background: var(--secondary);
   border-color: var(--foreground);
 }
-.chat-toggle {
-  position: relative;
-  margin-left: 0;
-}
-.unread-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 20px;
-  border-radius: 12px;
-  padding-inline: 4px;
-  background: var(--foreground);
-  color: var(--background);
-  font-size: 13px;
-}
 /* One shared clock keeps all timer actions beside the editable digits. */
 
 .countdown[data-running='true'] .countdown-digits {

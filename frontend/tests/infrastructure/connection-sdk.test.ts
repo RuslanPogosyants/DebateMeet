@@ -59,17 +59,18 @@ function setup() {
 }
 
 describe('installed LiveKit ESM signaling retries', () => {
-  it('retries a signal timeout with the same credential and retains the existing deadline', async () => {
+  it('retries promptly with the same credential while retaining the stored recovery deadline', async () => {
     const { join, response, enter, options } = setup()
     join.mockRejectedValueOnce(ConnectionError.timeout('signal upgrade timed out'))
     join.mockResolvedValue(response)
     await enter()
     expect(join).toHaveBeenCalledTimes(2)
-    for (const call of join.mock.calls) {
+    for (const [index, call] of join.mock.calls.entries()) {
       expect(call[0]).toBe('wss://media.example.test')
       expect(call[1]).toBe('test-token')
       expect(call[2]).toBe(options)
       expect(call[2].websocketTimeout).toBe(15000)
+      expect(call[6]).toBe(index === 0 ? 4000 : 15000)
     }
   })
 
@@ -134,11 +135,14 @@ describe('installed LiveKit ESM signaling retries', () => {
       .mockResolvedValueOnce(response)
     await enter()
     expect(join).toHaveBeenCalledTimes(3)
+    expect(join.mock.calls.map((call) => call[6])).toEqual([4000, 15000, 15000])
     join.mockClear().mockRejectedValue(failure)
     await expect(restart()).rejects.toBeDefined()
     expect(join).toHaveBeenCalledTimes(3)
+    expect(join.mock.calls.map((call) => call[6])).toEqual([4000, 15000, 15000])
     join.mockClear()
     await expect(restart()).rejects.toBeDefined()
     expect(join).toHaveBeenCalledTimes(3)
+    expect(join.mock.calls.map((call) => call[6])).toEqual([4000, 15000, 15000])
   })
 })

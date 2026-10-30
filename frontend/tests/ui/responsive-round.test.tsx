@@ -491,7 +491,8 @@ describe('responsive meeting navigation', () => {
       screen.getByRole('textbox', { name: 'Сообщение в общий чат' }),
       'Сохранить черновик',
     )
-    const toggle = screen.getByRole('button', { name: /^Чат$/u })
+    expect(screen.queryByRole('button', { name: /^Чат$/u })).not.toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: 'Свернуть боковую панель' })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     const collapse = screen.getByRole('button', { name: 'Свернуть боковую панель' })
     await userEvent.click(collapse)
@@ -534,10 +535,7 @@ describe('responsive meeting navigation', () => {
     if (!own) throw new Error('Missing participant')
     own.presence.status = 'connected'
     const { media } = await meeting(value)
-    const chatTrigger = screen
-      .getAllByRole('button', { name: /^Чат$/u })
-      .find((button) => button.classList.contains('chat-toggle'))
-    if (!chatTrigger) throw new Error('Missing chat trigger')
+    const chatTrigger = screen.getByRole('button', { name: 'Показать боковую панель' })
     await userEvent.click(chatTrigger)
     const chat = screen.getByRole('dialog', { name: 'Комнаты и чат' })
     const draft = within(chat).getByRole('textbox', { name: 'Сообщение в общий чат' })

@@ -251,7 +251,6 @@ export const contentStrings = {
   returning: 'Вернутся в барабан',
   none: 'нет',
   chat: 'Общий чат',
-  chatButton: 'Чат',
   collapseChat: 'Свернуть чат',
   message: 'Сообщение в общий чат',
   send: 'Отправить',
