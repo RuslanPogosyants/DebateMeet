@@ -84,8 +84,10 @@ export async function measureRenderedAudio(page: Page, toneHz?: number) {
       })
   })
   if (toneHz !== undefined) {
-    // Replace only microphone input. Signaling, encoding, SFU delivery and speaker output stay real.
+    // RNNoise suppresses steady tones, so isolate the transport using the normal gain path.
+    // Signaling, encoding, SFU delivery and speaker output stay real.
     await page.addInitScript((frequency) => {
+      localStorage.setItem('debatemeet.noiseSuppression', 'false')
       const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
       navigator.mediaDevices.getUserMedia = async (constraints) => {
         const stream = await capture(constraints)
