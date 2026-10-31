@@ -58,6 +58,25 @@ export class BrowserPreferences implements Preferences {
       )
   }
 
+  microphoneVolume(): number {
+    const raw = this.get('debatemeet.microphoneVolume')
+    if (raw === null || raw.trim() === '') return 1
+    const value = Number(raw)
+    return Number.isFinite(value) ? Math.max(0, Math.min(2, value)) : 1
+  }
+  setMicrophoneVolume(value: number): void {
+    if (Number.isFinite(value))
+      this.set('debatemeet.microphoneVolume', String(Math.max(0, Math.min(2, value))))
+  }
+
+  noiseSuppression(): boolean {
+    return this.get('debatemeet.noiseSuppression') !== 'false'
+  }
+
+  setNoiseSuppression(enabled: boolean): void {
+    this.set('debatemeet.noiseSuppression', String(enabled))
+  }
+
   reactionsHidden(): boolean {
     return this.get('debatemeet.reactionsHidden') === 'true'
   }

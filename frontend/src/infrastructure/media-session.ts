@@ -2,6 +2,7 @@ import {
   ConnectionState,
   ConnectionQuality,
   DefaultReconnectPolicy,
+  LocalAudioTrack,
   DisconnectReason,
   RemoteAudioTrack,
   Room,
@@ -25,6 +26,7 @@ import { readChatEvent } from '@/domain/chat'
 import { readMicrophoneEvent, readReaction } from '@/domain/social'
 import { MediaDevices } from './media-devices'
 import { MediaStats, type StatsSource } from './media-stats'
+import { NoiseFilter } from './noise-filter'
 import { BrowserClientClock } from './client-clock'
 
 function ended(reason: DisconnectReason | undefined): EndReason {
@@ -75,6 +77,7 @@ export class LiveKitMediaSession implements MediaSession {
   private microphoneRevision = 0
   private readonly adaptiveSettings = { pauseVideoInBackground: true }
   private readonly stats: MediaStats
+  private readonly noise: NoiseFilter
   private devices: MediaDevices | null = null
   private closed = false
   private screenCapture: ScreenCapture | null = null
@@ -83,7 +86,11 @@ export class LiveKitMediaSession implements MediaSession {
     // The round name is an access key. SDK debug logs must not print connection URLs/tokens.
     setLogLevel('silent')
     const retries = new DefaultReconnectPolicy()
-    this.context = new AudioContext()
+    try {
+      this.context = new AudioContext({ sampleRate: 48000 })
+    } catch {
+      this.context = new AudioContext()
+    }
     this.room = new Room({
       adaptiveStream: this.adaptiveSettings,
       dynacast: true,
@@ -93,6 +100,13 @@ export class LiveKitMediaSession implements MediaSession {
           this.events?.mayReconnect() === false ? null : retries.nextRetryDelayInMs(context),
       },
     })
+    this.noise = new NoiseFilter(
+      this.context,
+      (status) => this.events?.noiseStatus(status),
+      () => this.recordingMicChanged(),
+      undefined,
+      (status) => this.events?.microphoneVolumeStatus(status),
+    )
     this.stats = new MediaStats(
       () => this.statsSource(),
       clock,
@@ -120,9 +134,11 @@ export class LiveKitMediaSession implements MediaSession {
       this.refresh()
     })
     this.room.on(RoomEvent.LocalTrackPublished, () => {
+      this.bindMicrophone()
       this.refresh()
     })
     this.room.on(RoomEvent.LocalTrackUnpublished, () => {
+      this.bindMicrophone()
       this.refresh()
     })
     this.room.on(RoomEvent.ActiveDeviceChanged, () => this.recordingMicChanged())
@@ -190,6 +206,8 @@ export class LiveKitMediaSession implements MediaSession {
       this.events?.reconnecting()
     })
     this.room.on(RoomEvent.Reconnected, () => {
+      this.bindMicrophone()
+      this.noise.sync()
       this.refresh()
       this.stats.start()
       this.events?.reconnected()
@@ -199,6 +217,7 @@ export class LiveKitMediaSession implements MediaSession {
     })
     this.room.on(RoomEvent.Disconnected, (reason) => {
       this.closed = true
+      this.noise.close()
       this.recordingMic?.(null)
       this.watchRecordingTrack(null)
       void this.stopScreen()
@@ -266,6 +285,7 @@ export class LiveKitMediaSession implements MediaSession {
   async disconnect(): Promise<void> {
     this.intentional = true
     this.closed = true
+    this.noise.close()
     this.recordingMic?.(null)
     this.watchRecordingTrack(null)
     // Fence pending display capture and stop its raw track before disconnect yields.
@@ -336,7 +356,21 @@ export class LiveKitMediaSession implements MediaSession {
     return true
   }
 
+  private bindMicrophone(): void {
+    const track = this.room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track
+    this.noise.bind(track instanceof LocalAudioTrack ? track : null)
+  }
+
+  setMicrophoneVolume(value: number): void {
+    this.noise.setVolume(value)
+  }
+
+  setNoiseSuppression(enabled: boolean): void {
+    this.noise.setDesired(enabled)
+  }
+
   async microphone(enabled: boolean): Promise<void> {
+    if (!enabled) this.noise.fence()
     const revision = ++this.microphoneRevision
     this.recordingMicSuppressed = !enabled
     if (!enabled) this.recordingMic?.(null)
@@ -344,6 +378,8 @@ export class LiveKitMediaSession implements MediaSession {
       await this.devices?.microphone(enabled)
     } finally {
       if (revision === this.microphoneRevision) this.recordingMicSuppressed = false
+      this.bindMicrophone()
+      this.noise.sync()
       this.refresh()
     }
   }
@@ -375,7 +411,8 @@ export class LiveKitMediaSession implements MediaSession {
     )
     const track = publication?.track ?? null
     this.watchRecordingTrack(track)
-    const raw = track?.mediaStreamTrack
+    const raw =
+      track instanceof LocalAudioTrack ? this.noise.recordingTrack(track) : track?.mediaStreamTrack
     this.recordingMic?.(
       !this.closed &&
         !this.recordingMicSuppressed &&
@@ -481,9 +518,13 @@ export class LiveKitMediaSession implements MediaSession {
   }
   async selectDevice(kind: DeviceKind, id: string) {
     if (this.devices === null) return Promise.reject(new Error('Media unavailable'))
-    const state = await this.devices.select(kind, id)
-    this.recordingMicChanged()
-    return state
+    if (kind === 'audioinput') this.noise.changingInput()
+    try {
+      return await this.devices.select(kind, id)
+    } finally {
+      if (kind === 'audioinput') this.noise.sync()
+      this.recordingMicChanged()
+    }
   }
   subscribedVideoIds(): readonly string[] {
     return [...this.room.remoteParticipants.values()]

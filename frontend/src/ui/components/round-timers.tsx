@@ -468,33 +468,9 @@ function DurationEditor({
 export function TimerHealth({ controller }: { controller: RoundController }) {
   const clock = useStore(controller.timers.store)
   const playbackBlocked = useStore(controller.store, (state) => state.playbackBlocked)
-  const approximate = !clock.synchronized || clock.degraded || (clock.uncertaintyMs ?? 0) > 250
-  if (!approximate && !playbackBlocked && clock.audio !== 'blocked') return null
+  if (!playbackBlocked && clock.audio !== 'blocked') return null
   return (
     <div className="timer-health">
-      {approximate && (
-        <div className="timer-clock-status" role="status">
-          <span>
-            {!clock.synchronized
-              ? strings.timers.approximate
-              : clock.degraded
-                ? strings.timers.degraded
-                : clock.syncing
-                  ? strings.timers.syncing
-                  : strings.timers.approximate}
-          </span>
-          <button
-            className="text-link"
-            type="button"
-            disabled={clock.syncing}
-            onClick={() => {
-              void controller.timers.resync()
-            }}
-          >
-            {clock.syncing ? strings.timers.syncing : strings.timers.resync}
-          </button>
-        </div>
-      )}
       {(playbackBlocked || clock.audio === 'blocked') && (
         <div className="meeting-banner timer-audio-status" role="alert">
           <span>{strings.round.playback}</span>

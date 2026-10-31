@@ -72,6 +72,7 @@ export class MemoryPreferences implements Preferences {
   savedName = ''
   volumes = new Map<string, number>()
   hidden = false
+  noise = true
   layout: 'speaker' | 'grid' = 'speaker'
   showSelf = true
   sceneLayout() {
@@ -91,6 +92,19 @@ export class MemoryPreferences implements Preferences {
   }
   setVolume(round: string, participant: string, value: number) {
     this.volumes.set(`${round}.${participant}`, value)
+  }
+  microphoneVolumeValue = 1
+  microphoneVolume() {
+    return this.microphoneVolumeValue
+  }
+  setMicrophoneVolume(value: number) {
+    this.microphoneVolumeValue = value
+  }
+  noiseSuppression() {
+    return this.noise
+  }
+  setNoiseSuppression(enabled: boolean) {
+    this.noise = enabled
   }
   reactionsHidden() {
     return this.hidden
@@ -184,6 +198,7 @@ export class FakeMedia implements MediaSession {
   connections = 0
   stopped = 0
   microphoneChanges: boolean[] = []
+  noiseEnabled = true
   cameraChanges: boolean[] = []
   screenChanges: boolean[] = []
   private people: MediaPerson[] = []
@@ -225,6 +240,10 @@ export class FakeMedia implements MediaSession {
   apply(value: Snapshot) {
     this.applied.push(value)
     return Promise.resolve()
+  }
+  setMicrophoneVolume(_value: number) {}
+  setNoiseSuppression(value: boolean) {
+    this.noiseEnabled = value
   }
   microphone(value: boolean) {
     this.microphoneChanges.push(value)

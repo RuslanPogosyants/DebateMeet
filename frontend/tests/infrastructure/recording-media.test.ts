@@ -59,7 +59,7 @@ class Stream {
     return []
   }
 }
-class Context {
+class Context extends EventTarget {
   state = 'running'
   close() {
     this.state = 'closed'

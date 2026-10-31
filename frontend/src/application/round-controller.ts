@@ -144,7 +144,11 @@ export class RoundController {
     this.social = new SocialSession(roundId, services.preferences, services.clientClock, () =>
       this.timers.serverNow(),
     )
-    this.devices = new DeviceSession(services.devices, (id) => this.timers.output(id))
+    this.devices = new DeviceSession(
+      services.devices,
+      (id) => this.timers.output(id),
+      services.preferences,
+    )
     this.scene = new SceneSession(services.preferences)
     this.recording = new RecordingSession(
       roundId,
@@ -452,6 +456,12 @@ export class RoundController {
             },
             devices: (value) => {
               if (generation === this.generation) this.devices.accept(value)
+            },
+            microphoneVolumeStatus: (value) => {
+              if (generation === this.generation) this.devices.acceptMicrophoneVolumeStatus(value)
+            },
+            noiseStatus: (value) => {
+              if (generation === this.generation) this.devices.acceptNoiseStatus(value)
             },
             diagnostics: (value) => {
               if (generation === this.generation) this.diagnostics.media(value)

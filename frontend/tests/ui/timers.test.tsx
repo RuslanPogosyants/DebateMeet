@@ -510,29 +510,15 @@ describe('timer input and display', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it.each([
-    [false, false, 0, 'Время приблизительное'],
-    [true, true, 0, 'Не удалось уточнить время; используем последнюю поправку'],
-    [true, false, 500, 'Время приблизительное'],
-  ])(
-    'keeps a real clock warning and recovery action with synchronized=%s degraded=%s uncertainty=%i',
-    async (synchronized, degraded, uncertaintyMs, message) => {
-      const { controller } = await setup()
-      await controller.timers.resync()
-      controller.timers.store.setState({ synchronized, degraded, uncertaintyMs, syncing: false })
-      render(<TimerHealth controller={controller} />)
-      expect(screen.getByRole('status')).toHaveTextContent(message)
-      expect(screen.getByRole('button', { name: 'Уточнить время' })).toBeEnabled()
-      act(() => controller.timers.store.setState({ syncing: true }))
-      expect(screen.getByRole('status')).toBeVisible()
-      expect(screen.getByRole('button', { name: 'Уточняем время…' })).toBeDisabled()
-      act(() => controller.timers.store.setState({ syncing: false }))
-      expect(screen.getByRole('status')).toHaveTextContent(message)
-      expect(screen.getByRole('button', { name: 'Уточнить время' })).toBeEnabled()
-    },
-  )
+  it('does not show a clock warning when synchronization is degraded', async () => {
+    const { controller } = await setup()
+    controller.timers.store.setState({ synchronized: false, degraded: true, uncertaintyMs: 500 })
+    render(<TimerHealth controller={controller} />)
+    expect(screen.queryByText('Время приблизительное')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Уточнить время' })).not.toBeInTheDocument()
+  })
 
-  it('offers explicit clock recovery and the common audio unblock action', async () => {
+  it('keeps the audio unblock action even when the clock is degraded', async () => {
     const { controller } = await setup()
     controller.timers.store.setState({
       synchronized: false,
@@ -540,12 +526,8 @@ describe('timer input and display', () => {
       syncing: false,
       audio: 'blocked',
     })
-    const resync = vi.spyOn(controller.timers, 'resync').mockResolvedValue()
     const audio = vi.spyOn(controller, 'startAudio').mockResolvedValue()
     render(<TimerHealth controller={controller} />)
-    expect(screen.getByText('Время приблизительное')).toBeVisible()
-    await userEvent.click(screen.getByRole('button', { name: 'Уточнить время' }))
-    expect(resync).toHaveBeenCalledOnce()
     await userEvent.click(screen.getByRole('button', { name: 'Включить звук' }))
     expect(audio).toHaveBeenCalledOnce()
   })

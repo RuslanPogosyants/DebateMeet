@@ -5,6 +5,8 @@ import { RoundController } from '@/application/round-controller'
 import { VersionSession } from '@/application/version-session'
 import {
   ConnectionNotice,
+  NoiseControls,
+  NoiseNotice,
   ProblemReport,
   QualityMark,
   RoundViewBoundary,
@@ -35,6 +37,44 @@ async function setup() {
   if (session === undefined) throw new Error('Missing media session')
   return { ...fakes, controller, session }
 }
+
+it('saves the noise setting without enabling the microphone and reports failures on the call', async () => {
+  const { controller, session } = await setup()
+  const microphone = vi.spyOn(session, 'microphone')
+  const change = vi.spyOn(session, 'setNoiseSuppression')
+  render(
+    <>
+      <NoiseControls controller={controller} />
+      <NoiseNotice controller={controller} />
+    </>,
+  )
+  const checkbox = screen.getByRole('checkbox', { name: /Шумоподавление/ })
+  expect(checkbox).toBeChecked()
+  await userEvent.click(checkbox)
+  expect(change).toHaveBeenLastCalledWith(false)
+  expect(microphone).not.toHaveBeenCalled()
+  await userEvent.click(checkbox)
+  act(() => {
+    controller.store.setState({
+      people: [{ id: SELF, microphone: true, camera: false, speaking: false }],
+    })
+    controller.devices.acceptNoiseStatus('unavailable')
+  })
+  expect(screen.getAllByText(/обычный звук/i).length).toBeGreaterThan(0)
+})
+
+it('changes the outgoing microphone volume without turning on the microphone', async () => {
+  const { controller, session } = await setup()
+  const mic = vi.spyOn(session, 'microphone')
+  const volume = vi.spyOn(session, 'setMicrophoneVolume')
+  render(<NoiseControls controller={controller} />)
+  fireEvent.change(screen.getByRole('slider', { name: /Громкость вашего микрофона/ }), {
+    target: { value: '150' },
+  })
+  expect(volume).toHaveBeenLastCalledWith(1.5)
+  expect(controller.devices.store.getState().microphoneVolume).toBe(1.5)
+  expect(mic).not.toHaveBeenCalled()
+})
 
 it('names quality in text rather than communicating it by colour alone', () => {
   render(<QualityMark quality="poor" />)
