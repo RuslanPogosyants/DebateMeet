@@ -5,7 +5,6 @@ import { RoundController } from '@/application/round-controller'
 import { VersionSession } from '@/application/version-session'
 import {
   ConnectionNotice,
-  DiagnosticsPanel,
   ProblemReport,
   QualityMark,
   RoundViewBoundary,
@@ -14,7 +13,7 @@ import {
   SceneControls,
   VersionNotice,
 } from '@/ui/components/round-resilience'
-import { ROUND_ID, SECRET, SELF, fixture } from '../fixtures'
+import { ROUND_ID, SELF, fixture } from '../fixtures'
 
 const controllers: RoundController[] = []
 function Broken(): never {
@@ -86,27 +85,15 @@ it('scene controls only change personal layout and self view', async () => {
   expect(api.commands).toEqual([])
 })
 
-it('hides the unsupported output selector while keeping the input selectors accessible', async () => {
+it('explains an unsupported output selector while keeping input selectors accessible', async () => {
   const { controller } = await setup()
   controller.devices.store.setState({ outputSupported: false })
   render(<RuntimeDevices controller={controller} />)
   expect(screen.getByRole('combobox', { name: 'Микрофон' })).toBeVisible()
   expect(screen.getByRole('combobox', { name: 'Камера' })).toBeVisible()
-  expect(screen.queryByRole('combobox', { name: 'Динамики' })).not.toBeInTheDocument()
+  expect(screen.getByRole('combobox', { name: /Динамики/ })).toBeDisabled()
   act(() => controller.devices.store.setState({ outputSupported: true }))
-  expect(screen.getByRole('combobox', { name: 'Динамики' })).toHaveValue('')
-})
-
-it('debug data contains safe diagnostics and peer aliases without the round link, names or credentials', async () => {
-  const { controller } = await setup()
-  controller.captureError(new Error(`https://example.test/r/${ROUND_ID}?secret=${SECRET}`))
-  render(<DiagnosticsPanel controller={controller} onClose={() => {}} />)
-  const text = screen.getByLabelText('Технические данные соединения').textContent ?? ''
-  expect(text).not.toContain(ROUND_ID)
-  expect(text).not.toContain(SELF)
-  expect(text).not.toContain(SECRET)
-  expect(text).not.toContain('Вика')
-  expect(text).not.toContain('https:')
+  expect(screen.getByRole('combobox', { name: /Динамики/ })).toHaveValue('')
 })
 
 it('a pending output change leaves independent microphone and camera selectors available', async () => {

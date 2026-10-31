@@ -318,7 +318,7 @@ describe('responsive meeting navigation', () => {
     const drawer = screen.getByRole('dialog', { name: 'Ещё' })
     expect(within(drawer).queryByRole('button', { name: /^Реакция — /u })).not.toBeInTheDocument()
     expect(within(drawer).getByRole('button', { name: 'Скопировать ссылку' })).toBeEnabled()
-    expect(within(drawer).getByRole('button', { name: 'Диагностика' })).toBeEnabled()
+    expect(within(drawer).queryByRole('button', { name: 'Диагностика' })).not.toBeInTheDocument()
     expect(within(drawer).getByRole('button', { name: 'Сообщить о проблеме' })).toBeEnabled()
     expect(within(drawer).getByRole('checkbox', { name: 'Скрыть реакции' })).toBeEnabled()
     expect(within(drawer).getByRole('button', { name: 'Звук и устройства' })).toBeEnabled()
@@ -332,36 +332,19 @@ describe('responsive meeting navigation', () => {
     expect(api.leaves).toEqual(['PA_local'])
   })
 
-  it('opens diagnostics and reports through More, with one dialog and focus returning to its trigger', async () => {
+  it('opens reports through More without exposing diagnostics or its shortcut', async () => {
     viewport(1440, 900)
     await meeting()
     const more = screen.getByRole('button', { name: 'Ещё' })
+    await userEvent.click(more)
     expect(screen.queryByRole('button', { name: 'Диагностика' })).not.toBeInTheDocument()
-    for (const title of ['Диагностика', 'Сообщить о проблеме']) {
-      await userEvent.click(more)
-      await userEvent.click(screen.getByRole('button', { name: title }))
-      const dialog = screen.getByRole('dialog', { name: title })
-      expect(screen.getAllByRole('dialog')).toHaveLength(1)
-      fireEvent(dialog, new Event('cancel', { cancelable: true }))
-      expect(more).toHaveFocus()
-    }
+    fireEvent.keyDown(window, { key: 'D', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Диагностика' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Сообщить о проблеме' }))
+    const dialog = screen.getByRole('dialog', { name: 'Сообщить о проблеме' })
+    fireEvent(dialog, new Event('cancel', { cancelable: true }))
+    expect(more).toHaveFocus()
   })
-
-  it.each([false, true])(
-    'opens diagnostics by shortcut with More initially open=%s',
-    async (menuOpen) => {
-      viewport(1440, 900)
-      await meeting()
-      const more = screen.getByRole('button', { name: 'Ещё' })
-      if (menuOpen) await userEvent.click(more)
-      fireEvent.keyDown(window, { key: 'D', ctrlKey: true, shiftKey: true })
-      const diagnostics = screen.getByRole('dialog', { name: 'Диагностика' })
-      expect(screen.getAllByRole('dialog')).toHaveLength(1)
-      fireEvent(diagnostics, new Event('cancel', { bubbles: false, cancelable: true }))
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-      expect(more).toHaveFocus()
-    },
-  )
 
   it('retains judge exit confirmation and returns focus to the permanent leave button', async () => {
     viewport(1440, 900)

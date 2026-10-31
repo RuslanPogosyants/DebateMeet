@@ -255,6 +255,9 @@ export class FakeMedia implements MediaSession {
 }
 
 export class FakeDevices implements Devices {
+  outputSupported() {
+    return Promise.resolve(true)
+  }
   output(id: string) {
     return Promise.resolve(id)
   }

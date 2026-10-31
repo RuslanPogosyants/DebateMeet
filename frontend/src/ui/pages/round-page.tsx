@@ -30,7 +30,6 @@ import { RoundStage } from '@/ui/components/round-stage'
 import { Sheet } from '@/ui/components/sheet'
 import {
   ConnectionNotice,
-  DiagnosticsPanel,
   ProblemReport,
   RoundViewBoundary,
   RoundFailureActions,
@@ -195,12 +194,12 @@ function Meeting({ controller }: { controller: RoundController }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const roomsPanelId = useId()
   const [moreOpen, setMoreOpen] = useState(false)
-  const [utilityPanel, setUtilityPanel] = useState<'diagnostics' | 'report' | null>(null)
+  const [utilityPanel, setUtilityPanel] = useState<'report' | null>(null)
   const [recordingsOpen, setRecordingsOpen] = useState(false)
   const [recordingLeave, setRecordingLeave] = useState(false)
   const recordingState = useStore(controller.recording.store)
   const moreButton = useRef<HTMLButtonElement>(null)
-  function openUtility(panel: 'diagnostics' | 'report') {
+  function openUtility(panel: 'report') {
     setMoreOpen(false)
     setUtilityPanel(panel)
   }
@@ -208,17 +207,6 @@ function Meeting({ controller }: { controller: RoundController }) {
     setUtilityPanel(null)
     moreButton.current?.focus()
   }
-  useEffect(() => {
-    const shortcut = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
-        event.preventDefault()
-        setMoreOpen(false)
-        setUtilityPanel('diagnostics')
-      }
-    }
-    window.addEventListener('keydown', shortcut)
-    return () => window.removeEventListener('keydown', shortcut)
-  }, [])
   const [previousLayout, setPreviousLayout] = useState(layout)
   if (previousLayout !== layout) {
     setPreviousLayout(layout)
@@ -512,14 +500,6 @@ function Meeting({ controller }: { controller: RoundController }) {
                 Записи на этом компьютере
               </button>
               <SoundControls controller={controller} />
-              <button
-                className="action"
-                type="button"
-                aria-keyshortcuts="Control+Shift+D"
-                onClick={() => openUtility('diagnostics')}
-              >
-                {resilienceStrings.diagnostics}
-              </button>
               <button className="action" type="button" onClick={() => openUtility('report')}>
                 {resilienceStrings.report}
               </button>
@@ -540,9 +520,6 @@ function Meeting({ controller }: { controller: RoundController }) {
             <RoundSidebar controller={controller} tabs />
           </div>
         </Sheet>
-      )}
-      {utilityPanel === 'diagnostics' && (
-        <DiagnosticsPanel controller={controller} onClose={closeUtility} />
       )}
       {recordingsOpen && (
         <RecordingsLibrary

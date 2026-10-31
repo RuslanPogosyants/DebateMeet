@@ -136,8 +136,11 @@ export async function enter(page: Page, room: string) {
 }
 
 export async function claimJudge(page: Page) {
-  await page.getByRole('button', { name: /^(Стать судьёй|Взять флаг снова)$/u }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Стать судьёй', exact: true }).click()
+  await page.getByRole('button', { name: /^(Взять флаг судьи|Взять флаг снова)$/u }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Взять флаг судьи', exact: true })
+    .click()
   await expect.poll(async () => (await snapshot(page)).judgeFlag.holder).not.toBeNull()
 }
 
