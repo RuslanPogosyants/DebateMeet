@@ -58,13 +58,6 @@ test('logical rooms isolate actual speaker output and recall restores it without
     third = await contexts[1].newPage()
   const pages = [page, second, third]
   try {
-    // RNNoise correctly suppresses these sustained synthetic tones. This test measures
-    // room isolation, so preserve the tones while retaining the real sender and audio graph.
-    await Promise.all(
-      pages.map((person) =>
-        person.addInitScript(() => localStorage.setItem('debatemeet.noiseSuppression', 'false')),
-      ),
-    )
     await Promise.all(
       pages.map((person, index) => measureRenderedAudio(person, frequencies[index])),
     )

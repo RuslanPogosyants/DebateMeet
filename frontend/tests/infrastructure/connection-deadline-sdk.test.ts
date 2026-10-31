@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Keep the installed engine and signal lifecycle; replace only the external wire and physical PC.
 const sockets: TestSocket[] = []
 const rooms: Room[] = []
+const controllers: AbortController[] = []
 class TestSocket extends EventTarget {
   static readonly CONNECTING = 0
   static readonly OPEN = 1
@@ -66,6 +67,7 @@ function setup(maxRetries = 3, websocketTimeout = 15000) {
   const engine = room.engine
   Reflect.set(engine, 'configure', vi.fn<() => Promise<void>>().mockResolvedValue(undefined))
   const controller = new AbortController()
+  controllers.push(controller)
   const options = { autoSubscribe: false, e2eeEnabled: false, maxRetries, websocketTimeout }
   const enter = () => {
     const pending = engine.join(
@@ -87,12 +89,22 @@ beforeEach(() => {
   vi.stubGlobal('WebSocket', TestSocket)
 })
 afterEach(async () => {
+  const socketCount = sockets.length
+  for (const controller of controllers.splice(0)) controller.abort()
+  // These tests call engine.join directly, so Room.disconnect() sees a disconnected room
+  // and does not close the engine. Closing the engine first prevents late reconnects from
+  // leaking a socket into the next test.
+  const closing = Promise.all(rooms.splice(0).map((room) => room.engine.close()))
+  await vi.advanceTimersByTimeAsync(0)
+  await closing
   for (const socket of sockets) socket.close()
-  await Promise.all(rooms.splice(0).map((room) => room.disconnect()))
+  await vi.advanceTimersByTimeAsync(16000)
+  const leaked = sockets.length !== socketCount
   sockets.length = 0
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  if (leaked) throw new Error('Signal transport leaked after cleanup')
 })
 
 describe('installed LiveKit ESM upgrade deadlines', () => {
