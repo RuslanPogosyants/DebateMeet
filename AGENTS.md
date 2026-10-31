@@ -16,6 +16,7 @@ Web platform for British Parliamentary debate rounds: one link = one round with 
 - `docs/design.md` — how the interface looks and behaves: the «Реплика» visual direction and its rules, round screen layout at every size, start and entry screens, action safety, states to draw. Chosen by the author after aesthetic and UX reviews of the first mockups.
 - `docs/implementation-slice-6.md` — approved implementation plan v2 for slice 6: A6/B6 ordering, deletion and diagnostics invariants, client lifecycle/device/scene behavior, acceptance and wire contract. Current completion evidence remains in architecture §11.
 - `SECURITY.md` — current access model and safe vulnerability-reporting guidance; no confirmed private contact or enabled GitHub private reporting is assumed.
+- For storage, transactions or migrations, use `docs/references.md` as a starting map; inspect the relevant architecture and migration files before changing behavior.
 - `docs/research.md` — a historical snapshot (2026-09-27) with sources. Where it disagrees with spec or architecture (e.g. participant attributes, 60 s flag hold, round reset), spec and architecture win.
 - Read the relevant sections before proposing changes. Do not re-propose what they reject without new facts. Major changes go through an ADR in `docs/adr/`, discussed with the author first.
 - Keep `AGENTS.md` byte-for-byte identical to `CLAUDE.md` when editing either file.
