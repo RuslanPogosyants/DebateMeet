@@ -213,12 +213,7 @@ test('failed telemetry leaves audio and timer cues alive while safe reports pers
     await accessible(page, info, 'report')
     await report.getByRole('button', { name: 'Закрыть', exact: true }).click()
     await page.keyboard.press('Control+Shift+D')
-    const debug = page.getByRole('dialog', { name: 'Диагностика', exact: true })
-    await expect(debug).toBeVisible()
-    expect(
-      await debug.getByLabel('Технические данные соединения', { exact: true }).textContent(),
-    ).not.toContain('Автор отчёта')
-    await debug.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'Диагностика', exact: true })).toHaveCount(0)
     const draft = page.getByLabel('Сообщение в общий чат', { exact: true })
     await draft.fill('Несохранённый черновик')
     const current = await snapshot(page)

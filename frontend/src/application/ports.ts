@@ -171,6 +171,7 @@ export type Preview = {
   close(): void
 }
 export interface Devices {
+  outputSupported(): Promise<boolean>
   preview(cameraId?: string, microphoneId?: string): Promise<Preview>
   list(): Promise<MediaDeviceInfo[]>
   sound(): Promise<void>

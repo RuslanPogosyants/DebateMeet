@@ -47,6 +47,13 @@ async function setup() {
     .mockResolvedValueOnce(third.preview)
   vi.spyOn(fakes.services.devices, 'list').mockResolvedValue([
     {
+      deviceId: 'speaker-two',
+      kind: 'audiooutput',
+      label: 'Второй динамик',
+      groupId: '',
+      toJSON: () => ({}),
+    },
+    {
       deviceId: 'camera-two',
       kind: 'videoinput',
       label: 'Вторая камера',
@@ -92,6 +99,8 @@ describe('prejoin device controls', () => {
   it('shows the camera icon and a separate text sound check below the devices', async () => {
     const { first, open, sound, selection } = await setup()
     expect(screen.queryByRole('button', { name: 'Звук и устройства' })).not.toBeInTheDocument()
+    const outputSelector = screen.getByRole('combobox', { name: 'Динамики' })
+    fireEvent.change(outputSelector, { target: { value: 'speaker-two' } })
     const cameraSelector = screen.getByRole('combobox', { name: 'Камера' })
     const microphoneSelector = screen.getByRole('combobox', { name: 'Микрофон' })
     expect(cameraSelector).toBeVisible()
@@ -118,7 +127,11 @@ describe('prejoin device controls', () => {
       fireEvent.change(cameraSelector, { target: { value: 'camera-two' } })
       await Promise.resolve()
     })
-    expect(selection).toHaveBeenLastCalledWith({ cameraId: 'camera-two', microphoneId: undefined })
+    expect(selection).toHaveBeenLastCalledWith({
+      cameraId: 'camera-two',
+      microphoneId: undefined,
+      outputId: 'speaker-two',
+    })
     await act(async () => {
       fireEvent.change(microphoneSelector, { target: { value: 'microphone-two' } })
       await Promise.resolve()
@@ -126,6 +139,7 @@ describe('prejoin device controls', () => {
     expect(selection).toHaveBeenLastCalledWith({
       cameraId: 'camera-two',
       microphoneId: 'microphone-two',
+      outputId: 'speaker-two',
     })
     expect(open).toHaveBeenLastCalledWith('camera-two', 'microphone-two')
     await act(async () => {

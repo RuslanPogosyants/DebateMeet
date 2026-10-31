@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DeviceSelection, Preview } from '@/application/ports'
 import { useServices } from '@/ui/services'
-import { deviceErrorText, strings } from '@/ui/strings'
+import { deviceErrorText, resilienceStrings, strings } from '@/ui/strings'
 import { ControlIcon } from './control-icon'
 
 function defaultDeviceLabel(name: string | undefined): string {
@@ -27,7 +27,25 @@ export function DevicePreview({
   const preview = result?.request === request ? result.preview : null
   const [level, setLevel] = useState<{ request: typeof request; value: number } | null>(null)
   const [list, setList] = useState<MediaDeviceInfo[]>([])
+  const [outputId, setOutputId] = useState('')
+  const [outputSupported, setOutputSupported] = useState(false)
   const [error, setError] = useState<unknown>(null)
+
+  useEffect(() => {
+    let active = true
+    void devices.output('').catch(setError)
+    void devices.outputSupported().then(
+      (supported) => {
+        if (active) setOutputSupported(supported)
+      },
+      () => {
+        if (active) setOutputSupported(false)
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [devices])
 
   useEffect(() => {
     let cancelled = false
@@ -127,6 +145,7 @@ export function DevicePreview({
               onSelection({
                 cameraId: event.target.value || undefined,
                 microphoneId: request.microphoneId || undefined,
+                outputId: outputId || undefined,
               })
             }}
           >
@@ -147,6 +166,7 @@ export function DevicePreview({
               onSelection({
                 cameraId: request.cameraId || undefined,
                 microphoneId: event.target.value || undefined,
+                outputId: outputId || undefined,
               })
             }}
           >
@@ -157,6 +177,36 @@ export function DevicePreview({
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          {resilienceStrings.output}
+          <select
+            value={outputId}
+            disabled={!outputSupported}
+            onChange={(event) => {
+              const next = event.target.value
+              setOutputId(next)
+              onSelection({
+                cameraId: request.cameraId || undefined,
+                microphoneId: request.microphoneId || undefined,
+                outputId: next || undefined,
+              })
+              void devices.output(next).catch(setError)
+            }}
+          >
+            <option value="">{strings.round.defaultDevice}</option>
+            {list
+              .filter(
+                (device) =>
+                  device.kind === 'audiooutput' && device.deviceId && device.deviceId !== 'default',
+              )
+              .map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label || `${resilienceStrings.output} ${index + 1}`}
+                </option>
+              ))}
+          </select>
+          {!outputSupported && <span>{resilienceStrings.outputUnavailable}</span>}
         </label>
       </div>
       <div className="device-statuses">

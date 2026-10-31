@@ -6,6 +6,16 @@ export class BrowserDevices implements Devices {
   private soundContext: AudioContext | null = null
   private outputQueue: Promise<void> = Promise.resolve()
 
+  async outputSupported(): Promise<boolean> {
+    const { supportsAudioOutputSelection } = await import('livekit-client')
+    return (
+      typeof AudioContext !== 'undefined' &&
+      'setSinkId' in AudioContext.prototype &&
+      'sinkId' in AudioContext.prototype &&
+      supportsAudioOutputSelection()
+    )
+  }
+
   output(id: string): Promise<string | null> {
     this.outputId = id
     const context = this.soundContext

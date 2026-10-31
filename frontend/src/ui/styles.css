@@ -2661,12 +2661,12 @@ dialog select {
   .meeting-controls .media-toggle,
   .meeting-controls .meeting-control-group > .icon-control,
   .meeting-controls .call-leave {
-    width: 44px;
-    height: 44px;
-    min-height: 44px;
+    width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
   .meeting-controls .call-leave {
-    flex: 0 0 44px;
+    flex: 0 0 48px;
     padding: 0;
     gap: 0;
     border-radius: 50%;
@@ -2677,6 +2677,10 @@ dialog select {
   .meeting-control-group {
     column-gap: 6px;
     row-gap: 4px;
+  }
+  .meeting-control-group .reaction-button span {
+    width: 42px;
+    height: 42px;
   }
   .meeting-control-group > .reaction-buttons {
     flex: 0 0 calc(100% - 46px);

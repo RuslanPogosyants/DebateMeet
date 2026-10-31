@@ -73,7 +73,7 @@ export const strings = {
     noJudge: 'Судьи нет',
     flagAvailable: 'Флаг свободен',
     judge: 'Судья',
-    becomeJudge: 'Стать судьёй',
+    becomeJudge: 'Взять флаг судьи',
     reclaimJudge: 'Взять флаг снова',
     youJudge: 'Вы судья',
     releaseJudge: 'Отказаться от флага',
@@ -81,7 +81,7 @@ export const strings = {
     handOverConfirm: 'Передать флаг',
     handOverTo: 'Кому передать флаг',
     chooseParticipant: 'Выберите участника',
-    claimTitle: 'Стать судьёй?',
+    claimTitle: 'Взять флаг судьи?',
     claimDescription:
       'Вы сможете управлять таймерами, возвращать комнаты в базу и передавать флаг другому участнику.',
     recallAll: 'Всех в базу',
@@ -379,10 +379,6 @@ export const resilienceStrings = {
   cancelMicrophoneEnable: 'Отменить включение микрофона',
   cancelMicrophoneDisable: 'Отменить выключение микрофона',
   settings: 'Настройки',
-  diagnostics: 'Диагностика',
-  diagnosticsHint:
-    'Технические данные без имён, ссылки и содержимого раунда. Открыть с клавиатуры: Ctrl + Shift + D.',
-  debugData: 'Технические данные соединения',
   report: 'Сообщить о проблеме',
   reportDescription:
     'Сохраните технический отчёт на этом сервере и передайте его номер автору площадки. Имена, чат, резолюция и ссылка в отчёт не входят.',
@@ -405,6 +401,7 @@ export const resilienceStrings = {
   microphone: 'Микрофон',
   camera: 'Камера',
   output: 'Динамики',
+  outputUnavailable: 'Выберите устройство вывода в настройках системы или браузера.',
   defaultDevice: 'По умолчанию',
   refreshDevices: 'Обновить список устройств',
   devicesPending: 'Меняем устройство…',

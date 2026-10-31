@@ -113,9 +113,7 @@ export function RuntimeDevices({ controller }: { controller: RoundController }) 
   const selectors: { kind: DeviceKind; label: string; selected: string | undefined }[] = [
     { kind: 'audioinput', label: text.microphone, selected: state.selected.microphoneId },
     { kind: 'videoinput', label: text.camera, selected: state.selected.cameraId },
-    ...(state.outputSupported
-      ? [{ kind: 'audiooutput' as const, label: text.output, selected: state.selected.outputId }]
-      : []),
+    { kind: 'audiooutput', label: text.output, selected: state.selected.outputId },
   ]
   return (
     <div className="runtime-devices">
@@ -125,7 +123,10 @@ export function RuntimeDevices({ controller }: { controller: RoundController }) 
           <select
             id={`${prefix}-${selector.kind}`}
             value={selector.selected ?? ''}
-            disabled={state.pendingKinds.includes(selector.kind)}
+            disabled={
+              state.pendingKinds.includes(selector.kind) ||
+              (selector.kind === 'audiooutput' && !state.outputSupported)
+            }
             onChange={(event) => {
               void controller.devices.select(selector.kind, event.target.value)
             }}
@@ -146,6 +147,9 @@ export function RuntimeDevices({ controller }: { controller: RoundController }) 
                 </option>
               ))}
           </select>
+          {selector.kind === 'audiooutput' && !state.outputSupported && (
+            <span>{text.outputUnavailable}</span>
+          )}
         </label>
       ))}
       <button
@@ -171,24 +175,6 @@ export function RuntimeDevices({ controller }: { controller: RoundController }) 
         </div>
       )}
     </div>
-  )
-}
-
-export function DiagnosticsPanel({
-  controller,
-  onClose,
-}: {
-  controller: RoundController
-  onClose: () => void
-}) {
-  useStore(controller.diagnostics.store)
-  return (
-    <Sheet title={text.diagnostics} onClose={onClose}>
-      <p className="diagnostics-hint">{text.diagnosticsHint}</p>
-      <pre className="diagnostics-data" aria-label={text.debugData}>
-        {JSON.stringify(controller.diagnostics.debug(), null, 2)}
-      </pre>
-    </Sheet>
   )
 }
 
