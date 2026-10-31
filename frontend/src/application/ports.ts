@@ -80,6 +80,10 @@ export interface Preferences {
   remember(roundId: string, name: string, credentials: Credentials): void
   volume(roundId: string, participantId: string): number
   setVolume(roundId: string, participantId: string, value: number): void
+  microphoneVolume(): number
+  setMicrophoneVolume(value: number): void
+  noiseSuppression(): boolean
+  setNoiseSuppression(enabled: boolean): void
   reactionsHidden(): boolean
   setReactionsHidden(hidden: boolean): void
   sceneLayout(): 'speaker' | 'grid'
@@ -97,6 +101,7 @@ export type MediaPerson = {
   quality?: import('@/domain/diagnostics').MediaRecord['quality']
 }
 export type VideoSource = 'camera' | 'screen'
+export type NoiseStatus = 'off' | 'waiting' | 'starting' | 'active' | 'unavailable' | 'reconnect'
 export type DeviceKind = 'audioinput' | 'videoinput' | 'audiooutput'
 export type DeviceSelection = { cameraId?: string; microphoneId?: string; outputId?: string }
 export type MediaDeviceState = {
@@ -118,6 +123,8 @@ export type MediaEvents = {
   playback(blocked: boolean): void
   deviceError(error: unknown): void
   devices(value: MediaDeviceState): void
+  noiseStatus(value: NoiseStatus): void
+  microphoneVolumeStatus(value: NoiseStatus): void
   diagnostics(value: MediaObservation): void
 }
 
@@ -133,6 +140,8 @@ export interface MediaSession {
   disconnect(): Promise<void>
   apply(snapshot: Snapshot, self: string): Promise<void>
   microphone(enabled: boolean): Promise<void>
+  setMicrophoneVolume(value: number): void
+  setNoiseSuppression(enabled: boolean): void
   camera(enabled: boolean): Promise<void>
   screen(enabled: boolean): Promise<void>
   startAudio(): Promise<void>

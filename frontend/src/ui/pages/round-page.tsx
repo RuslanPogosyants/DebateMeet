@@ -30,6 +30,7 @@ import { RoundStage } from '@/ui/components/round-stage'
 import { Sheet } from '@/ui/components/sheet'
 import {
   ConnectionNotice,
+  NoiseNotice,
   ProblemReport,
   RoundViewBoundary,
   RoundFailureActions,
@@ -337,6 +338,7 @@ function Meeting({ controller }: { controller: RoundController }) {
       >
         <VersionNotice controller={controller} />
         <ConnectionNotice controller={controller} />
+        <NoiseNotice controller={controller} />
         <SocialNotices controller={controller} />
         <TimerHealth controller={controller} />
         {state.motionChanged && (

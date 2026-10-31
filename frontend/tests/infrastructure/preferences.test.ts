@@ -7,6 +7,36 @@ afterEach(() => {
 })
 
 describe('local preferences', () => {
+  it('stores and clamps microphone volume, defaulting to 100 percent', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    })
+    const prefs = new BrowserPreferences()
+    expect(prefs.microphoneVolume()).toBe(1)
+    prefs.setMicrophoneVolume(1.5)
+    expect(new BrowserPreferences().microphoneVolume()).toBe(1.5)
+    prefs.setMicrophoneVolume(4)
+    expect(prefs.microphoneVolume()).toBe(2)
+    prefs.setMicrophoneVolume(0)
+    expect(prefs.microphoneVolume()).toBe(0)
+    prefs.setMicrophoneVolume(NaN)
+    expect(prefs.microphoneVolume()).toBe(0)
+  })
+  it('enables noise suppression by default and remembers an explicit choice', () => {
+    const values = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    })
+    const preferences = new BrowserPreferences()
+    expect(preferences.noiseSuppression()).toBe(true)
+    preferences.setNoiseSuppression(false)
+    expect(new BrowserPreferences().noiseSuppression()).toBe(false)
+    preferences.setNoiseSuppression(true)
+    expect(new BrowserPreferences().noiseSuppression()).toBe(true)
+  })
   it('scopes volume by round and identity, caps it at 200 percent and retains it without storage', () => {
     vi.stubGlobal('localStorage', {
       getItem: () => {

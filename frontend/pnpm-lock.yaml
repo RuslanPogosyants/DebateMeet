@@ -166,6 +166,7 @@ overrides:
   why-is-node-running: 3.2.1
 
 patchedDependencies:
+  '@sapphi-red/web-noise-suppressor@0.4.1': d01e084b57a93569b63eca2af3c15b9bac1eb5f56d7f33e5de36cf5111c07f79
   livekit-client@2.23.0: e4d5d1556da5cb2f9e3c9d863847700eb6f68661731755eef75cd4da5e3db3e8
 
 importers:
@@ -181,6 +182,9 @@ importers:
       '@fontsource/montserrat':
         specifier: ^5.3.0
         version: 5.3.0
+      '@sapphi-red/web-noise-suppressor':
+        specifier: 0.4.1
+        version: 0.4.1(patch_hash=d01e084b57a93569b63eca2af3c15b9bac1eb5f56d7f33e5de36cf5111c07f79)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -658,6 +662,9 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
+  '@sapphi-red/web-noise-suppressor@0.4.1':
+    resolution: {integrity: sha512-hy2GnF079+zi4n9BZUf+GGIQ1IofApAk6rgGMyMQ3soHfz/GKu1pcCsmePyIHVvUuv1LrFudw9BmmBqoOKay5w==}
 
   '@tailwindcss/node@4.3.3':
     resolution: {integrity: sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg==}
@@ -2019,6 +2026,8 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
+
+  '@sapphi-red/web-noise-suppressor@0.4.1(patch_hash=d01e084b57a93569b63eca2af3c15b9bac1eb5f56d7f33e5de36cf5111c07f79)': {}
 
   '@tailwindcss/node@4.3.3':
     dependencies:

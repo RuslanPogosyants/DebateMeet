@@ -102,7 +102,11 @@ module.exports = {
       comment: 'An import that does not resolve would slip past every other rule.',
       severity: 'error',
       from: {},
-      to: { couldNotResolve: true },
+      // Vite resolves these two query-suffixed, self-hosted assets during bundling.
+      to: {
+        couldNotResolve: true,
+        pathNot: '^@sapphi-red/web-noise-suppressor/(rnnoiseWorklet\\.js|rnnoise\\.wasm)\\?url$',
+      },
     },
     {
       name: 'no-non-package-json',

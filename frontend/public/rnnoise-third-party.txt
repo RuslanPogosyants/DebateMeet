@@ -1,0 +1,9 @@
+The microphone noise filter includes:
+
+- @sapphi-red/web-noise-suppressor 0.4.1, MIT: web-noise-suppressor-MIT.txt
+  https://github.com/sapphi-red/web-noise-suppressor
+  Its RNNoise worklet is modified to report initialization success and failure.
+- @shiguredo/rnnoise-wasm 2022.2.0, Apache-2.0: rnnoise-wasm-Apache-2.0.txt
+  https://github.com/shiguredo/rnnoise-wasm/tree/2022.2.0
+- Xiph.Org RNNoise, BSD-3-Clause: rnnoise-BSD-3-Clause.txt
+  https://github.com/xiph/rnnoise

@@ -16,7 +16,7 @@ import { Sheet } from './sheet'
 import { ParticipantRoster } from './participant-roster'
 import { HandBadge, JudgeParticipantActions } from './participant-actions'
 export { HandBadge, ParticipantActions } from './participant-actions'
-import { RuntimeDevices } from './round-resilience'
+import { NoiseControls, RuntimeDevices } from './round-resilience'
 
 const reactions: readonly [ReactionCode, string][] = [
   ['clap', '👏'],
@@ -331,6 +331,7 @@ export function SoundControls({
         <Sheet title={strings.round.devices} onClose={() => setOpen(false)}>
           <div className="sound-controls">
             <RuntimeDevices controller={controller} />
+            <NoiseControls controller={controller} />
             <button
               className="action"
               type="button"

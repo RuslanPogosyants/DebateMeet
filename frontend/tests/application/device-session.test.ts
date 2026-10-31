@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DeviceSession } from '@/application/device-session'
 import type { MediaDeviceState } from '@/application/ports'
-import { FakeDevices, FakeMedia } from '../fixtures'
+import { FakeDevices, FakeMedia, MemoryPreferences } from '../fixtures'
 
 function deferred<T>() {
   const result: { resolve?: (value: T) => void; reject?: (error: Error) => void } = {}
@@ -25,7 +25,7 @@ function setup() {
     return Promise.resolve(current)
   })
   vi.spyOn(media, 'readDevices').mockImplementation(() => Promise.resolve(current))
-  const session = new DeviceSession(devices, timer)
+  const session = new DeviceSession(devices, timer, new MemoryPreferences())
   session.bind(media)
   session.accept(state())
   return { session, media, select, timer, sound }

@@ -75,6 +75,94 @@ export function ConnectionNotice({ controller }: { controller: RoundController }
   )
 }
 
+export function NoiseNotice({ controller }: { controller: RoundController }) {
+  const { noiseEnabled, noiseStatus, microphoneVolumeStatus } = useStore(controller.devices.store)
+  const microphone = useStore(
+    controller.store,
+    (state) => state.people.find((person) => person.id === state.self)?.microphone ?? false,
+  )
+  if (microphone && ['starting', 'unavailable', 'reconnect'].includes(microphoneVolumeStatus)) {
+    return (
+      <p className="meeting-banner" role="status">
+        {microphoneVolumeStatus === 'starting'
+          ? 'Громкость микрофона применяется. Пока может передаваться обычный звук.'
+          : microphoneVolumeStatus === 'reconnect'
+            ? 'Не удалось восстановить звук микрофона. Выйдите и подключитесь снова.'
+            : 'Не удалось применить громкость микрофона. Вас может быть слышно с обычной громкостью.'}
+      </p>
+    )
+  }
+  if (
+    noiseStatus !== 'reconnect' &&
+    (!noiseEnabled || !microphone || !['starting', 'unavailable'].includes(noiseStatus))
+  )
+    return null
+  const message =
+    noiseStatus === 'starting'
+      ? text.noiseStarting
+      : noiseStatus === 'reconnect'
+        ? text.noiseReconnect
+        : text.noiseUnavailable
+  return (
+    <p className="meeting-banner" role="status">
+      {message}
+    </p>
+  )
+}
+
+export function NoiseControls({ controller }: { controller: RoundController }) {
+  const { noiseEnabled, noiseStatus, microphoneVolume, microphoneVolumeStatus } = useStore(
+    controller.devices.store,
+  )
+  return (
+    <div className="noise-controls">
+      <label className="microphone-volume">
+        Громкость вашего микрофона: {Math.round(microphoneVolume * 100)}%
+        <input
+          type="range"
+          min="0"
+          max="200"
+          step="5"
+          value={Math.round(microphoneVolume * 100)}
+          onChange={(event) =>
+            controller.devices.setMicrophoneVolume(Number(event.target.value) / 100)
+          }
+        />
+      </label>
+      {microphoneVolumeStatus === 'starting' && (
+        <p role="status">Громкость микрофона применяется. Пока может передаваться обычный звук.</p>
+      )}
+      {['unavailable', 'reconnect'].includes(microphoneVolumeStatus) && (
+        <p role="alert">
+          Не удалось применить громкость микрофона. Вас может быть слышно с обычной громкостью.
+        </p>
+      )}
+      <label>
+        <input
+          type="checkbox"
+          checked={noiseEnabled}
+          onChange={(event) => controller.devices.setNoiseSuppression(event.target.checked)}
+        />
+        {text.noiseSuppression}
+      </label>
+      {noiseEnabled && noiseStatus === 'starting' && <p role="status">{text.noiseStarting}</p>}
+      {noiseEnabled && noiseStatus === 'unavailable' && (
+        <div role="status">
+          <p>{text.noiseUnavailable}</p>
+          <button
+            className="text-link"
+            type="button"
+            onClick={() => controller.devices.setNoiseSuppression(true)}
+          >
+            {strings.round.retry}
+          </button>
+        </div>
+      )}
+      {noiseEnabled && noiseStatus === 'reconnect' && <p role="alert">{text.noiseReconnect}</p>}
+    </div>
+  )
+}
+
 export function SceneControls({ controller }: { controller: RoundController }) {
   const scene = useStore(controller.scene.store)
   return (

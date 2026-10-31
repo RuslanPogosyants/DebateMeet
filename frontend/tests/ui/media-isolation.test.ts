@@ -205,13 +205,15 @@ const events: MediaEvents = {
   playback: () => {},
   deviceError: () => {},
   devices: () => {},
+  noiseStatus: () => {},
+  microphoneVolumeStatus: () => {},
   diagnostics: () => {},
 }
 
 beforeEach(() => {
   vi.stubGlobal(
     'AudioContext',
-    class {
+    class extends EventTarget {
       state = 'running'
       close() {
         this.state = 'closed'

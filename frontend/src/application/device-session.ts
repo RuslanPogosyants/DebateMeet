@@ -1,10 +1,22 @@
 import { createStore } from 'zustand/vanilla'
-import type { DeviceKind, DeviceSelection, Devices, MediaDeviceState, MediaSession } from './ports'
+import type {
+  DeviceKind,
+  DeviceSelection,
+  Devices,
+  MediaDeviceState,
+  MediaSession,
+  NoiseStatus,
+  Preferences,
+} from './ports'
 
 export type DeviceState = MediaDeviceState & {
   pending: boolean
   pendingKinds: readonly DeviceKind[]
   error: unknown
+  noiseEnabled: boolean
+  noiseStatus: NoiseStatus
+  microphoneVolume: number
+  microphoneVolumeStatus: NoiseStatus
 }
 function field(kind: DeviceKind): keyof DeviceSelection {
   return kind === 'audioinput' ? 'microphoneId' : kind === 'videoinput' ? 'cameraId' : 'outputId'
@@ -18,8 +30,13 @@ export class DeviceSession {
     pending: false,
     pendingKinds: [],
     error: null,
+    noiseEnabled: true,
+    noiseStatus: 'waiting',
+    microphoneVolume: 1,
+    microphoneVolumeStatus: 'waiting',
   }))
   private readonly devices: Devices
+  private readonly preferences: Preferences
   private readonly timerOutput: (id: string) => Promise<string>
   private media: MediaSession | null = null
   private desired: DeviceSelection = {}
@@ -30,9 +47,20 @@ export class DeviceSession {
   private readonly queues = new Map<DeviceKind, Promise<void>>()
   private readonly errors = new Map<DeviceKind | 'read', unknown>()
 
-  constructor(devices: Devices, timerOutput: (id: string) => Promise<string>) {
+  constructor(
+    devices: Devices,
+    timerOutput: (id: string) => Promise<string>,
+    preferences: Preferences,
+  ) {
     this.devices = devices
+    this.preferences = preferences
     this.timerOutput = timerOutput
+    const enabled = preferences.noiseSuppression()
+    this.store.setState({
+      noiseEnabled: enabled,
+      noiseStatus: enabled ? 'waiting' : 'off',
+      microphoneVolume: preferences.microphoneVolume(),
+    })
   }
   reset(selection: DeviceSelection): void {
     this.close()
@@ -46,8 +74,29 @@ export class DeviceSession {
     this.queues.clear()
     this.errors.clear()
     this.media = media
+    media.setMicrophoneVolume(this.store.getState().microphoneVolume)
+    media.setNoiseSuppression(this.store.getState().noiseEnabled)
     this.outputReady = false
     this.store.setState({ pending: false, pendingKinds: [], error: null })
+  }
+  setNoiseSuppression(enabled: boolean): void {
+    this.preferences.setNoiseSuppression(enabled)
+    this.store.setState({ noiseEnabled: enabled, noiseStatus: enabled ? 'waiting' : 'off' })
+    this.media?.setNoiseSuppression(enabled)
+  }
+  setMicrophoneVolume(value: number): void {
+    if (!Number.isFinite(value)) return
+    const volume = Math.max(0, Math.min(2, value))
+    this.preferences.setMicrophoneVolume(volume)
+    this.store.setState({ microphoneVolume: volume })
+    this.media?.setMicrophoneVolume(volume)
+  }
+  acceptMicrophoneVolumeStatus(status: NoiseStatus): void {
+    if (this.media !== null) this.store.setState({ microphoneVolumeStatus: status })
+  }
+  acceptNoiseStatus(status: NoiseStatus): void {
+    if (this.media === null) return
+    this.store.setState({ noiseStatus: status })
   }
   selection(): DeviceSelection {
     return { ...this.desired }
@@ -212,6 +261,8 @@ export class DeviceSession {
       pending: false,
       pendingKinds: [],
       error: null,
+      noiseStatus: this.store.getState().noiseEnabled ? 'waiting' : 'off',
+      microphoneVolumeStatus: 'waiting',
     })
   }
 }
