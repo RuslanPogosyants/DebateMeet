@@ -45,7 +45,7 @@ describe('timer lifecycle', () => {
     expect(audio[0]?.plans.flat()).toEqual([])
     api.time.mockResolvedValue(100000)
     await session.resync()
-    expect(audio[0]?.plans.at(-1)).toHaveLength(2)
+    expect(audio[0]?.plans.at(-1)).toHaveLength(4)
   })
 
   it('resumes without awaiting a browser promise and fences old callbacks after close', async () => {
@@ -74,7 +74,7 @@ describe('timer lifecycle', () => {
     await session.resync()
     expect(session.usableClock()).toBe(false)
     expect(session.store.getState()).toMatchObject({ synchronized: true, degraded: true })
-    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([290000])
+    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([290000, 350000, 365000])
   })
 
   it('silences an invalidated lifecycle anchor until a successful post-gap estimate', async () => {
@@ -91,7 +91,7 @@ describe('timer lifecycle', () => {
     expect(session.store.getState()).toMatchObject({ synchronized: false, degraded: true })
     api.time.mockImplementation(() => Promise.resolve(session.serverNow()))
     await session.resync()
-    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([])
+    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([50000, 65000])
   })
 
   it('cancels on pause and skips past milestones after foreground recovery', async () => {
@@ -104,9 +104,9 @@ describe('timer lifecycle', () => {
     if (!first) throw new Error('No audio')
     advance(370000)
     session.foreground()
-    expect(first.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([])
+    expect(first.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([50000, 65000])
     await session.resync()
-    expect(first.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([])
+    expect(first.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([50000, 65000])
     const paused = {
       ...value,
       version: 2,
@@ -132,13 +132,17 @@ describe('timer lifecycle', () => {
     session.resume()
     session.accept(value)
     await session.resync()
-    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([60000, 360000])
+    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([
+      60000, 360000, 420000, 435000,
+    ])
     const edited = structuredClone(value)
     edited.version++
     edited.timers.speech.endsAt = 600000
     session.accept(edited)
-    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([140000, 440000])
-    expect(audio[0]?.plans.at(-1)).toHaveLength(2)
+    expect(audio[0]?.plans.at(-1)?.map((cue) => cue.delayMs)).toEqual([
+      140000, 440000, 500000, 515000,
+    ])
+    expect(audio[0]?.plans.at(-1)).toHaveLength(4)
   })
 
   it('resynchronizes periodically and reuses one audio owner across media reconnections', async () => {
@@ -190,6 +194,6 @@ describe('timer lifecycle', () => {
     await Promise.resolve()
     expect(first.silences).toBe(3)
     expect(session.store.getState().audio).toBe('running')
-    expect(first.plans.at(-1)).toHaveLength(2)
+    expect(first.plans.at(-1)).toHaveLength(4)
   })
 })

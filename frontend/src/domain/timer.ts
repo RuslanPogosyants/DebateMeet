@@ -32,14 +32,15 @@ export function speechMilestones(durationMs: number): number[] {
 export function futureSpeechCues(
   snapshot: Snapshot,
   serverNow: number,
-): { id: string; delayMs: number }[] {
+): { id: string; delayMs: number; final?: true }[] {
   const timer = snapshot.timers.speech
   if (timer.status !== 'running' || timer.endsAt === null) return []
   const startedAt = timer.endsAt - timer.durationMs
-  return speechMilestones(timer.durationMs)
+  return [...speechMilestones(timer.durationMs), timer.durationMs, timer.durationMs + GRACE_MS]
     .map((mark) => ({
       id: `${snapshot.epoch}:speech:${timer.durationMs}:${timer.endsAt}:${mark}`,
       delayMs: startedAt + mark - serverNow,
+      ...(mark === timer.durationMs + GRACE_MS ? { final: true as const } : {}),
     }))
     .filter((cue) => cue.delayMs > 0)
 }

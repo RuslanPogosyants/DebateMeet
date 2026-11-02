@@ -10,7 +10,7 @@ import {
   type TimerView,
 } from '@/domain/timer'
 import { ControlIcon } from './control-icon'
-import { formatTimerTime, parseTimerTime } from '@/ui/timer-time'
+import { formatTimerTime, formatTypedTimerTime, parseTimerTime } from '@/ui/timer-time'
 import { useServerTime } from '@/ui/use-server-time'
 import type { MeetingLayout } from '@/ui/use-meeting-layout'
 import { strings } from '@/ui/strings'
@@ -164,7 +164,12 @@ function TimerFace({
   return (
     <div className="countdown" data-running={running || undefined}>
       <div className="countdown-row">
-        <span className="countdown-digits" role="timer" aria-label={text.timer} aria-live="off">
+        <span
+          className={`countdown-digits${kind === 'speech' ? ` speech-digits-${speechState(timer, now)}` : ''}`}
+          role="timer"
+          aria-label={text.timer}
+          aria-live="off"
+        >
           {judge && state.stage === 'connected' ? (
             <input
               className="countdown-input"
@@ -185,8 +190,14 @@ function TimerFace({
                 event.currentTarget.select()
               }}
               onChange={(event) => {
-                draftRef.current = event.target.value
-                setDraft(event.target.value)
+                const value = formatTypedTimerTime(
+                  event.target.value,
+                  draftRef.current ?? '',
+                  event.nativeEvent instanceof InputEvent ? event.nativeEvent.inputType : '',
+                  event.target.selectionStart ?? event.target.value.length,
+                )
+                draftRef.current = value
+                setDraft(value)
                 setInvalid(false)
               }}
               onBlur={(event) => {
@@ -432,8 +443,14 @@ function DurationEditor({
         aria-describedby={hint}
         onFocus={(event) => event.currentTarget.select()}
         onChange={(event) => {
-          draftRef.current = event.target.value
-          setDraft(event.target.value)
+          const value = formatTypedTimerTime(
+            event.target.value,
+            draftRef.current ?? '',
+            event.nativeEvent instanceof InputEvent ? event.nativeEvent.inputType : '',
+            event.target.selectionStart ?? event.target.value.length,
+          )
+          draftRef.current = value
+          setDraft(value)
           setInvalid(false)
         }}
         onBlur={(event) => {

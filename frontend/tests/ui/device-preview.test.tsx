@@ -72,9 +72,16 @@ async function setup() {
   const selection = vi.fn<(value: DeviceSelection) => void>()
   function View() {
     const [camera, setCamera] = useState(false)
+    const [microphone, setMicrophone] = useState(false)
     return (
       <ServicesContext.Provider value={fakes.services}>
-        <DevicePreview camera={camera} setCamera={setCamera} onSelection={selection} />
+        <DevicePreview
+          camera={camera}
+          setCamera={setCamera}
+          microphone={microphone}
+          setMicrophone={setMicrophone}
+          onSelection={selection}
+        />
       </ServicesContext.Provider>
     )
   }
@@ -110,6 +117,13 @@ describe('prejoin device controls', () => {
     expect(screen.getByRole('option', { name: 'Вторая камера' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Второй микрофон' })).toBeInTheDocument()
     const camera = screen.getByRole('button', { name: 'Камера выключена' })
+    const microphone = screen.getByRole('button', { name: 'Микрофон выключен' })
+    expect(microphone).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(microphone)
+    expect(screen.getByRole('button', { name: 'Микрофон включён' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
     expect(camera).toHaveAttribute('title', 'Камера выключена')
     expect(camera.querySelector('svg')).not.toBeNull()
     fireEvent.click(camera)

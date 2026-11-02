@@ -219,6 +219,17 @@ input[type='range'] {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.entry-exit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 24px 0;
+}
+.entry-exit-actions a {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
 .recent-rounds {
   border-top: 1px solid var(--foreground);
   padding-top: 18px;
@@ -1527,6 +1538,19 @@ dialog select {
 
 .countdown[data-running='true'] .countdown-digits {
   color: var(--word);
+}
+.countdown .speech-digits-poi,
+.countdown[data-running='true'] .speech-digits-poi {
+  color: var(--foreground);
+}
+.countdown .speech-digits-protected,
+.countdown .speech-digits-grace,
+.countdown .speech-digits-overtime {
+  color: var(--word);
+}
+.countdown .speech-digits-overtime,
+.countdown[data-running='true'] .speech-digits-overtime {
+  filter: saturate(1.7) contrast(1.15);
 }
 .countdown-input:hover:not(:disabled),
 .countdown-input:focus {

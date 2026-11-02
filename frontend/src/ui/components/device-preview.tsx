@@ -14,10 +14,14 @@ function defaultDeviceLabel(name: string | undefined): string {
 export function DevicePreview({
   camera,
   setCamera,
+  microphone,
+  setMicrophone,
   onSelection,
 }: {
   camera: boolean
   setCamera: (enabled: boolean) => void
+  microphone: boolean
+  setMicrophone: (enabled: boolean) => void
   onSelection: (devices: DeviceSelection) => void
 }) {
   const { devices } = useServices()
@@ -122,6 +126,16 @@ export function DevicePreview({
         )}
       </div>
       <div className="preview-actions">
+        <button
+          className="action media-toggle"
+          type="button"
+          aria-label={microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+          title={microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+          aria-pressed={microphone}
+          onClick={() => setMicrophone(!microphone)}
+        >
+          <ControlIcon kind="microphone" off={!microphone} />
+        </button>
         <button
           className="action media-toggle"
           type="button"
