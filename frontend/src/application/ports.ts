@@ -200,7 +200,7 @@ export interface ClientClock {
   wallNow(): number
 }
 
-export type TimerCue = { id: string; delayMs: number }
+export type TimerCue = { id: string; delayMs: number; final?: true }
 export type TimerAudioState = 'running' | 'blocked' | 'closed'
 export type TimerAudioEvents = { state(value: TimerAudioState): void }
 export interface TimerAudio {

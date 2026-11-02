@@ -53,7 +53,7 @@ describe('timer projection', () => {
     value.timers.prep = running(900000)
     expect(futureSpeechCues(value, 100000)).toEqual([])
     value.timers.speech = running()
-    expect(futureSpeechCues(value, 460000).map((cue) => cue.delayMs)).toEqual([])
+    expect(futureSpeechCues(value, 460000).map((cue) => cue.delayMs)).toEqual([60000, 75000])
     const ids = futureSpeechCues(value, 100000).map((cue) => cue.id)
     expect(futureSpeechCues({ ...value, version: 999 }, 100000).map((cue) => cue.id)).toEqual(ids)
     expect(
@@ -78,19 +78,22 @@ describe('timer projection', () => {
 })
 
 describe('shared countdown signals', () => {
-  it('signals after the first minute and with one minute remaining, never at zero', () => {
+  it('signals at protected boundaries, end, and grace end', () => {
     const value = snapshot()
     value.timers.speech = running()
-    expect(futureSpeechCues(value, 100000).map((cue) => cue.delayMs)).toEqual([60000, 360000])
-    expect(futureSpeechCues(value, 460000)).toEqual([])
-    expect(futureSpeechCues(value, 520000)).toEqual([])
+    expect(futureSpeechCues(value, 100000).map((cue) => cue.delayMs)).toEqual([
+      60000, 360000, 420000, 435000,
+    ])
+    expect(futureSpeechCues(value, 460000).map((cue) => cue.delayMs)).toEqual([60000, 75000])
+    expect(futureSpeechCues(value, 520000).map((cue) => cue.delayMs)).toEqual([15000])
+    expect(futureSpeechCues(value, 520000)[0]?.final).toBe(true)
   })
   it('deduplicates coincident marks and skips zero or end marks on a short timer', () => {
     const value = snapshot()
     value.timers.speech = running(120000)
-    expect(futureSpeechCues(value, 100000)).toHaveLength(1)
+    expect(futureSpeechCues(value, 100000)).toHaveLength(3)
     value.timers.speech = running(60000)
-    expect(futureSpeechCues(value, 100000)).toEqual([])
+    expect(futureSpeechCues(value, 100000).map((cue) => cue.delayMs)).toEqual([60000, 75000])
   })
   it('retains signal identity for unrelated snapshots and replaces it after editing a deadline', () => {
     const value = snapshot()

@@ -52,7 +52,7 @@ describe('routes and entry', () => {
   })
 
   it('allows entry without media devices and keeps the microphone off', async () => {
-    const { media } = renderAt(`/r/${ROUND_ID}`)
+    const { media, router } = renderAt(`/r/${ROUND_ID}`)
     const name = await screen.findByRole('textbox', { name: strings.round.name })
     await userEvent.type(name, 'Вика')
     await waitFor(() => {
@@ -67,6 +67,10 @@ describe('routes and entry', () => {
     expect(media[0]?.microphoneChanges).toEqual([])
     await userEvent.click(screen.getByRole('button', { name: strings.round.leave }))
     expect(await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: strings.round.return })).toBeVisible()
+    await userEvent.click(screen.getByRole('link', { name: strings.round.home }))
+    expect(router.state.location.pathname).toBe('/')
+    expect(screen.getByRole('heading', { name: strings.start.title })).toBeVisible()
   })
 
   it('shows the not-found page for an unknown path', () => {

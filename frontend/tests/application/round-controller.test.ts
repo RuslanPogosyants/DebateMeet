@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RoundController } from '@/application/round-controller'
 import { ClientError } from '@/application/ports'
-import { FakeMedia, ROUND_ID, credentials, fixture, snapshot } from '../fixtures'
+import { FakeMedia, ROUND_ID, SELF, credentials, fixture, snapshot } from '../fixtures'
 
 const controllers: RoundController[] = []
 afterEach(() => {
@@ -111,7 +111,8 @@ describe('entry and state', () => {
     expect(controller.store.getState().people[0]?.microphone).toBe(false)
   })
 
-  it('reports an initial media failure once when disconnect arrives before rejection', async () => {
+  it('retries initial media failure with the same credentials and connects', async () => {
+    vi.useFakeTimers()
     const { controller, services, api } = setup()
     const failed = new FakeMedia()
     vi.spyOn(failed, 'connect').mockImplementation((_, __, ___, events) => {
@@ -120,12 +121,88 @@ describe('entry and state', () => {
     })
     vi.spyOn(services, 'media').mockResolvedValueOnce(failed)
 
-    await controller.join('Вика', false)
-
-    expect(controller.store.getState().stage).toBe('prejoin')
-    expect(controller.store.getState().error).toBe('media_unavailable')
+    const joining = controller.join('Вика', false)
+    await vi.waitFor(() => expect(controller.store.getState().error).toBe('media_unavailable'))
     expect(api.joins).toHaveLength(1)
     expect(failed.stopped).toBe(1)
+    await vi.advanceTimersByTimeAsync(2000)
+    await joining
+    expect(api.joins).toEqual([null, credentials])
+    expect(controller.store.getState().stage).toBe('connected')
+    expect(controller.store.getState().error).toBeNull()
+  })
+
+  it('cancels a pending automatic entry retry on leave', async () => {
+    vi.useFakeTimers()
+    const { controller, api } = setup()
+    const join = vi.spyOn(api, 'join').mockRejectedValue(new ClientError('network'))
+    const joining = controller.join('Вика', false)
+    await vi.waitFor(() => expect(controller.store.getState().error).toBe('network'))
+    await controller.leave()
+    await joining
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(join).toHaveBeenCalledTimes(1)
+    expect(controller.store.getState().stage).toBe('left')
+  })
+
+  it('does not enable the chosen microphone when entry is cancelled', async () => {
+    const { controller, api, media } = setup()
+    const pending: { resolve?: (value: typeof api.response) => void } = {}
+    vi.spyOn(api, 'join').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.resolve = resolve
+        }),
+    )
+    const joining = controller.join('Вика', false, {}, true)
+    await vi.waitFor(() => expect(pending.resolve).toBeDefined())
+    await controller.leave()
+    pending.resolve?.(api.response)
+    await joining
+    expect(media).toEqual([])
+    expect(controller.store.getState().stage).toBe('left')
+  })
+
+  it('receives judge notices while the selected microphone is starting', async () => {
+    const { controller, services } = setup()
+    const session = new FakeMedia()
+    const pending: { resolve?: () => void } = {}
+    vi.spyOn(session, 'microphone').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.resolve = resolve
+        }),
+    )
+    vi.spyOn(services, 'media').mockResolvedValueOnce(session)
+    const joining = controller.join('Вика', false, {}, true)
+    await vi.waitFor(() => expect(pending.resolve).toBeDefined())
+    const notice = {
+      topic: 'microphone_muted' as const,
+      roundId: ROUND_ID,
+      epoch: 1,
+      effectId: '1',
+      targetId: SELF,
+      targetSid: 'PA_local',
+      expiresAt: Math.floor(controller.timers.serverNow()) + 30000,
+    }
+    session.events?.microphone(notice)
+    expect(controller.social.store.getState().notice).toEqual(notice)
+    pending.resolve?.()
+    await joining
+    expect(controller.social.store.getState().notice).toEqual(notice)
+    await controller.leave()
+    session.events?.microphone({ ...notice, effectId: '2' })
+    expect(controller.social.store.getState().notice).toBeNull()
+  })
+
+  it('enables the chosen microphone once, without restoring it after reconnect', async () => {
+    const { controller, media } = setup()
+    await controller.join('Вика', false, {}, true)
+    expect(media[0]?.microphoneChanges).toEqual([true])
+    media[0]?.events?.ended('network')
+    await vi.waitFor(() => expect(media).toHaveLength(2))
+    await vi.waitFor(() => expect(controller.store.getState().stage).toBe('connected'))
+    expect(media[1]?.microphoneChanges).toEqual([])
   })
 
   it('rejoins with stored credentials and a null secret response', async () => {
@@ -426,6 +503,23 @@ describe('session ownership consent', () => {
     expect(api.leaves).toEqual([])
   })
 
+  it('does not retry a failed transfer after another tab could take ownership', async () => {
+    vi.useFakeTimers()
+    const { controller, api, services, ownership, preferences } = setup()
+    preferences.saved = credentials
+    ownership.available = false
+    const failed = new FakeMedia()
+    vi.spyOn(failed, 'connect').mockRejectedValue(new Error('ICE could not connect'))
+    vi.spyOn(services, 'media').mockResolvedValueOnce(failed)
+    await controller.join('Вика', false)
+    await controller.confirmTransfer()
+    expect(controller.store.getState().stage).toBe('prejoin')
+    ownership.held = true // A third tab now owns the session.
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(api.joins).toEqual([credentials])
+    expect(ownership.held).toBe(true)
+  })
+
   it('replaces only after confirmation and never leaves after losing ownership', async () => {
     const { controller, api, media, ownership, preferences } = setup()
     preferences.saved = credentials
@@ -574,7 +668,7 @@ it('applies accepted timer state before a delayed room subscription transition',
     expect(controller.timers.store.getState().snapshot?.version).toBe(2)
   })
   expect(controller.store.getState().snapshot?.version).toBe(1)
-  expect(timerAudio[0]?.plans.at(-1)).toHaveLength(2)
+  expect(timerAudio[0]?.plans.at(-1)).toHaveLength(4)
   await controller.leave()
   pending.resolve?.()
   await sending

@@ -102,6 +102,7 @@ function Prejoin({ controller }: { controller: RoundController }) {
   const error = useStore(controller.store, (state) => state.error)
   const [name, setName] = useState(() => preferences.name())
   const [camera, setCamera] = useState(false)
+  const [microphone, setMicrophone] = useState(false)
   const [devices, setDevices] = useState<DeviceSelection>({})
   const [health, setHealth] = useState<'checking' | 'ready' | 'unavailable'>('checking')
   useEffect(() => {
@@ -117,22 +118,28 @@ function Prejoin({ controller }: { controller: RoundController }) {
     const timer =
       error === 'updating'
         ? setTimeout(() => {
-            void controller.join(name, camera, devices)
+            void controller.join(name, camera, devices, microphone)
           }, 20_000)
         : undefined
     return () => {
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [error, controller, name, camera, devices])
+  }, [error, controller, name, camera, devices, microphone])
 
   function join(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault()
-    void controller.join(name, camera, devices)
+    void controller.join(name, camera, devices, microphone)
   }
 
   return (
     <div className="entry-layout">
-      <DevicePreview camera={camera} setCamera={setCamera} onSelection={setDevices} />
+      <DevicePreview
+        camera={camera}
+        setCamera={setCamera}
+        microphone={microphone}
+        setMicrophone={setMicrophone}
+        onSelection={setDevices}
+      />
       <section className="entry-form">
         <h1 className="font-display text-display font-bold">{strings.round.title}</h1>
         <p className="text-title">{strings.round.prejoin}</p>
@@ -150,7 +157,7 @@ function Prejoin({ controller }: { controller: RoundController }) {
             aria-invalid={error === 'invalid_name'}
           />
           <p id="microphone-notice" className="text-caption text-muted-foreground">
-            {strings.round.microphoneMuted}
+            {microphone ? strings.round.microphoneJoiningOn : strings.round.microphoneMuted}
           </p>
           <p className="server-status">
             {strings.round.server}
@@ -636,21 +643,23 @@ export function RoundPage() {
       <main className="entry-shell">
         <VersionNotice controller={controller} canReload />
         <h1 className="font-display text-display font-bold">{endedText[state.ended ?? 'left']}</h1>
+        <div className="entry-exit-actions">
+          <Link className="action-primary" to="/">
+            {strings.round.home}
+          </Link>
+          {state.ended !== 'removed' && state.ended !== 'deleted' && (
+            <button
+              className="action"
+              type="button"
+              onClick={() => {
+                void controller.join(services.preferences.name(), false)
+              }}
+            >
+              {strings.round.return}
+            </button>
+          )}
+        </div>
         <LocalRecordingsButton />
-        {state.ended !== 'removed' && state.ended !== 'deleted' && (
-          <button
-            className="action-primary"
-            type="button"
-            onClick={() => {
-              void controller.join(services.preferences.name(), false)
-            }}
-          >
-            {strings.round.return}
-          </button>
-        )}
-        <Link className="text-link" to="/">
-          {strings.round.home}
-        </Link>
       </main>
     )
   if (state.stage === 'joining')
@@ -660,6 +669,7 @@ export function RoundPage() {
         <h1 className="font-display text-display font-bold" role="status">
           {strings.round.joining}
         </h1>
+        {state.error !== null && <p role="status">Не удалось подключиться. Повторяем попытку…</p>}
         <button
           className="action"
           type="button"

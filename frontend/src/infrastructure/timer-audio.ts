@@ -86,11 +86,12 @@ export class WebAudioTimerAudio implements TimerAudio {
       const source = context.createOscillator()
       const gain = context.createGain()
       const startsAt = context.currentTime + cue.delayMs / 1000
-      source.frequency.value = 660
+      const duration = cue.final ? 0.3 : 0.12
+      source.frequency.value = cue.final ? 440 : 660
       gain.gain.setValueAtTime(0, startsAt)
       gain.gain.linearRampToValueAtTime(0.04, startsAt + 0.008)
-      gain.gain.setValueAtTime(0.04, startsAt + 0.1)
-      gain.gain.linearRampToValueAtTime(0, startsAt + 0.12)
+      gain.gain.setValueAtTime(0.04, startsAt + duration - 0.02)
+      gain.gain.linearRampToValueAtTime(0, startsAt + duration)
       source.connect(gain)
       gain.connect(context.destination)
       const scheduled = { source, gain, startsAt }
@@ -107,7 +108,7 @@ export class WebAudioTimerAudio implements TimerAudio {
         { once: true },
       )
       source.start(startsAt)
-      source.stop(startsAt + 0.12)
+      source.stop(startsAt + duration)
     }
   }
 

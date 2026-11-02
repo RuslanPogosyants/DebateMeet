@@ -91,12 +91,15 @@ export class RoundController {
   private credentials: Credentials | null = null
   private name = ''
   private camera = false
+  private joinMicrophone = false
   private joinDevices: DeviceSelection = {}
   private lastForeground: { mono: number; wall: number }
   private unsubscribeErrors: (() => void) | null = null
   private unsubscribeClock: (() => void) | null = null
   private unsubscribeDevices: (() => void) | null = null
   private generation = 0
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private cancelRetry: (() => void) | null = null
   private readonly toggles: Record<ToggleKind, ToggleState> = {
     camera: { revision: 0, pending: new Set(), latest: null },
     microphone: { revision: 0, pending: new Set(), latest: null },
@@ -290,7 +293,12 @@ export class RoundController {
       this.diagnostics.switched(room, this.emptyRoom())
   }
 
-  async join(name: string, camera: boolean, devices: DeviceSelection = {}): Promise<void> {
+  async join(
+    name: string,
+    camera: boolean,
+    devices: DeviceSelection = {},
+    microphone = false,
+  ): Promise<void> {
     this.activate()
     if (this.store.getState().stage === 'joining') return
     this.name = name.trim()
@@ -299,6 +307,7 @@ export class RoundController {
       return
     }
     this.camera = camera
+    this.joinMicrophone = microphone
     this.joinDevices = devices
     this.devices.reset(devices)
     this.credentials = this.services.preferences.credentials(this.roundId)
@@ -321,7 +330,7 @@ export class RoundController {
         this.store.setState({ stage: 'transfer' })
         return
       }
-      await this.connect(generation)
+      await this.connectWithRetry(generation)
     } catch (error) {
       if (generation !== this.generation) return
       await this.session?.disconnect()
@@ -399,6 +408,31 @@ export class RoundController {
       commandPending: false,
       commandUncertain: false,
     })
+  }
+
+  private async connectWithRetry(generation: number): Promise<void> {
+    let failures = 0
+    while (generation === this.generation) {
+      try {
+        await this.connect(generation)
+        return
+      } catch (error) {
+        if (generation !== this.generation) return
+        const code = error instanceof ClientError ? error.code : 'media_unavailable'
+        if (!['network', 'media_unavailable', 'updating'].includes(code)) throw error
+        this.store.setState({ error: code })
+        const delay = code === 'updating' ? 20_000 : Math.min(2_000 * 2 ** failures, 30_000)
+        failures = Math.min(failures + 1, 4)
+        await new Promise<void>((resolve) => {
+          this.cancelRetry = resolve
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = null
+            this.cancelRetry = null
+            resolve()
+          }, delay)
+        })
+      }
+    }
   }
 
   private async connect(generation: number, takeover = false): Promise<void> {
@@ -543,9 +577,14 @@ export class RoundController {
       }
     })
     if (generation !== this.generation) return
-    this.chat.start(this.credentials, this.subscriptions.latest?.epoch ?? joined.snapshot.epoch)
     this.social.start(joined.participantId, this.session?.sid ?? null)
-    this.store.setState({ stage: 'connected', controlUnavailable: false })
+    if (this.joinMicrophone) {
+      this.joinMicrophone = false
+      await this.microphone(true)
+      if (generation !== this.generation) return
+    }
+    this.chat.start(this.credentials, this.subscriptions.latest?.epoch ?? joined.snapshot.epoch)
+    this.store.setState({ stage: 'connected', controlUnavailable: false, error: null })
     this.recording.connect(this.credentials)
     this.diagnostics.start(this.credentials)
     this.diagnostics.connected(this.emptyRoom())
@@ -623,7 +662,7 @@ export class RoundController {
     await cleanup
     if (generation !== this.generation) return
     try {
-      await this.connect(generation)
+      await this.connectWithRetry(generation)
     } catch (error) {
       if (generation !== this.generation) return
       const code = error instanceof ClientError ? error.code : 'media_unavailable'
@@ -754,6 +793,10 @@ export class RoundController {
   }
 
   private nextGeneration(): number {
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer)
+    this.retryTimer = null
+    this.cancelRetry?.()
+    this.cancelRetry = null
     for (const toggle of Object.values(this.toggles)) {
       ++toggle.revision
       toggle.pending.clear()

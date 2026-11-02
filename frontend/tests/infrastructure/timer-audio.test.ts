@@ -98,6 +98,17 @@ function setup() {
 }
 
 describe('timer audio boundary', () => {
+  it('uses a longer distinct but equally quiet signal at the end of grace', async () => {
+    const { audio } = setup()
+    await audio.resume()
+    const context = Context.contexts[0]
+    if (!context) throw new Error('No audio context')
+    audio.replace([{ id: 'final', delayMs: 1000, final: true }])
+    expect(context.sources[0]?.frequency.value).toBe(440)
+    expect(context.sources[0]?.stops).toEqual([11.3])
+    expect(Math.max(...(context.gains[0]?.gain.values ?? []))).toBe(0.04)
+    audio.close()
+  })
   it('routes its own context without resuming or changing scheduled timer cues', async () => {
     const { audio } = setup()
     expect(await audio.output('headphones')).toBe('headphones')
