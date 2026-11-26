@@ -84,8 +84,8 @@ describe('local recordings UI', () => {
       statusUnavailable: true,
     })
     render(<RecordingIndicator controller={controller} onLibrary={noop} />)
-    expect(screen.getByText(/Борис.*ведет запись/u)).toBeInTheDocument()
-    expect(screen.getByText('Не удалось обновить сведения о записи.')).toBeInTheDocument()
+    expect(screen.getByText(/По последним данным, Борис ведет запись/u)).toBeInTheDocument()
+    expect(screen.queryByText('Не удалось обновить сведения о записи.')).not.toBeInTheDocument()
     expect(screen.queryByText(/Вы попадаете/u)).not.toBeInTheDocument()
   })
 })
