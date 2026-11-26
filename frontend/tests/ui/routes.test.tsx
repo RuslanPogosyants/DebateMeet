@@ -38,7 +38,7 @@ describe('routes and entry', () => {
     renderAt(`/r/${ROUND_ID}`)
     expect(screen.getByRole('status')).toHaveTextContent(strings.loading)
     expect(await screen.findByRole('heading', { name: strings.round.title })).toBeInTheDocument()
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.queryByText(strings.loading)).not.toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByRole('button', { name: strings.round.join })).toBeEnabled()
     })

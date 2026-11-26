@@ -9,7 +9,10 @@ import {
 } from './media'
 import { claimJudge, enter, join, mediaSid, snapshot } from './round'
 
-test('a valid long judge name fits the phone header', async ({ browser, page }, testInfo) => {
+test('a valid long judge name fits the phone header and remains readable in the room roster', async ({
+  browser,
+  page,
+}, testInfo) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Создать раунд', exact: true }).click()
   await expect(page).toHaveURL(/\/r\/[A-Za-z0-9_-]{22}$/u)
@@ -39,6 +42,35 @@ test('a valid long judge name fits the phone header', async ({ browser, page }, 
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(390)
     await page.screenshot({ path: testInfo.outputPath('long-judge-mobile.png'), fullPage: true })
+    await page.setViewportSize({ width: 320, height: 820 })
+    const more = await page.getByRole('button', { name: 'Ещё', exact: true }).boundingBox()
+    const reaction = await page
+      .getByRole('button', { name: 'Реакция — 👏', exact: true })
+      .boundingBox()
+    if (!more || !reaction) throw new Error('Missing mobile dock controls')
+    expect(
+      Math.abs(more.y + more.height / 2 - reaction.y - reaction.height / 2),
+    ).toBeLessThanOrEqual(1)
+
+    await page.getByRole('button', { name: 'Показать боковую панель', exact: true }).click()
+    const map = page.getByRole('dialog', { name: 'Комнаты и чат' })
+    const base = map.getByRole('region', { name: 'База', exact: true })
+    const clipped = base.locator('.room-preview .room-person-name').filter({ hasText: name })
+    await expect
+      .poll(() => clipped.evaluate((element) => element.scrollWidth > element.clientWidth))
+      .toBe(true)
+    const rosterTrigger = base.getByRole('button', { name: 'Состав комнаты База' })
+    await rosterTrigger.press('Enter')
+    const roster = base.getByRole('list', { name: 'Полный состав комнаты База' })
+    await expect(roster.getByText(name, { exact: true })).toBeVisible()
+    await expect(page.getByTestId('current-room-heading')).toHaveText('База')
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(320)
+    await page.screenshot({
+      path: testInfo.outputPath('long-name-room-roster.png'),
+      fullPage: true,
+    })
   } finally {
     await otherContext.close()
   }

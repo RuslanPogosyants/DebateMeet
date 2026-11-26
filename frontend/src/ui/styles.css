@@ -310,8 +310,13 @@ input[type='range'] {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  flex-wrap: wrap;
   margin-top: 12px;
+}
+.preview-actions > div {
+  display: grid;
+  width: 88px;
+  justify-items: center;
+  gap: 3px;
 }
 .preview-actions .media-toggle {
   display: grid;
@@ -333,39 +338,88 @@ input[type='range'] {
 }
 .device-selectors {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
   padding-top: 16px;
 }
-.device-selectors label {
+.device-selector {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.device-selector label {
+  padding-block: 8px;
+}
+.device-field {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: 6px;
+}
+.device-picker {
+  position: relative;
+  min-width: 0;
+}
+.device-picker > svg {
+  position: absolute;
+  inset-block-start: 11px;
+  inset-inline-end: 10px;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
 }
 .device-selectors select {
+  appearance: none;
   min-width: 0;
   max-width: 100%;
+  min-height: 38px;
+  padding: 6px 32px 6px 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-@media (max-width: 760px) {
-  .device-selectors {
-    grid-template-columns: minmax(0, 1fr);
+@supports (appearance: base-select) {
+  .device-selectors select,
+  .device-selectors select::picker(select) {
+    appearance: base-select;
+  }
+  .device-selectors select::picker-icon {
+    display: none;
+  }
+  .device-selectors select::picker(select) {
+    margin-block-start: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--background);
+    color: var(--foreground);
+  }
+  .device-selectors option {
+    padding: 7px 8px;
+    border-radius: 4px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .device-selectors option:checked,
+  .device-selectors option:hover {
+    background: var(--secondary);
   }
 }
-.device-statuses {
-  padding-top: 24px;
-  display: grid;
-  gap: 12px;
+.device-test-sound {
+  justify-self: end;
 }
-.device-statuses p,
 .server-status {
   display: flex;
   justify-content: space-between;
   gap: 24px;
 }
-.device-statuses p span {
-  text-align: right;
-  max-width: 72%;
-  color: var(--muted-foreground);
+@media (pointer: coarse) {
+  .device-selectors select {
+    min-height: 44px;
+  }
+  .device-picker > svg {
+    inset-block-start: 14px;
+  }
 }
 .microphone-level {
   width: 100%;
@@ -436,9 +490,6 @@ input[type='range'] {
 .timer-health {
   flex-shrink: 0;
 }
-.room-wide {
-  grid-column: 1 / -1;
-}
 .room-own {
   background: var(--foreground);
   color: var(--background);
@@ -449,10 +500,6 @@ input[type='range'] {
   text-underline-offset: 3px;
   font-size: 13px;
   line-height: 18px;
-}
-.room-own .room-description,
-.room-own .room-more {
-  color: var(--on-stage-muted);
 }
 .judge-control {
   display: flex;
@@ -1687,24 +1734,6 @@ dialog select {
     min-height: 56px;
   }
 }
-.meeting-side-panel .room-card {
-  padding: 6px 8px;
-}
-.meeting-side-panel .room-map-grid {
-  gap: 5px;
-}
-.meeting-side-panel .room-description {
-  margin-top: 2px;
-}
-.meeting-side-panel .room-card ul {
-  margin-top: 4px;
-}
-.meeting-side-panel .room-card-heading {
-  font-size: 14px;
-}
-.meeting-side-panel .room-enter {
-  font-size: 13px;
-}
 .meeting-side-panel .sidebar-heading {
   min-height: 32px;
 }
@@ -1845,13 +1874,15 @@ dialog select {
   gap: 8px 12px;
   flex-shrink: 0;
   min-width: 0;
+  flex-wrap: wrap;
   padding-block: 6px;
 }
 .scene-heading {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 2px 10px;
+  gap: 2px 8px;
+  flex: 1 1 170px;
   min-width: 0;
 }
 .scene-heading h1 {
@@ -1868,17 +1899,11 @@ dialog select {
   width: 18px;
   height: 18px;
 }
-.scene-heading .hand-queue-trigger {
-  flex-basis: 32px;
-}
 @media (pointer: coarse) {
   .scene-heading .icon-control {
     width: 44px;
     height: 44px;
     min-height: 44px;
-  }
-  .scene-heading .hand-queue-trigger {
-    flex-basis: 44px;
   }
 }
 .scene-heading p {
@@ -1893,6 +1918,21 @@ dialog select {
   gap: 0;
   flex-shrink: 0;
   font-size: 13px;
+}
+.meeting-scene > .scene-controls {
+  justify-content: flex-end;
+}
+.scene-heading .copy-link {
+  position: relative;
+}
+.scene-heading .copy-link p {
+  position: absolute;
+  z-index: 2;
+  width: max-content;
+  max-width: 150px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
 }
 .scene-controls > .scene-choice:first-child {
   border-radius: 8px 0 0 8px;
@@ -1929,53 +1969,116 @@ dialog select {
   min-height: 0;
   overflow: hidden;
 }
-.room-map-heading,
-.room-card-heading {
+.room-map-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 6px;
-}
-.room-map-heading {
   min-height: 32px;
   margin-bottom: 6px;
 }
 .room-map-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 .room-card {
   min-width: 0;
-  padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 5px;
 }
-.room-card-heading {
-  flex-wrap: wrap;
-  align-items: baseline;
+.room-card-row {
+  display: grid;
+  grid-template: 'title preview tools' minmax(32px, auto) / 69px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 7px 2px;
+}
+.room-card-name {
+  grid-area: title;
+  font-size: 13px;
+}
+.room-card-actions {
+  grid-area: tools;
+  display: flex;
+  align-items: center;
+}
+.room-card-action {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 32px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.room-card-action:enabled:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.room-card-action svg {
+  width: 15px;
+  height: 15px;
+}
+.room-roster-action {
+  position: relative;
+}
+.room-hidden-hands {
+  position: absolute;
+  inset: 0 0 auto auto;
+  display: flex;
+  align-items: center;
+  background: var(--protected);
+  color: var(--foreground);
+  border-radius: 3px;
+  padding-inline: 2px;
+  font-size: 9px;
+  line-height: 11px;
+}
+.room-hidden-hands svg {
+  width: 9px;
+  height: 9px;
+}
+.room-roster-action[hidden] {
+  display: grid;
+  visibility: hidden;
+}
+.room-roster-action[aria-expanded='true'] > svg {
+  transform: rotate(180deg);
+}
+.room-preview,
+.room-empty {
+  grid-area: preview;
 }
 .room-card ul {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0;
   padding: 0;
 }
-.room-card li {
+.room-preview {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 16px;
-  align-items: start;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 13px;
+}
+.room-preview li,
+.room-expanded li {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  font-size: 12px;
   line-height: 18px;
 }
 .room-person-name {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.room-hand-badge,
-.room-hand-summary {
+.room-preview .room-person-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-hand-badge {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -1985,17 +2088,9 @@ dialog select {
   color: var(--foreground);
   font-size: 11px;
   line-height: 18px;
-  vertical-align: baseline;
   white-space: nowrap;
 }
-.room-hand-badge {
-  margin-right: 4px;
-}
-.room-hand-summary {
-  margin-left: 4px;
-}
-.room-hand-badge svg,
-.room-hand-summary svg {
+.room-hand-badge svg {
   width: 12px;
   height: 12px;
 }
@@ -2003,28 +2098,42 @@ dialog select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 18px;
+  flex: 0 0 13px;
+  margin-left: auto;
 }
 .room-person-microphone svg {
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
 }
-.room-card li + li {
-  margin-top: 4px;
-}
-.room-description {
-  margin-top: 4px;
-  font-size: 13px;
-  line-height: 18px;
+.room-empty {
   color: var(--muted-foreground);
+}
+.room-expanded {
+  margin: 0 7px 6px;
+  padding-top: 5px;
+  border-top: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  font-size: 13px;
+}
+.room-expanded li {
+  padding-block: 3px;
 }
 .room-recall {
   display: block;
-  margin-top: 6px;
+  margin: 0 7px 4px;
   text-decoration: underline;
   text-underline-offset: 3px;
   font-size: 13px;
   line-height: 18px;
+}
+@media (pointer: coarse) {
+  .room-card-row {
+    grid-template-rows: minmax(44px, auto);
+    grid-template-columns: 65px minmax(0, 1fr) auto;
+  }
+  .room-card-action {
+    width: 44px;
+    height: 44px;
+  }
 }
 .room-navigation {
   display: flex;
@@ -2122,8 +2231,25 @@ dialog select {
   border-radius: 6px;
   white-space: nowrap;
 }
+.timer-actions {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  gap: 6px;
+}
+.timer-actions .hand-queue-trigger {
+  flex-basis: 32px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+.timer-actions .hand-queue-trigger svg {
+  width: 18px;
+  height: 18px;
+}
 .timer-direction {
-  min-width: 118px;
+  min-width: 0;
+  width: 118px;
   min-height: 32px;
   padding: 3px 6px;
   border: 1px solid var(--border);
@@ -2568,13 +2694,6 @@ dialog select {
     grid-template-columns: 280px minmax(0, 1fr);
   }
 }
-@media (max-width: 1100px) {
-  .scene-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
-  }
-}
 @media (max-width: 959px) {
   .meeting-shell {
     padding: 8px 12px;
@@ -2646,11 +2765,17 @@ dialog select {
   .timer-direction {
     min-height: 44px;
   }
-  .scene-toolbar {
+  .timer-actions {
     gap: 4px;
   }
-  .scene-heading {
-    flex-basis: 100%;
+  .timer-actions .hand-queue-trigger {
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+  .scene-toolbar {
+    gap: 4px;
   }
   .scene-heading h1 {
     font-size: 16px;
@@ -2710,12 +2835,12 @@ dialog select {
     height: 42px;
   }
   .meeting-control-group > .reaction-buttons {
-    flex: 0 0 calc(100% - 46px);
+    flex: 0 0 calc(100% - 50px);
     column-gap: 1px;
     order: 1;
     justify-content: center;
   }
-  .meeting-control-group > .more-trigger {
+  .meeting-controls .meeting-control-group > .more-trigger {
     order: 1;
     width: 44px;
     height: 44px;

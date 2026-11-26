@@ -1,4 +1,12 @@
-import { useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from 'react'
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+  type ReactNode,
+} from 'react'
 import { useStore } from 'zustand'
 import type { RoundController } from '@/application/round-controller'
 import {
@@ -509,9 +517,11 @@ export function TimerHealth({ controller }: { controller: RoundController }) {
 export function RoundTimers({
   controller,
   layout,
+  toolbarAction,
 }: {
   controller: RoundController
   layout: MeetingLayout
+  toolbarAction?: ReactNode
 }) {
   const snapshot = useStore(controller.timers.store, (state) => state.snapshot)
   const [selected, setSelected] = useState<TimerKind | null>(null)
@@ -537,19 +547,22 @@ export function RoundTimers({
             </button>
           ))}
         </div>
-        <select
-          className="timer-direction"
-          aria-label="Направление отсчета"
-          data-timer-switch
-          value={directions[kind]}
-          onChange={(event) => {
-            const direction = event.target.value === 'stopwatch' ? 'stopwatch' : 'countdown'
-            setDirections((previous) => ({ ...previous, [kind]: direction }))
-          }}
-        >
-          <option value="countdown">Таймер</option>
-          <option value="stopwatch">Секундомер</option>
-        </select>
+        <div className="timer-actions">
+          <select
+            className="timer-direction"
+            aria-label="Направление отсчета"
+            data-timer-switch
+            value={directions[kind]}
+            onChange={(event) => {
+              const direction = event.target.value === 'stopwatch' ? 'stopwatch' : 'countdown'
+              setDirections((previous) => ({ ...previous, [kind]: direction }))
+            }}
+          >
+            <option value="countdown">Таймер</option>
+            <option value="stopwatch">Секундомер</option>
+          </select>
+          {toolbarAction}
+        </div>
       </div>
       <TimerReadouts controller={controller} kind={kind} direction={directions[kind]} updateTitle />
     </section>

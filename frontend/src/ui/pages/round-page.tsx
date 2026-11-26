@@ -22,6 +22,7 @@ import { MotionDisplay } from '@/ui/components/round-motion'
 import { RoundSidebar } from '@/ui/components/round-sidebar'
 import { RoomsPanelToggle } from '@/ui/components/rooms-panel-toggle'
 import {
+  RecordingControl,
   RecordingIndicator,
   RecordingsLibrary,
   LocalRecordingsButton,
@@ -63,7 +64,7 @@ function supportedBrowser(): boolean {
   return safari === null || Number(safari[1]) >= 17
 }
 
-function CopyLink({ labeled = false }: { labeled?: boolean }) {
+function CopyLink() {
   const [copied, setCopied] = useState(false)
   const [failed, setFailed] = useState(false)
   async function copy() {
@@ -75,9 +76,9 @@ function CopyLink({ labeled = false }: { labeled?: boolean }) {
     }
   }
   return (
-    <div>
+    <div className="copy-link">
       <button
-        className={labeled ? 'action copy-link-labeled' : 'action icon-control share-link'}
+        className="action icon-control share-link"
         aria-label={copied ? strings.round.copied : strings.round.copy}
         title={copied ? strings.round.copied : 'Поделиться ссылкой'}
         type="button"
@@ -86,7 +87,6 @@ function CopyLink({ labeled = false }: { labeled?: boolean }) {
         }}
       >
         <ControlIcon kind="share" />
-        {labeled && <span>{copied ? strings.round.copied : strings.round.copy}</span>}
       </button>
       {failed && (
         <p role="alert" className="text-caption">
@@ -443,17 +443,22 @@ function Meeting({ controller }: { controller: RoundController }) {
               <h1 className="font-display text-title font-bold" data-testid="current-room-heading">
                 {roomNames[room]}
               </h1>
-              <HandQueue controller={controller} compact />
               <JudgeControl controller={controller} panel compact />
+              <CopyLink />
               <p>{strings.round.hearing}</p>
             </div>
-            <SceneControls controller={controller} />
+            <RecordingControl controller={controller} occupied={recordingOccupied} room={room} />
           </div>
           <div className="scene-round-header">
             <MotionDisplay controller={controller} editable={layout !== 'narrow'} />
-            <RoundTimers controller={controller} layout={layout} />
+            <RoundTimers
+              controller={controller}
+              layout={layout}
+              toolbarAction={<HandQueue controller={controller} compact />}
+            />
           </div>
           <div className="meeting-scene">
+            <SceneControls controller={controller} />
             <RecordingIndicator controller={controller} onLibrary={() => setRecordingsOpen(true)} />
             <div className="meeting-call-area">
               <RoundStage key={room} controller={controller} layout={layout} />
@@ -471,33 +476,6 @@ function Meeting({ controller }: { controller: RoundController }) {
         >
           <div className="more-controls">
             <div className="utility-actions">
-              <CopyLink labeled />
-              <button
-                className="action"
-                type="button"
-                disabled={
-                  recordingState.phase !== 'idle' ||
-                  !controller.recording.platform.supported() ||
-                  recordingOccupied
-                }
-                onClick={() => {
-                  setMoreOpen(false)
-                  void controller.startRecording()
-                }}
-              >
-                Начать запись комнаты
-              </button>
-              {controller.recording.platform.supported() &&
-                !recordingOccupied &&
-                recordingState.phase === 'idle' && (
-                  <p className="text-caption">
-                    Выберите эту вкладку со звуком. Ваш включенный микрофон тоже попадет в запись.
-                  </p>
-                )}
-              {!controller.recording.platform.supported() && (
-                <p className="text-caption">Запись вкладки недоступна в этом браузере.</p>
-              )}
-              {recordingOccupied && <p className="text-caption">В этой комнате уже идет запись.</p>}
               <button
                 className="action"
                 type="button"

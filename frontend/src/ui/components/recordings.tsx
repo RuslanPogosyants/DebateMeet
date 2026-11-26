@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useStore } from 'zustand'
+import type { LogicalRoom } from '@/application/ports'
 import type { RoundController } from '@/application/round-controller'
 import type { RecordingEntry, LocalRecordingStore } from '@/application/recording-ports'
 import { useServices } from '@/ui/services'
 import { Sheet } from './sheet'
+import { ControlIcon } from './control-icon'
 import { ConfirmDialog } from './confirm-dialog'
 import { roomNames } from '@/ui/strings'
 import './recordings.css'
@@ -42,15 +44,19 @@ function size(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
 }
 
-export function RecordingIndicator({
+export function RecordingControl({
   controller,
-  onLibrary,
+  occupied,
+  room,
 }: {
   controller: RoundController
-  onLibrary: () => void
+  occupied: boolean
+  room: LogicalRoom
 }) {
   const state = useStore(controller.recording.store)
-  const round = useStore(controller.store)
+  const [preparedRoom, setPreparedRoom] = useState<LogicalRoom | null>(null)
+  if (preparedRoom !== null && preparedRoom !== room) setPreparedRoom(null)
+  const supported = controller.recording.platform.supported()
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (state.phase !== 'recording') return undefined
@@ -70,36 +76,88 @@ export function RecordingIndicator({
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [state.phase])
+  const live = state.phase === 'recording'
+  const idle = state.phase === 'idle'
+  const stopping = state.phase === 'stopping'
+  const status = live
+    ? `● Идет запись · ${duration(now - (state.startedAt ?? now))}`
+    : state.phase === 'choosing'
+      ? 'Выберите вкладку для записи…'
+      : state.phase === 'starting'
+        ? 'Запускаем запись…'
+        : 'Сохраняем запись…'
+  return (
+    <div className="recording-control">
+      {idle ? (
+        <button
+          className="action"
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => setPreparedRoom(room)}
+        >
+          <ControlIcon kind="record" /> Запись
+        </button>
+      ) : (
+        <div className="recording-live">
+          <span role="status">{status}</span>
+          {!stopping && (
+            <button
+              className="action"
+              type="button"
+              onClick={() => void controller.recording.stop()}
+            >
+              {live ? 'Остановить' : 'Отменить'}
+            </button>
+          )}
+        </div>
+      )}
+      {preparedRoom === room && (
+        <Sheet title="Запись комнаты" onClose={() => setPreparedRoom(null)}>
+          {!supported ? (
+            <p>Запись вкладки недоступна в этом браузере.</p>
+          ) : occupied ? (
+            <p>В этой комнате уже идет запись.</p>
+          ) : (
+            <p>Выберите эту вкладку со звуком. Ваш включенный микрофон тоже попадет в запись.</p>
+          )}
+          <button
+            className="action"
+            type="button"
+            disabled={!idle || !supported || occupied}
+            onClick={() => {
+              const current = controller.store.getState()
+              if (
+                current.snapshot?.participants.find((person) => person.id === current.self)
+                  ?.room === preparedRoom
+              ) {
+                void controller.startRecording()
+              }
+              setPreparedRoom(null)
+            }}
+          >
+            Начать запись комнаты
+          </button>
+        </Sheet>
+      )}
+    </div>
+  )
+}
+
+export function RecordingIndicator({
+  controller,
+  onLibrary,
+}: {
+  controller: RoundController
+  onLibrary: () => void
+}) {
+  const state = useStore(controller.recording.store)
+  const round = useStore(controller.store)
   const room = round.snapshot?.participants.find((person) => person.id === round.self)?.room
   const others = state.leases.filter(
     (lease) => lease.room === room && lease.participantId !== round.self,
   )
   return (
     <div className="recording-status">
-      {state.phase !== 'idle' && (
-        <div className="recording-live" role="status">
-          <span>
-            {state.phase === 'recording'
-              ? `● Идет запись · ${duration(now - (state.startedAt ?? now))}`
-              : state.phase === 'choosing'
-                ? 'Выберите вкладку для записи…'
-                : state.phase === 'starting'
-                  ? 'Запускаем запись…'
-                  : 'Сохраняем запись…'}
-          </span>
-          {state.phase !== 'stopping' && (
-            <button
-              className="action"
-              type="button"
-              onClick={() => {
-                void controller.recording.stop()
-              }}
-            >
-              {state.phase === 'recording' ? 'Остановить' : 'Отменить'}
-            </button>
-          )}
-        </div>
-      )}
       {others.map((lease) => (
         <p key={lease.recordingId} role="status">
           {state.statusUnavailable ? 'По последним данным, ' : ''}

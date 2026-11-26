@@ -1,7 +1,8 @@
 import { ControlIcon } from './control-icon'
-import { useId, useState } from 'react'
+import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
-import type { RoundController } from '@/application/round-controller'
+import type { RoundController, RoundState } from '@/application/round-controller'
+import type { Participant } from '@/domain/snapshot'
 import type { LogicalRoom, RoundCommand, SubRoom } from '@/application/ports'
 import { handQueue } from '@/domain/social'
 import { ConfirmDialog } from './confirm-dialog'
@@ -36,7 +37,6 @@ export function RoomMap({
 }) {
   const state = useStore(controller.store)
   const [recall, setRecall] = useState<SubRoom | 'all' | null>(null)
-  const handSummaryId = useId()
   const current = state.snapshot?.participants.find((person) => person.id === state.self)?.room
   const judge = state.self !== null && state.snapshot?.judgeFlag.holder === state.self
   const busy = state.commandPending || state.commandUncertain || state.stage !== 'connected'
@@ -68,123 +68,30 @@ export function RoomMap({
                   Number(b.id === state.self) - Number(a.id === state.self) ||
                   Number(connectedIds.has(b.id)) - Number(connectedIds.has(a.id)),
               ) ?? []
-          const queue = state.snapshot ? handQueue(state.snapshot, room) : []
-          const hiddenHands = queue.filter(
-            (person) => !people.slice(0, 2).some((visible) => visible.id === person.id),
-          ).length
           return (
-            <section
+            <RoomCard
               key={room}
-              className={`room-card${current === room ? ' room-own' : ''}${room === 'base' || room === 'judges' ? ' room-wide' : ''}`}
-              aria-label={roomNames[room]}
-            >
-              <div className="room-card-heading">
-                <p className="font-medium">
-                  {roomNames[room]} <span className="text-caption">· {people.length}</span>
-                </p>
-                {current === room ? (
-                  <span className="text-caption">{strings.round.currentRoom}</span>
-                ) : (
-                  <button
-                    className="room-enter"
-                    type="button"
-                    disabled={busy}
-                    aria-label={enterRoom(roomNames[room])}
-                    onClick={() => {
-                      void controller.command({ type: 'enter', room }).then(() => {
-                        if (
-                          controller.store
-                            .getState()
-                            .snapshot?.participants.find((person) => person.id === state.self)
-                            ?.room === room
-                        )
-                          onEntered?.()
-                      })
-                    }}
-                  >
-                    {strings.round.enter}
-                  </button>
-                )}
-              </div>
-              {people.length > 0 && (
-                <ul>
-                  {people.slice(0, 2).map((person) => {
-                    const hand = queue.findIndex((raised) => raised.id === person.id) + 1
-                    const media = state.people.find((connected) => connected.id === person.id)
-                    const microphoneLabel = media
-                      ? media.microphone
-                        ? strings.round.microphoneOn
-                        : strings.round.microphoneOff
-                      : strings.round.noConnection
-                    return (
-                      <li key={person.id}>
-                        <span className="room-person-name">
-                          {hand > 0 && (
-                            <span
-                              className="room-hand-badge"
-                              role="img"
-                              aria-label={handPosition(hand)}
-                              title={handPosition(hand)}
-                            >
-                              <ControlIcon kind="hand" /> {hand}
-                            </span>
-                          )}
-                          {person.name}
-                          {person.id === state.self && (
-                            <span className="text-caption"> · {strings.round.you}</span>
-                          )}
-                        </span>
-                        <span
-                          className="room-person-microphone"
-                          role="img"
-                          aria-label={microphoneLabel}
-                          title={microphoneLabel}
-                        >
-                          {media ? <ControlIcon kind="microphone" off={!media.microphone} /> : '—'}
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              {people.length > 2 && (
-                <p
-                  className="room-more text-caption"
-                  aria-describedby={hiddenHands > 0 ? `${handSummaryId}-${room}` : undefined}
-                >
-                  Еще {people.length - 2}
-                  {hiddenHands > 0 && (
-                    <>
-                      <span
-                        className="room-hand-summary"
-                        role="img"
-                        aria-label={`Поднятых рук среди остальных: ${hiddenHands}`}
-                        title={`Поднятых рук среди остальных: ${hiddenHands}`}
-                      >
-                        <ControlIcon kind="hand" /> {hiddenHands}
-                      </span>
-                      <span className="sr-only" id={`${handSummaryId}-${room}`}>
-                        Поднятых рук среди остальных: {hiddenHands}
-                      </span>
-                    </>
-                  )}
-                </p>
-              )}
-              {people.length === 0 && (
-                <p className="room-description text-caption">{roomDescriptions[room]}</p>
-              )}
-              {judge && room !== 'base' && people.length > 0 && (
-                <button
-                  className="room-recall"
-                  type="button"
-                  disabled={busy}
-                  aria-label={recallRoom(roomNames[room])}
-                  onClick={() => setRecall(room)}
-                >
-                  {strings.round.recall}
-                </button>
-              )}
-            </section>
+              room={room}
+              state={state}
+              people={people}
+              current={current === room}
+              canRecall={judge && room !== 'base' && people.length > 0}
+              busy={busy}
+              onEnter={() => {
+                void controller.command({ type: 'enter', room }).then(() => {
+                  if (
+                    controller.store
+                      .getState()
+                      .snapshot?.participants.find((person) => person.id === state.self)?.room ===
+                    room
+                  )
+                    onEntered?.()
+                })
+              }}
+              onRecall={() => {
+                if (room !== 'base') setRecall(room)
+              }}
+            />
           )
         })}
       </div>
@@ -192,6 +99,179 @@ export function RoomMap({
         <RecallConfirmation controller={controller} room={recall} onClose={() => setRecall(null)} />
       )}
     </aside>
+  )
+}
+
+function RoomCard({
+  room,
+  state,
+  people,
+  current,
+  canRecall,
+  busy,
+  onEnter,
+  onRecall,
+}: {
+  room: LogicalRoom
+  state: RoundState
+  people: Participant[]
+  current: boolean
+  canRecall: boolean
+  busy: boolean
+  onEnter: () => void
+  onRecall: () => void
+}) {
+  const id = useId()
+  const preview = useRef<HTMLUListElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const [open, setOpen] = useState(false)
+  const [clipped, setClipped] = useState(false)
+  const measure = useCallback(() => {
+    const names = preview.current?.querySelectorAll('.room-person-name') ?? []
+    setClipped(Array.from(names).some((name) => name.scrollWidth > name.clientWidth))
+  }, [])
+  useLayoutEffect(measure)
+  useLayoutEffect(() => {
+    if (!preview.current || typeof ResizeObserver !== 'function') return undefined
+    const observer = new ResizeObserver(measure)
+    observer.observe(preview.current)
+    return () => observer.disconnect()
+  }, [measure])
+  const visible = people.slice(0, 2)
+  const extra = people.length - visible.length
+  const queue = state.snapshot ? handQueue(state.snapshot, room) : []
+  const hiddenHands = queue.filter(
+    (person) => !visible.some((member) => member.id === person.id),
+  ).length
+  const canExpand = extra > 0 || clipped
+  const label = roomNames[room]
+
+  function personItem(person: Participant) {
+    const hand = queue.findIndex((raised) => raised.id === person.id) + 1
+    const media = state.people.find((connected) => connected.id === person.id)
+    const microphoneLabel = media
+      ? media.microphone
+        ? strings.round.microphoneOn
+        : strings.round.microphoneOff
+      : strings.round.noConnection
+    return (
+      <li key={person.id}>
+        {hand > 0 && (
+          <span
+            className="room-hand-badge"
+            role="img"
+            aria-label={handPosition(hand)}
+            title={handPosition(hand)}
+          >
+            <ControlIcon kind="hand" /> {hand}
+          </span>
+        )}
+        <span className="room-person-name" title={person.name}>
+          {person.name}
+          {person.id === state.self && <span> · {strings.round.you}</span>}
+        </span>
+        <span
+          className="room-person-microphone"
+          role="img"
+          aria-label={microphoneLabel}
+          title={microphoneLabel}
+        >
+          {media ? <ControlIcon kind="microphone" off={!media.microphone} /> : '—'}
+        </span>
+      </li>
+    )
+  }
+
+  function toggleRoster() {
+    if (open && !canExpand) heading.current?.focus()
+    setOpen(!open)
+  }
+
+  return (
+    <section className={`room-card${current ? ' room-own' : ''}`} aria-label={label}>
+      <div className="room-card-row">
+        <h3
+          ref={heading}
+          tabIndex={-1}
+          className="room-card-name font-medium"
+          aria-current={current ? 'true' : undefined}
+          title={roomDescriptions[room]}
+        >
+          {label}
+          {current && <span className="sr-only"> · {strings.round.currentRoom}</span>}
+        </h3>
+        <ul
+          ref={preview}
+          className="room-preview"
+          aria-label={`Участники комнаты ${label}`}
+          aria-hidden={visible.length === 0 || open}
+        >
+          {visible.map(personItem)}
+        </ul>
+        {visible.length === 0 && <p className="room-empty text-caption">Пусто</p>}
+        <div className="room-card-actions">
+          <button
+            className="room-card-action room-roster-action"
+            type="button"
+            hidden={!open && !canExpand}
+            aria-label={`Состав комнаты ${label}`}
+            title={`Состав комнаты ${label}`}
+            aria-controls={id}
+            aria-expanded={open}
+            aria-describedby={hiddenHands > 0 ? `${id}-hands` : undefined}
+            onClick={toggleRoster}
+          >
+            {extra > 0 ? `+${extra}` : <ControlIcon kind="chevron-down" />}
+            {hiddenHands > 0 && (
+              <>
+                <span
+                  className="room-hidden-hands"
+                  role="img"
+                  aria-label={`Поднятых рук среди остальных: ${hiddenHands}`}
+                  title={`Поднятых рук среди остальных: ${hiddenHands}`}
+                >
+                  <ControlIcon kind="hand" /> {hiddenHands}
+                </span>
+                <span className="sr-only" id={`${id}-hands`}>
+                  Поднятых рук среди остальных: {hiddenHands}
+                </span>
+              </>
+            )}
+          </button>
+          {!current && (
+            <button
+              className="room-card-action"
+              type="button"
+              disabled={busy}
+              aria-label={enterRoom(label)}
+              title={enterRoom(label)}
+              onClick={onEnter}
+            >
+              <ControlIcon kind="chevron-right" />
+            </button>
+          )}
+        </div>
+      </div>
+      <div id={id} hidden={!open} className="room-expanded">
+        {open &&
+          (people.length > 0 ? (
+            <ul aria-label={`Полный состав комнаты ${label}`}>{people.map(personItem)}</ul>
+          ) : (
+            <p>Пусто</p>
+          ))}
+      </div>
+      {canRecall && (
+        <button
+          className="room-recall"
+          type="button"
+          disabled={busy}
+          aria-label={recallRoom(label)}
+          onClick={onRecall}
+        >
+          {strings.round.recall}
+        </button>
+      )}
+    </section>
   )
 }
 
