@@ -44,6 +44,19 @@ function size(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
 }
 
+function RecordingStatusWarning() {
+  const [visible, setVisible] = useState(true)
+  useEffect(() => {
+    const timeout = setTimeout(() => setVisible(false), 5000)
+    return () => clearTimeout(timeout)
+  }, [])
+  return visible ? (
+    <p className="recording-status-warning" role="status">
+      Не удалось обновить сведения о записи.
+    </p>
+  ) : null
+}
+
 export function RecordingControl({
   controller,
   occupied,
@@ -88,6 +101,7 @@ export function RecordingControl({
         : 'Сохраняем запись…'
   return (
     <div className="recording-control">
+      {live && state.statusUnavailable && <RecordingStatusWarning />}
       {idle ? (
         <button
           className="action"
@@ -166,7 +180,6 @@ export function RecordingIndicator({
           ведет запись
         </p>
       ))}
-      {state.statusUnavailable && <p role="status">Не удалось обновить сведения о записи.</p>}
       {state.error && (
         <p role="status">
           {reasons[state.error] ??

@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { createMemoryRouter } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RoundController } from '@/application/round-controller'
+import { RecordingControl, RecordingIndicator } from '@/ui/components/recordings'
 import { routes } from '@/ui/routes'
 import { ServicesContext } from '@/ui/services'
 import { BOB, ROUND_ID, SELF, fixture, snapshot } from '../fixtures'
@@ -403,6 +405,32 @@ describe('responsive meeting navigation', () => {
     await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })
     expect(recording.run.stop).toHaveBeenCalledOnce()
     expect(api.leaves).toEqual(['PA_local'])
+  })
+
+  it('shows a temporary status warning only while this client records', () => {
+    vi.useFakeTimers()
+    const { services } = fixture()
+    const controller = new RoundController(ROUND_ID, services)
+    const warning = 'Не удалось обновить сведения о записи.'
+    try {
+      render(
+        <>
+          <RecordingControl controller={controller} occupied={false} room="base" />
+          <RecordingIndicator controller={controller} onLibrary={() => {}} />
+        </>,
+      )
+      act(() => controller.recording.store.setState({ statusUnavailable: true }))
+      expect(screen.queryByText(warning)).not.toBeInTheDocument()
+      act(() => controller.recording.store.setState({ phase: 'recording' }))
+      expect(screen.getByText(warning)).toHaveClass('recording-status-warning')
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(screen.queryByText(warning)).not.toBeInTheDocument()
+    } finally {
+      controller.dispose()
+      vi.useRealTimers()
+    }
   })
 
   it('discards the recording prompt when the participant moves to another room', async () => {
