@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { createMemoryRouter } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RoundController } from '@/application/round-controller'
+import { RecordingControl, RecordingIndicator } from '@/ui/components/recordings'
 import { routes } from '@/ui/routes'
 import { ServicesContext } from '@/ui/services'
 import { BOB, ROUND_ID, SELF, fixture, snapshot } from '../fixtures'
@@ -261,7 +263,7 @@ describe('responsive meeting navigation', () => {
     const drawer = screen.getByRole('dialog', { name: 'Комнаты и чат' })
     const base = within(drawer).getByRole('region', { name: 'База' })
     expect(within(base).getAllByRole('listitem')).toHaveLength(2)
-    expect(within(base).getByText('Еще 8')).toBeVisible()
+    expect(within(base).getByText('+8')).toBeVisible()
     expect(within(drawer).queryByRole('button', { name: /^Все \d+/u })).not.toBeInTheDocument()
     expect(within(drawer).queryByRole('button', { name: /^Действия — /u })).not.toBeInTheDocument()
     fireEvent(drawer, new Event('cancel', { cancelable: true }))
@@ -306,8 +308,10 @@ describe('responsive meeting navigation', () => {
     const leave = screen.getByRole('button', { name: 'Выйти' })
     expect(leave.closest('.meeting-controls')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Настройки' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Скопировать ссылку' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /^Реакция — /u })).toHaveLength(5)
+    expect(
+      screen.getByRole('button', { name: 'Скопировать ссылку' }).closest('.scene-heading'),
+    ).not.toBeNull()
+    expect(screen.getAllByRole('button', { name: /^Реакция — /u })).toHaveLength(4)
     await userEvent.click(screen.getByRole('button', { name: 'Реакция — 👏' }))
     expect(api.reactions).toEqual(['clap'])
     expect(screen.getByRole('button', { name: 'Поднять руку' })).toHaveAttribute(
@@ -317,7 +321,9 @@ describe('responsive meeting navigation', () => {
     await userEvent.click(more)
     const drawer = screen.getByRole('dialog', { name: 'Ещё' })
     expect(within(drawer).queryByRole('button', { name: /^Реакция — /u })).not.toBeInTheDocument()
-    expect(within(drawer).getByRole('button', { name: 'Скопировать ссылку' })).toBeEnabled()
+    expect(
+      within(drawer).queryByRole('button', { name: 'Скопировать ссылку' }),
+    ).not.toBeInTheDocument()
     expect(within(drawer).queryByRole('button', { name: 'Диагностика' })).not.toBeInTheDocument()
     expect(within(drawer).getByRole('button', { name: 'Сообщить о проблеме' })).toBeEnabled()
     expect(within(drawer).getByRole('checkbox', { name: 'Скрыть реакции' })).toBeEnabled()
@@ -379,8 +385,12 @@ describe('responsive meeting navigation', () => {
       fakes.services.recording = recording
       fakes.services.recordingApi = new FakeRecordingApi()
     })
-    await userEvent.click(screen.getByRole('button', { name: 'Ещё' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Начать запись комнаты' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Запись' }))
+    const recordDialog = screen.getByRole('dialog', { name: 'Запись комнаты' })
+    expect(within(recordDialog).getByText(/Выберите эту вкладку со звуком/u)).toBeVisible()
+    await userEvent.click(
+      within(recordDialog).getByRole('button', { name: 'Начать запись комнаты' }),
+    )
     await screen.findByRole('button', { name: 'Остановить' })
     const leave = screen.getByRole('button', { name: 'Выйти' })
     await userEvent.click(leave)
@@ -395,6 +405,58 @@ describe('responsive meeting navigation', () => {
     await screen.findByRole('heading', { name: 'Вы вышли из раунда.' })
     expect(recording.run.stop).toHaveBeenCalledOnce()
     expect(api.leaves).toEqual(['PA_local'])
+  })
+
+  it('shows a temporary status warning only while this client records', () => {
+    vi.useFakeTimers()
+    const { services } = fixture()
+    const controller = new RoundController(ROUND_ID, services)
+    const warning = 'Не удалось обновить сведения о записи.'
+    try {
+      render(
+        <>
+          <RecordingControl controller={controller} occupied={false} room="base" />
+          <RecordingIndicator controller={controller} onLibrary={() => {}} />
+        </>,
+      )
+      act(() => controller.recording.store.setState({ statusUnavailable: true }))
+      expect(screen.queryByText(warning)).not.toBeInTheDocument()
+      act(() => controller.recording.store.setState({ phase: 'recording' }))
+      expect(screen.getByText(warning)).toHaveClass('recording-status-warning')
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(screen.queryByText(warning)).not.toBeInTheDocument()
+    } finally {
+      controller.dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  it('discards the recording prompt when the participant moves to another room', async () => {
+    viewport(1440, 900)
+    const value = snapshot()
+    const recording = new FakeRecordingPlatform()
+    const { media } = await meeting(value, (fakes) => {
+      fakes.services.recording = recording
+      fakes.services.recordingApi = new FakeRecordingApi()
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Запись' }))
+    expect(screen.getByRole('dialog', { name: 'Запись комнаты' })).toBeVisible()
+    await act(async () => {
+      media[0]?.events?.snapshot({
+        ...value,
+        version: value.version + 1,
+        participants: value.participants.map((person) =>
+          person.id === SELF ? { ...person, room: 'og' } : person,
+        ),
+      })
+      await Promise.resolve()
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Запись комнаты' })).not.toBeInTheDocument()
+    })
+    expect(recording.capture).not.toHaveBeenCalled()
   })
 
   it('keeps people from other rooms off the scene before and after moving', async () => {

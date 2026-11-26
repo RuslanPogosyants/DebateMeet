@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { DeviceSelection, Preview } from '@/application/ports'
 import { useServices } from '@/ui/services'
 import { deviceErrorText, resilienceStrings, strings } from '@/ui/strings'
@@ -24,6 +24,7 @@ export function DevicePreview({
   setMicrophone: (enabled: boolean) => void
   onSelection: (devices: DeviceSelection) => void
 }) {
+  const fieldId = useId()
   const { devices } = useServices()
   const video = useRef<HTMLVideoElement>(null)
   const [request, setRequest] = useState({ cameraId: '', microphoneId: '' })
@@ -126,149 +127,169 @@ export function DevicePreview({
         )}
       </div>
       <div className="preview-actions">
-        <button
-          className="action media-toggle"
-          type="button"
-          aria-label={microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
-          title={microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
-          aria-pressed={microphone}
-          onClick={() => setMicrophone(!microphone)}
-        >
-          <ControlIcon kind="microphone" off={!microphone} />
-        </button>
-        <button
-          className="action media-toggle"
-          type="button"
-          aria-label={camera ? strings.round.cameraOn : strings.round.cameraOff}
-          title={camera ? strings.round.cameraOn : strings.round.cameraOff}
-          aria-pressed={camera}
-          onClick={() => {
-            setCamera(!camera)
-          }}
-        >
-          <ControlIcon kind="camera" off={!camera} />
-        </button>
+        <div>
+          <button
+            className="action media-toggle"
+            type="button"
+            aria-label={microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+            title={microphone ? strings.round.microphoneOn : strings.round.microphoneOff}
+            aria-pressed={microphone}
+            onClick={() => setMicrophone(!microphone)}
+          >
+            <ControlIcon kind="microphone" off={!microphone} />
+          </button>
+          <span className="text-caption">{microphone ? 'Включен' : 'Выключен'}</span>
+        </div>
+        <div>
+          <button
+            className="action media-toggle"
+            type="button"
+            aria-label={camera ? strings.round.cameraOn : strings.round.cameraOff}
+            title={camera ? strings.round.cameraOn : strings.round.cameraOff}
+            aria-pressed={camera}
+            onClick={() => {
+              setCamera(!camera)
+            }}
+          >
+            <ControlIcon kind="camera" off={!camera} />
+          </button>
+          <span className="text-caption">{camera ? 'Включена' : 'Выключена'}</span>
+        </div>
       </div>
       <div className="device-selectors">
-        <label>
-          {strings.round.camera}
-          <select
-            value={request.cameraId}
-            onChange={(event) => {
-              setRequest({ ...request, cameraId: event.target.value })
-              onSelection({
-                cameraId: event.target.value || undefined,
-                microphoneId: request.microphoneId || undefined,
-                outputId: outputId || undefined,
-              })
-            }}
-          >
-            <option value="">{defaultDeviceLabel(cameraName)}</option>
-            {cameras.map((device, index) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `${strings.round.camera} ${index + 1}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {strings.round.microphone}
-          <select
-            value={request.microphoneId}
-            onChange={(event) => {
-              setRequest({ ...request, microphoneId: event.target.value })
-              onSelection({
-                cameraId: request.cameraId || undefined,
-                microphoneId: event.target.value || undefined,
-                outputId: outputId || undefined,
-              })
-            }}
-          >
-            <option value="">{defaultDeviceLabel(microphoneName)}</option>
-            {microphones.map((device, index) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `${strings.round.microphone} ${index + 1}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {resilienceStrings.output}
-          <select
-            value={outputId}
-            disabled={!outputSupported}
-            onChange={(event) => {
-              const next = event.target.value
-              setOutputId(next)
-              onSelection({
-                cameraId: request.cameraId || undefined,
-                microphoneId: request.microphoneId || undefined,
-                outputId: next || undefined,
-              })
-              void devices.output(next).catch(setError)
-            }}
-          >
-            <option value="">{strings.round.defaultDevice}</option>
-            {list
-              .filter(
-                (device) =>
-                  device.kind === 'audiooutput' && device.deviceId && device.deviceId !== 'default',
-              )
-              .map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `${resilienceStrings.output} ${index + 1}`}
-                </option>
-              ))}
-          </select>
-          {!outputSupported && <span>{resilienceStrings.outputUnavailable}</span>}
-        </label>
-      </div>
-      <div className="device-statuses">
-        <p>
-          {strings.round.camera}
-          <span>
-            {preview === null
-              ? strings.round.checking
-              : cameraReady
-                ? strings.round.ready
-                : deviceErrorText(preview.cameraError)}
-          </span>
-        </p>
-        <p>
-          {strings.round.microphone}
-          <span>
-            {preview === null
-              ? strings.round.checking
-              : microphoneReady
-                ? strings.round.ready
-                : deviceErrorText(preview.microphoneError)}
-          </span>
-        </p>
-        <div
-          className="microphone-level"
-          role="meter"
-          aria-label="Уровень микрофона"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(
-            (preview !== null && level?.request === request ? level.value : 0) * 100,
-          )}
-        >
-          <span
-            style={{
-              transform: `scaleX(${preview !== null && level?.request === request ? level.value : 0})`,
-            }}
-          />
+        <div className="device-selector">
+          <label htmlFor={fieldId + '-camera'}>{strings.round.camera}</label>
+          <div className="device-field">
+            <div className="device-picker">
+              <select
+                id={fieldId + '-camera'}
+                value={request.cameraId}
+                onChange={(event) => {
+                  setRequest({ ...request, cameraId: event.target.value })
+                  onSelection({
+                    cameraId: event.target.value || undefined,
+                    microphoneId: request.microphoneId || undefined,
+                    outputId: outputId || undefined,
+                  })
+                }}
+              >
+                <option value="">{defaultDeviceLabel(cameraName)}</option>
+                {cameras.map((device, index) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `${strings.round.camera} ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+              <ControlIcon kind="chevron-down" />
+            </div>
+            {(preview === null || !cameraReady) && (
+              <p className="text-caption" role="status">
+                {preview === null ? strings.round.checking : deviceErrorText(preview.cameraError)}
+              </p>
+            )}
+          </div>
         </div>
-        <button
-          className="action"
-          type="button"
-          onClick={() => {
-            void devices.sound().catch(setError)
-          }}
-        >
-          {strings.round.sound}
-        </button>
+        <div className="device-selector">
+          <label htmlFor={fieldId + '-mic'}>{strings.round.microphone}</label>
+          <div className="device-field">
+            <div className="device-picker">
+              <select
+                id={fieldId + '-mic'}
+                value={request.microphoneId}
+                onChange={(event) => {
+                  setRequest({ ...request, microphoneId: event.target.value })
+                  onSelection({
+                    cameraId: request.cameraId || undefined,
+                    microphoneId: event.target.value || undefined,
+                    outputId: outputId || undefined,
+                  })
+                }}
+              >
+                <option value="">{defaultDeviceLabel(microphoneName)}</option>
+                {microphones.map((device, index) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `${strings.round.microphone} ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+              <ControlIcon kind="chevron-down" />
+            </div>
+            <div
+              className="microphone-level"
+              role="meter"
+              aria-label="Уровень микрофона"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(
+                (preview !== null && level?.request === request ? level.value : 0) * 100,
+              )}
+            >
+              <span
+                style={{
+                  transform: `scaleX(${preview !== null && level?.request === request ? level.value : 0})`,
+                }}
+              />
+            </div>
+            {(preview === null || !microphoneReady) && (
+              <p className="text-caption" role="status">
+                {preview === null
+                  ? strings.round.checking
+                  : deviceErrorText(preview.microphoneError)}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="device-selector">
+          <label htmlFor={fieldId + '-output'}>{resilienceStrings.output}</label>
+          <div className="device-field">
+            <div className="device-picker">
+              <select
+                id={fieldId + '-output'}
+                value={outputId}
+                disabled={!outputSupported}
+                onChange={(event) => {
+                  const next = event.target.value
+                  setOutputId(next)
+                  onSelection({
+                    cameraId: request.cameraId || undefined,
+                    microphoneId: request.microphoneId || undefined,
+                    outputId: next || undefined,
+                  })
+                  void devices.output(next).catch(setError)
+                }}
+              >
+                <option value="">{strings.round.defaultDevice}</option>
+                {list
+                  .filter(
+                    (device) =>
+                      device.kind === 'audiooutput' &&
+                      device.deviceId &&
+                      device.deviceId !== 'default',
+                  )
+                  .map((device, index) => (
+                    <option key={device.deviceId} value={device.deviceId}>
+                      {device.label || `${resilienceStrings.output} ${index + 1}`}
+                    </option>
+                  ))}
+              </select>
+              <ControlIcon kind="chevron-down" />
+            </div>
+            {!outputSupported && (
+              <p className="text-caption">{resilienceStrings.outputUnavailable}</p>
+            )}
+            <div className="device-test-sound">
+              <button
+                className="action"
+                type="button"
+                onClick={() => {
+                  void devices.sound().catch(setError)
+                }}
+              >
+                {strings.round.sound}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
       {(error !== null || (preview !== null && (!cameraReady || !microphoneReady))) && (
         <button

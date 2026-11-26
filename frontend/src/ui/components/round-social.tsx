@@ -96,9 +96,11 @@ export function HandQueue({
           onClick={() => setRosterOpen(true)}
         >
           <ControlIcon kind="hand" />
-          <span className="hand-queue-count" aria-hidden="true">
-            {queue.length}
-          </span>
+          {queue.length > 0 && (
+            <span className="hand-queue-count" aria-hidden="true">
+              {queue.length}
+            </span>
+          )}
         </button>
         {rosterOpen && (
           <ParticipantRoster
@@ -270,21 +272,23 @@ export function ReactionControls({ controller }: { controller: RoundController }
   const state = useStore(controller.store)
   return (
     <div className="reaction-buttons" role="group" aria-label={socialStrings.reactions}>
-      {reactions.map(([reaction, symbol]) => (
-        <button
-          key={reaction}
-          className="reaction-button"
-          type="button"
-          aria-label={reactionLabel(symbol)}
-          title={reactionLabel(symbol)}
-          disabled={state.stage !== 'connected' || !controller.social.canReact()}
-          onClick={() => {
-            void controller.react(reaction)
-          }}
-        >
-          <span aria-hidden="true">{symbol}</span>
-        </button>
-      ))}
+      {reactions
+        .filter(([reaction]) => reaction !== 'thumbs_up')
+        .map(([reaction, symbol]) => (
+          <button
+            key={reaction}
+            className="reaction-button"
+            type="button"
+            aria-label={reactionLabel(symbol)}
+            title={reactionLabel(symbol)}
+            disabled={state.stage !== 'connected' || !controller.social.canReact()}
+            onClick={() => {
+              void controller.react(reaction)
+            }}
+          >
+            <span aria-hidden="true">{symbol}</span>
+          </button>
+        ))}
     </div>
   )
 }

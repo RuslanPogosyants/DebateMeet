@@ -476,7 +476,7 @@ try {
   // Native capture requires a focused initiating surface; only startup activates this test window.
   await page.bringToFront()
   await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
-  await page.getByRole('button', { name: 'Ещё', exact: true }).click()
+  await page.getByRole('button', { name: 'Запись', exact: true }).click()
   await page.getByRole('button', { name: 'Начать запись комнаты' }).click()
   try {
     await page.getByRole('button', { name: 'Остановить', exact: true }).waitFor()

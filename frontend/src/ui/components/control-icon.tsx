@@ -22,6 +22,9 @@ export function ControlIcon({
     | 'leave-call'
     | 'pin'
     | 'screen'
+    | 'record'
+    | 'chevron-down'
+    | 'chevron-right'
   off?: boolean
 }) {
   return (
@@ -106,6 +109,14 @@ export function ControlIcon({
           <path d="M3 22v-3a9 9 0 0 1 18 0v3Z" fill="currentColor" stroke="none" />
         </>
       )}
+      {kind === 'record' && (
+        <>
+          <circle cx="12" cy="12" r="9" />
+          <circle cx="12" cy="12" r="3" fill="currentColor" />
+        </>
+      )}
+      {kind === 'chevron-down' && <path d="m6 9 6 6 6-6" />}
+      {kind === 'chevron-right' && <path d="m9 6 6 6-6 6" />}
       {off && <path d="m3 3 18 18" />}
     </svg>
   )

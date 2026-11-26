@@ -1,3 +1,31 @@
+.recording-control {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-inline-start: auto;
+  font-size: 13px;
+}
+.recording-control > .action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-inline: 10px;
+}
+.recording-control > .action svg {
+  width: 15px;
+  height: 15px;
+}
+.recording-status-warning {
+  position: fixed;
+  z-index: 20;
+  inset-block-start: max(12px, env(safe-area-inset-top));
+  inset-inline-end: max(12px, env(safe-area-inset-right));
+  max-inline-size: min(340px, calc(100% - 24px));
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--foreground);
+  color: var(--background);
+  pointer-events: none;
+}
 .recording-status {
   display: flex;
   flex-wrap: wrap;

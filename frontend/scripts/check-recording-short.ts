@@ -189,7 +189,7 @@ try {
     document.title = title
   }, recorderTitle)
   await first.bringToFront()
-  await first.getByRole('button', { name: 'Ещё', exact: true }).click()
+  await first.getByRole('button', { name: 'Запись', exact: true }).click()
   await first.getByRole('button', { name: 'Начать запись комнаты', exact: true }).click()
   await first.getByRole('button', { name: 'Остановить', exact: true }).waitFor()
   await expect(second.locator('.recording-status')).toContainText('Иван тест записи ведет запись', {

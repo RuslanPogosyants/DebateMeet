@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RoundController } from '@/application/round-controller'
 import { RoomMap } from '@/ui/components/round-tools'
@@ -69,7 +70,7 @@ describe('compact room map people', () => {
     expect(controller.store.getState().snapshot?.participants.map((person) => person.name)).toEqual(
       ['Анна', 'Борис', longName],
     )
-    expect(within(room).getByText('Еще 1')).toBeVisible()
+    expect(within(room).getByText('+1')).toBeVisible()
   })
 
   it('keeps equal-rank ordering stable in another room and counts hands behind the sorted visible rows', async () => {
@@ -92,11 +93,11 @@ describe('compact room map people', () => {
     expect(first).toHaveTextContent('Борис')
     expect(second).toHaveTextContent('Анна')
     expect(within(second).getByRole('img', { name: handPosition(1) })).toBeVisible()
-    expect(within(base).getByText('Еще 1')).not.toHaveAccessibleDescription(
+    expect(within(base).getByText('+1')).not.toHaveAccessibleDescription(
       'Поднятых рук среди остальных: 1',
     )
   })
-  it('shows room state with a noninteractive count instead of a participant menu', async () => {
+  it('opens the read-only roster and keeps room transitions separate', async () => {
     const { api } = await setup()
     const commands = vi.spyOn(api, 'command')
     const room = screen.getByRole('region', { name: 'База' })
@@ -113,13 +114,21 @@ describe('compact room map people', () => {
     expect(within(room).queryByRole('button', { name: /^Действия — /u })).not.toBeInTheDocument()
     expect(within(room).queryByTestId('hand-badge')).not.toBeInTheDocument()
     expect(first).not.toHaveTextContent('Судья')
-    expect(within(room).getByText('Еще 1')).toBeVisible()
+    expect(within(room).getByText('+1')).toBeVisible()
     expect(within(room).queryByRole('button', { name: 'Все 3' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    const roster = within(room).getByRole('button', { name: 'Состав комнаты База' })
+    await userEvent.click(roster)
+    const full = within(room).getByRole('list', { name: 'Полный состав комнаты База' })
+    expect(within(full).getAllByRole('listitem')).toHaveLength(3)
+    expect(within(full).getByText(longName, { exact: false })).toBeVisible()
+    expect(within(full).getByText('Анна')).toBeVisible()
+    expect(within(full).queryByRole('button')).not.toBeInTheDocument()
+    await userEvent.click(roster)
+    expect(roster).toHaveFocus()
     expect(commands).not.toHaveBeenCalled()
   })
 
-  it('retains the hidden-hand count without exposing the old roster', async () => {
+  it('retains the hidden-hand count on the roster disclosure', async () => {
     await setup(true, (value) => {
       const hidden = value.participants[2]
       if (!hidden) throw new Error('Missing hidden participant')
@@ -130,7 +139,7 @@ describe('compact room map people', () => {
     const first = rows[0]
     if (!first) throw new Error('Missing visible participant')
     expect(within(first).getByRole('img', { name: handPosition(2) })).toBeVisible()
-    const more = within(room).getByText('Еще 1').closest('p')
+    const more = within(room).getByRole('button', { name: 'Состав комнаты База' })
     expect(more).toHaveAccessibleDescription('Поднятых рук среди остальных: 1')
     expect(within(room).getByRole('img', { name: 'Поднятых рук среди остальных: 1' })).toBeVisible()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
